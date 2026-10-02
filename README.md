@@ -34,6 +34,7 @@ src/     系統本體：後端 .gs(計算引擎、公式、資料存取、報告
 local/   地端層：瀏覽器版模擬層、資料包、暫存、工具列
 dist/    FS-local.html —— 由 tools/build-local.js 產生的單一檔案，使用者拿這一個就好
 tools/   build、驗算、本機預覽(只在開發時用 Node 執行)
+data/    整理好的資料包(可直接「匯入資料包…→合併匯入」)
 docs/    說明文件
 ```
 
@@ -54,6 +55,9 @@ node tools/verify-write-batching.js    # 整批寫入：跨情境隔離、新增
 node tools/verify-local.js             # 地端版：數字與驗算層逐格相同、暫存、資料包、合併匯入、dist 為最新
 node tools/e2e-local.js                # 地端版瀏覽器測試（需要 Playwright，找不到時略過）
 ```
+
+`node tools/import-d5x-fs-cmc.js` 由「D5X 損益 FS_CMC」Excel 的 `D5X  FS_CMC` 分頁產生 `data/D5X_FS_CMC_資料包.json`，
+並逐格對 Excel 驗算(112 格)後才輸出。
 
 `verify-gatef.js` 會順便把比較表印出來，方便跟原始試算表並排肉眼再對一次。
 
