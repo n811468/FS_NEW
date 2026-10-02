@@ -68,6 +68,7 @@ function renderReportPanel() {
           <button type="button" class="seg-btn${reportUnit === 1000 ? ' active' : ''}" onclick="setReportUnit(1000)">千元/台</button></div></label>
         <label class="chk" style="align-self:center;"><input type="checkbox" ${reportShowPrice ? 'checked' : ''} onchange="reportShowPrice=this.checked;saveReportPrefs_();drawReport_()"> 顯示售價結構</label>
         <span style="flex:1"></span>
+        <button type="button" class="btn secondary" onclick="createSnapshotDialog_(reportSel.target, (scenarioCache.find(s => s.ScenarioID === reportSel.target) || {}).ScenarioName ? scenarioLabel(scenarioCache.find(s => s.ScenarioID === reportSel.target)) : '')" data-tip="把目標情境現在的數字存一份，之後可以比較改了什麼">存成快照</button>
         <button type="button" class="btn secondary" onclick="loadReport_()">重新計算</button>
         <button type="button" class="btn" onclick="printReport_()">列印 / 存成 PDF</button>
       </div>
@@ -165,6 +166,7 @@ function drawReport_() {
   if (B) slides.push(slideHtml_(no(), '現況 → 目標：營業淨利差距拆解', '每一根長條 = 該科目讓營業淨利增加(綠)或減少(紅)多少', reportBridgeHtml_()));
   if (B) slides.push(slideHtml_(no(), '現況與目標對照（加權平均）', '差距 = 目標 − 現況；對淨利影響已依科目方向換算', reportCompareHtml_(), 'rpt-compare'));
   slides.push(slideHtml_(no(), '目標成本作法', '差距由哪些作法補起來、擔當單位與進度', reportActionsHtml_(), 'rpt-actions'));
+  if (B) slides.push(slideHtml_(no(), '現況 → 作法 → 目標', '營業淨利：每一項作法補了多少，還差多少', '<div id="rpt-act-wf">' + reportActionWaterfallHtml_() + '</div>'));
   if (B) slides.push(slideHtml_(no(), '作法對帳', '作法寫的效果，跟現況 → 目標的實際數字對得起來嗎？', '<div id="rpt-recon-wrap">' + reportReconHtml_() + '</div>', 'rpt-recon'));
   slides.push(slideHtml_(no(), `細車型 FS 損益狀況（${T.meta.label}）`, `${esc(T.meta.ScenarioType)}情境`, reportFsHtml_(T, 'rpt-fs-target'), 'rpt-fs-target'));
   if (B) slides.push(slideHtml_(no(), `細車型 FS 損益狀況（${B.meta.label}）`, `${esc(B.meta.ScenarioType)}情境，供參`, reportFsHtml_(B, 'rpt-fs-base'), 'rpt-fs-base'));
@@ -379,12 +381,52 @@ function reportActionsTableHtml_() {
       <tr class="total"><td class="no-print"></td><td colspan="4" style="text-align:left;">尚待補足（差距 − 作法）</td><td id="rpt-act-remain" class="${gap - total > 0.5 ? 'negative' : 'good'}">${fmt(gap - total)}</td><td></td><td colspan="3"></td></tr>` : ''}
     </tfoot></table></div>`;
 }
+/**
+ * 作法瀑布：現況營業淨利 → 每一項作法的效果 → 目標營業淨利。
+ * 作法加總跟實際差距對不起來的部分單獨一根：差距比作法多 =「尚待補足」，作法比差距多 =「作法高估/其他惡化」。
+ * 作法超過 10 項時，效果小的併成「其他作法」。表格上改作法，這張圖即時跟著變。
+ */
+function reportActionWfSteps_() {
+  const R = reportData, T = R.target, B = R.base;
+  if (!B) return [];
+  const start = B.weighted.K || 0, end = T.weighted.K || 0;
+  let acts = reportActions.filter(a => String(a.Title || '').trim() && num(a.Effect))
+    .map(a => ({ label: a.Title, value: num(a.Effect), kind: 'delta', tip: `${a.Title}\n${[a.LineCode ? reportLineName_(a.LineCode) : '', a.Owner, a.Status].filter(x => x).join('｜')}\n${signed_(num(a.Effect))} 元/台` }));
+  if (acts.length > 10) {
+    const ranked = acts.slice().sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    const drop = ranked.slice(9);
+    acts = acts.filter(a => drop.indexOf(a) === -1);
+    acts.push({ label: `其他 ${drop.length} 項作法`, value: drop.reduce((s, a) => s + a.value, 0), kind: 'delta' });
+  }
+  const steps = [{ label: `現況 ${reportLineName_('K')}`, value: start, kind: 'total' }].concat(acts);
+  const remain = (end - start) - acts.reduce((s, a) => s + a.value, 0);
+  if (Math.abs(remain) >= 0.5) steps.push({ label: remain > 0 ? '其他改善（沒有寫成作法）' : '作法高估或其他惡化', value: remain, kind: 'delta', remain: true });
+  steps.push({ label: `目標 ${reportLineName_('K')}`, value: end, kind: 'total' });
+  return steps;
+}
+function reportActionWaterfallHtml_() {
+  const R = reportData;
+  if (!R.base) return '';
+  const steps = reportActionWfSteps_();
+  const start = steps[0].value, end = steps[steps.length - 1].value;
+  const remainStep = steps.find(x => x.remain);
+  const remain = remainStep ? remainStep.value : 0;
+  const total = end - start - remain;
+  return `${wfSvg_(steps, { width: 1180, height: 400, labels: true, fmtV: v => shortAmount_(v / reportUnit) })}
+    <div class="field-row" style="margin-top:6px;"><span class="muted">作法效果合計 <b>${rSigned_(total)}</b>　現況 → 目標差距 <b>${rSigned_(end - start)}</b>${remainStep ? `　<span class="${remain < 0 ? 'bad' : ''}">${remain > 0 ? '差距中沒有對應作法' : '作法比實際改善多'} <b>${rSigned_(Math.abs(remain))}</b></span>` : '　作法與差距吻合'}</span>
+      <span class="spacer"></span><button type="button" class="btn secondary sm no-print" onclick="openInWaterfallTool_(reportActionWfSteps_(), '營業淨利：現況 → 作法 → 目標')">在瀑布圖工具開啟</button></div>`;
+}
+function refreshActionWaterfall_() {
+  const w = document.getElementById('rpt-act-wf');
+  if (w) w.innerHTML = reportActionWaterfallHtml_();
+}
 function refreshRecon_() {
   const w = document.getElementById('rpt-recon-wrap');
   if (w) w.innerHTML = reportReconHtml_();
 }
 function updateReportActionTotals_() {
   refreshRecon_();
+  refreshActionWaterfall_();
   const R = reportData, vol = R.target.volume.monthlyVolume || 0;
   const total = reportActions.reduce((s, a) => s + num(a.Effect), 0);
   reportActions.forEach((a, i) => { const el = document.getElementById('rpt-act-month-' + i); if (el) el.textContent = fmt(num(a.Effect) * vol / 10000, 1); });
@@ -400,6 +442,7 @@ function redrawReportActions_() {
   const wrap = document.getElementById('rpt-actions-wrap');
   if (!wrap) return;
   refreshRecon_();
+  refreshActionWaterfall_();
   wrap.innerHTML = reportActionsTableHtml_();
   makeSortable(document.getElementById('rpt-actions-body'), {
     items: 'tr[data-key]',

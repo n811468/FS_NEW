@@ -141,7 +141,7 @@ async function main() {
   await page.waitForSelector('#wi-multi-result .lever-table', { timeout: 30000 });
   assert(/可以達成/.test(await page.textContent('#wi-multi-result')), '多項目標反推：-15 萬應該達得到：' + (await page.textContent('#wi-multi-result')).slice(0, 200));
   assert((await page.$$('#wi-multi-result .wf-bar')).length === 5, '多項目標反推的瀑布圖應該有 目前 + 3 項 + 達成 共 5 根');
-  await page.click('button:has-text("在瀑布圖工具開啟")');
+  await page.click('#wi-multi-result button:has-text("在瀑布圖工具開啟")');
   await page.waitForSelector('#wf-manual-body tr');
   assert((await page.$$('#wf-chart .wf-bar')).length === 5, '帶到瀑布圖工具(自訂)後應該一樣是 5 根');
 
@@ -158,6 +158,32 @@ async function main() {
     await page.click(`#wf-body .seg-btn:has-text("${mode}")`);
     await page.waitForFunction(() => document.querySelectorAll('#wf-chart .wf-bar').length >= 3, null, { timeout: 15000 });
   }
+
+  // GATE 報告：現況 → 作法 → 目標 瀑布投影片
+  await page.click('nav button[data-tab="report"]');
+  await page.waitForFunction(() => document.querySelectorAll('#rpt-act-wf .wf-bar').length >= 3, null, { timeout: 15000 });
+  assert(/現況 → 作法 → 目標/.test(await page.textContent('#panel-report')), 'GATE 報告應該有「現況 → 作法 → 目標」');
+
+  // 情境快照：情境設定頁存一份 → 出現在清單 → 加到儀表板 → 跟現在比較(瀑布圖)
+  await page.click('nav button[data-tab="scenarios"]');
+  await page.waitForSelector('#snapshot-card button:has-text("把目前情境存成快照")');
+  await page.click('#snapshot-card button:has-text("把目前情境存成快照")');
+  await page.waitForSelector('dialog.modal input#mf-0');
+  await page.fill('dialog.modal input#mf-0', '審議版E2E');
+  await page.click('dialog.modal button[value=ok]');
+  await page.waitForSelector('#snapshot-body td:has-text("審議版E2E")', { timeout: 10000 });
+  await page.click('#snapshot-body button:has-text("加到儀表板")');
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('.pl-table thead th')).some(th => /快照 審議版E2E/.test(th.textContent)), null, { timeout: 15000 });
+  const snapK = await page.$$eval('.pl-table tbody tr', rs => {
+    const r = rs.find(x => x.querySelector('td.row-head[data-l="K"]'));
+    return r ? Array.from(r.querySelectorAll('td.amt')).map(td => td.textContent.trim()) : [];
+  });
+  assert(snapK.length >= 2 && snapK.some((v, i) => snapK.indexOf(v) !== i), '快照欄位的營業淨利應該跟現在一樣(剛存的)：' + snapK.join(','));
+  await page.click('nav button[data-tab="scenarios"]');
+  await page.waitForSelector('#snapshot-body button:has-text("跟現在比較")');
+  await page.click('#snapshot-body button:has-text("跟現在比較")');
+  await page.waitForFunction(() => document.querySelectorAll('#wf-chart .wf-bar').length >= 2, null, { timeout: 15000 });
+  assert(/快照 審議版E2E/.test(await page.textContent('#wf-heading')), '瀑布圖工具起點應該是快照：' + await page.textContent('#wf-heading'));
 
   // v2：拖曳把手可以用鍵盤 Alt+↓ 調整車系順序，放開(按下)就存檔
   await page.click('nav button[data-tab="vehicles"]');
@@ -263,7 +289,7 @@ async function main() {
     failures.forEach(f => console.log('  ✗ ' + f));
     process.exit(1);
   }
-  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、多項反推、瀑布圖工具、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
+  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、多項反推、瀑布圖工具、情境快照、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
 }
 
 main().catch(e => { console.error(e); if (ERRS.length) console.error('頁面錯誤：', ERRS.join(' | ')); process.exit(1); });

@@ -6,8 +6,9 @@ function renderEntityPanel(key) {
   const cfg = ENTITIES[key];
   const panel = document.getElementById('panel-' + key);
   if (cfg.scopedBy === 'vehicleType' && !requireScope(key, false)) return;
-  panel.innerHTML = gridShell(key, cfg.label, cfg.intro);
+  panel.innerHTML = gridShell(key, cfg.label, cfg.intro) + (key === 'scenarios' ? snapshotCardShellHtml_() : '');
   loadEntityData(key);
+  if (key === 'scenarios') loadSnapshotCard_();
 }
 
 /** ENTITIES 的 scopedBy 只有 'vehicleType' 或 null，剛好對應到快取鍵要區分到什麼程度 */

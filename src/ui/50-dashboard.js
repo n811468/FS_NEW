@@ -83,9 +83,7 @@ function builderRowHtml_(sel, i) {
     <td><select onchange="onBuilderRowTypeChange_(${i}, this.value)">
       ${comparisonOptions.map(t => `<option value="${esc(t.VehicleTypeID)}"${t.VehicleTypeID === typeId ? ' selected' : ''}>${esc(t.VehicleTypeID)}</option>`).join('')}
     </select></td>
-    <td><select onchange="onBuilderRowScenarioChange_(${i}, this.value)">
-      ${scenarios.map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === sel.ScenarioID ? ' selected' : ''}>${esc(scenarioLabel(s))}</option>`).join('')}
-    </select></td>
+    <td><select onchange="onBuilderRowScenarioChange_(${i}, this.value)">${scenarioOptionsHtml_(scenarios, sel.ScenarioID)}</select></td>
     <td><select onchange="onBuilderRowVehicleChange_(${i}, this.value)">
       <option value=""${!sel.VehicleID ? ' selected' : ''}>加權平均</option>
       ${vehicles.map(v => `<option value="${esc(v.VehicleID)}"${v.VehicleID === sel.VehicleID ? ' selected' : ''}>${esc(v.VehicleCode || v.VehicleID)}</option>`).join('')}
@@ -102,9 +100,7 @@ function builderNewRowHtml_(draftType) {
     <td><select onchange="onBuilderDraftChange_('vehicleTypeId', this.value)">
       ${comparisonOptions.map(t => `<option value="${esc(t.VehicleTypeID)}"${t.VehicleTypeID === builderDraft_.vehicleTypeId ? ' selected' : ''}>${esc(t.VehicleTypeID)}</option>`).join('')}
     </select></td>
-    <td>${scenarios.length ? `<select onchange="onBuilderDraftChange_('scenarioId', this.value)">
-      ${scenarios.map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === builderDraft_.scenarioId ? ' selected' : ''}>${esc(scenarioLabel(s))}</option>`).join('')}
-    </select>` : '<span class="muted">(此車型尚無情境)</span>'}</td>
+    <td>${scenarios.length ? `<select onchange="onBuilderDraftChange_('scenarioId', this.value)">${scenarioOptionsHtml_(scenarios, builderDraft_.scenarioId)}</select>` : '<span class="muted">(此車型尚無情境)</span>'}</td>
     <td><select onchange="onBuilderDraftChange_('vehicleId', this.value)">
       <option value=""${!builderDraft_.vehicleId ? ' selected' : ''}>加權平均</option>
       ${vehicles.map(v => `<option value="${esc(v.VehicleID)}"${v.VehicleID === builderDraft_.vehicleId ? ' selected' : ''}>${esc(v.VehicleCode || v.VehicleID)}</option>`).join('')}
@@ -117,6 +113,12 @@ function builderNewRowHtml_(draftType) {
   </tr>`;
 }
 
+/** 情境下拉：一般情境在前，情境快照(唯讀的歷史版本)另成一組 */
+function scenarioOptionsHtml_(scenarios, selected) {
+  const opt = s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === selected ? ' selected' : ''}>${esc(scenarioLabel(s))}</option>`;
+  const live = scenarios.filter(s => !s.isSnapshot), snaps = scenarios.filter(s => s.isSnapshot);
+  return live.map(opt).join('') + (snaps.length ? `<optgroup label="情境快照（歷史版本）">${snaps.map(opt).join('')}</optgroup>` : '');
+}
 function onBuilderDraftChange_(field, value) {
   builderDraft_[field] = value;
   if (field === 'vehicleTypeId') { builderDraft_.scenarioId = ''; builderDraft_.vehicleId = ''; }

@@ -23,7 +23,7 @@
 
   // 資料包收錄的表(順序即匯出順序)。PLResult 是計算快照不收；AuditLog 另外處理。
   var PACK_TABLES = ['VehicleTypes', 'Vehicles', 'Scenarios', 'SalesMix', 'CostOfSales',
-    'DevInvestment', 'OperatingExpense', 'Parameters', 'PLLineItems', 'ParamDefs', 'LineNotes', 'Actions'];
+    'DevInvestment', 'OperatingExpense', 'Parameters', 'PLLineItems', 'ParamDefs', 'LineNotes', 'Actions', 'Snapshots'];
   var AUDIT_TABLE = 'AuditLog';
   var AUDIT_HEADERS = ['Timestamp', 'User', 'SheetName', 'RowID', 'Action', 'Payload'];
 
@@ -78,7 +78,9 @@
         var charts = chartsByType_(tables.PLLineItems || [], Object.keys(types));
         return Object.keys(charts).reduce(function (all, id) { return all.concat(charts[id]); }, []);
       })(),
-      ParamDefs: (tables.ParamDefs || []).slice()
+      ParamDefs: (tables.ParamDefs || []).slice(),
+      // 情境快照跟著車型走(情境刪掉了快照仍保留，所以不是依情境篩)
+      Snapshots: (tables.Snapshots || []).filter(function (r) { return types[str_(r.VehicleTypeID)]; })
     };
     Object.keys(SCENARIO_TABLES).forEach(function (name) {
       out[name] = (tables[name] || []).filter(function (r) {
@@ -263,6 +265,16 @@
       });
     });
 
+    // ---- 情境快照是歷史紀錄：兩邊都留(同一個快照代號只留一份)，不因為換掉車型資料就消失 ----
+    var snapIds = set_(local.Snapshots.map(function (r) { return r.SnapshotID; }));
+    report.snapshotsAdded = 0;
+    incoming.Snapshots.forEach(function (r) {
+      if (snapIds[str_(r.SnapshotID)]) return;
+      snapIds[str_(r.SnapshotID)] = true;
+      local.Snapshots.push(r);
+      report.snapshotsAdded++;
+    });
+
     // ---- 稽核紀錄：兩邊都留，去掉完全相同的列 ----
     var seen = set_(local[AUDIT_TABLE].map(function (r) { return JSON.stringify(r); }));
     incoming[AUDIT_TABLE].forEach(function (r) {
@@ -286,6 +298,7 @@
     if (report.chartsReplaced.length) {
       lines.push('・科目表跟著車型一起換成資料包的版本：' + report.chartsReplaced.join('、') + '（其他車型的科目表不受影響）');
     }
+    if (report.snapshotsAdded) lines.push('・新增 ' + report.snapshotsAdded + ' 份情境快照（本機原有的快照保留）');
     if (report.paramDefsAdded.length) {
       lines.push('・新增自訂參數：' + report.paramDefsAdded.join('、'));
     }

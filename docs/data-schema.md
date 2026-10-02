@@ -324,3 +324,15 @@ PLLineItems ──(靜態科目表)──> CalcEngine ──> PLResult >──�
 ## 4. 架構與資料流
 
 見 `docs/architecture.md`。
+
+## Snapshots（情境快照）
+
+| 欄位 | 說明 |
+|---|---|
+| SnapshotID | 主鍵（SNAP-…） |
+| VehicleTypeID / ScenarioID | 來源車型、情境（情境刪除後快照仍保留） |
+| SnapshotName / Notes | 名稱、備註 |
+| CreatedAt / CreatedBy | 建立時間（ISO）、建立者 |
+| Data | JSON：`{ v, scenario, lines, columns: [{ vehicleId, vehicleLabel, isWeighted, amounts, revenue, exFactoryPrice, volume }] }`，存的是計算結果 |
+
+比較功能裡以 `snap:<SnapshotID>` 當成唯讀情境代號（`calculateComparison`、`getComparisonOptions`、瀑布圖工具）。

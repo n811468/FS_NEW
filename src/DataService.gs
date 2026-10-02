@@ -516,7 +516,7 @@ function saveDevInvestmentGrid(scenarioId, rows) {
  * 只覆蓋所選的資料類別，帶入前會先清掉目標情境同類別的既有資料。
  * 帶入的開發總投列，其挑戰低減目標一律歸零，由使用者自己填新的目標值。
  */
-function copyScenarioData(sourceScenarioId, targetScenarioId, parts) {
+function copyScenarioData(sourceScenarioId, targetScenarioId, parts, opts) {
   return withLock_(function () {
     if (!sourceScenarioId || !targetScenarioId) throw new Error('請選擇來源情境與目標情境');
     if (sourceScenarioId === targetScenarioId) throw new Error('來源情境與目標情境不能相同');
@@ -567,7 +567,8 @@ function copyScenarioData(sourceScenarioId, targetScenarioId, parts) {
         copy.ScenarioID = targetScenarioId;
         if (sheetName === SHEETS.DEV_INVESTMENT) {
           // 低減目標屬於目標情境自己的假設，帶入後歸零讓使用者重新填
-          copy.ChallengeReductionPct = '';
+          // (目標反推另存成情境時要原封不動：opts.keepChallenge)
+          if (!(opts && opts.keepChallenge)) copy.ChallengeReductionPct = '';
           // 舊資料只有 AssetType、沒有 TargetLineCode 的列，平常是靠畫面顯示時(devAmortTargetOf_)
           // 即時解析成攤提落點，使用者存檔那一刻才會真的寫回 Sheet —— 但帶入是直接複製原始列，
           // 不會經過那次存檔，複製過去的仍是「TargetLineCode 空白」的舊格式列。

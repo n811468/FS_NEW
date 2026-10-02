@@ -305,6 +305,51 @@ check('多項目標反推：缺口由多個項目分擔、上限、同幅度、�
   near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '試算完存檔的數字不能變', 0.01);
 });
 
+check('目標反推另存成新情境：資料寫實後重算的營業淨利 = 試算值，來源情境不變', () => {
+  reset();
+  const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
+  const r = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, k0 + 40000, [
+    { driver: { type: 'price' }, share: 30 }, { driver: { type: 'line', code: 'b1' }, share: 30 },
+    { driver: { type: 'dev' }, share: 20 }, { driver: { type: 'volume' }, share: 20 }
+  ], 'share');
+  assert(r.feasible, r.message);
+  const saved = gs.saveWhatIfAsScenario(sid, r.levers.map(l => ({ driver: l.driver, value: l.value })), { ScenarioName: '反推目標', ScenarioType: '目標' });
+  near(saved.actual, saved.expected, '新情境重算 = 試算', 1);
+  near(saved.actual, k0 + 40000, '新情境營業淨利 = 目標', 1);
+  assert(/建議零售價/.test(saved.scenario.Notes), '情境備註記錄調整內容：' + saved.scenario.Notes);
+  const p = gs.saveWhatIfAsScenario(sid, [{ driver: { type: 'param', name: '季Margin率' }, value: 1 }, { driver: { type: 'fx', currency: 'CNY' }, value: 4.3 }], { ScenarioName: '參數反推' });
+  near(p.actual, p.expected, '參數/匯率另存後重算 = 試算', 1);
+  near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '來源情境不變', 0.01);
+  gs.deleteScenario(saved.scenario.ScenarioID); gs.deleteScenario(p.scenario.ScenarioID);
+});
+
+check('情境快照：存下當時的數字，之後改資料不影響；可以當成比較欄位', () => {
+  reset();
+  const kOf = () => gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
+  const k0 = kOf();
+  const snap = gs.createSnapshot(sid, '審議版');
+  assert(snap.SnapshotID, '建立快照');
+  const list = gs.getSnapshots('DA');
+  assert(list.length === 1 && Math.abs(list[0].K - k0) < 0.01 && list[0].scenarioExists, '快照清單：' + JSON.stringify(list));
+  // 改資料：材料成本加 1 萬
+  const v1 = gs.getCostOfSales(sid, 'V1').filter(r => r.LineCode === 'b1')[0];
+  gs.saveCostOfSalesMatrix(sid, [{ RowID: v1.RowID, VehicleID: 'V1', LineCode: 'b1', Amount: Number(v1.Amount) + 10000, Currency: v1.Currency || 'TWD' }]);
+  assert(Math.abs(kOf() - k0) > 1, '資料改了，營業淨利應該變');
+  const opt = gs.getComparisonOptions().find(t => t.VehicleTypeID === 'DA').scenarios.find(x => x.isSnapshot);
+  assert(opt && opt.ScenarioID === 'snap:' + snap.SnapshotID, '比較選項列出快照');
+  const cmp = gs.calculateComparison([{ ScenarioID: opt.ScenarioID, VehicleID: '' }, { ScenarioID: sid, VehicleID: '' }, { ScenarioID: opt.ScenarioID, VehicleID: 'V1' }]);
+  near(cmp.columns[0].amounts.K, k0, '快照欄位 = 存快照當時的營業淨利', 0.01);
+  near(cmp.columns[1].amounts.K, kOf(), '目前欄位 = 改過的數字', 0.01);
+  assert(cmp.columns[2].amounts.b1 > 0 && /快照 審議版/.test(cmp.columns[0].scenarioLabel), '快照的車系欄位與名稱：' + cmp.columns[0].scenarioLabel);
+  assert(cmp.lines.some(l => l.LineCode === 'K'), '科目聯集含快照科目');
+  gs.renameSnapshot(snap.SnapshotID, '審議版 v2');
+  assert(gs.getSnapshots('DA')[0].SnapshotName === '審議版 v2', '改名');
+  gs.saveCostOfSalesMatrix(sid, [{ RowID: v1.RowID, VehicleID: 'V1', LineCode: 'b1', Amount: Number(v1.Amount), Currency: v1.Currency || 'TWD' }]);
+  gs.deleteSnapshot(snap.SnapshotID);
+  assert(!gs.getSnapshots('DA').length, '刪除');
+  near(kOf(), k0, '還原', 0.01);
+});
+
 check('預設公式下 Gate F 數字不變(回歸)', () => {
   reset();
   const all = gs.calculatePLAllVehicles(sid);

@@ -22,7 +22,8 @@ var SHEETS = {
   PL_RESULT: 'PLResult',
   PARAM_DEFS: 'ParamDefs',
   LINE_NOTES: 'LineNotes',
-  ACTIONS: 'Actions'
+  ACTIONS: 'Actions',
+  SNAPSHOTS: 'Snapshots'
 };
 
 // 每張表的欄位順序，同時作為 Sheet 標題列與 Apps Script 讀寫時的欄位對應。
@@ -53,7 +54,10 @@ var SCHEMA = {
   LineNotes: ['RowID', 'ScenarioID', 'LineCode', 'VehicleID', 'Notes'],
   // 改善作法：掛在目標情境底下，說明「差距要靠哪些作法補起來」，Effect 為對營業淨利的單台改善金額(元/台)
   Actions: ['ActionID', 'VehicleTypeID', 'ScenarioID', 'LineCode', 'Title', 'Detail', 'Owner', 'Effect',
-    'Status', 'DueDate', 'SortOrder']
+    'Status', 'DueDate', 'SortOrder'],
+  // 情境快照：某個時間點的計算結果(加權平均 + 各車系的每個科目金額)，存成 JSON 放在 Data。
+  // 之後輸入資料怎麼改都不影響快照，用來比較「這一版跟審議那一版差在哪」；情境刪掉快照仍保留。
+  Snapshots: ['SnapshotID', 'VehicleTypeID', 'ScenarioID', 'SnapshotName', 'CreatedAt', 'CreatedBy', 'Notes', 'Data']
 };
 
 // 情境代號改用 GATE 別；同一個 GATE 底下可以有多個情境(GATE F 現況 / GATE F 目標)，
@@ -288,5 +292,6 @@ var TEXT_COLUMNS = {
   PLResult: ['ResultID', 'ScenarioID', 'VehicleID', 'LineCode'],
   ParamDefs: ['ParamName', 'Unit', 'Description'],
   LineNotes: ['RowID', 'ScenarioID', 'LineCode', 'VehicleID', 'Notes'],
-  Actions: ['ActionID', 'VehicleTypeID', 'ScenarioID', 'LineCode', 'Title', 'Detail', 'Owner', 'Status', 'DueDate']
+  Actions: ['ActionID', 'VehicleTypeID', 'ScenarioID', 'LineCode', 'Title', 'Detail', 'Owner', 'Status', 'DueDate'],
+  Snapshots: ['SnapshotID', 'VehicleTypeID', 'ScenarioID', 'SnapshotName', 'CreatedAt', 'CreatedBy', 'Notes', 'Data']
 };

@@ -320,7 +320,8 @@ function wfScenarioSelectHtml_(side, onlyWeighted) {
   wfLists.scenarios.forEach(s => { (byType[s.VehicleTypeID] = byType[s.VehicleTypeID] || []).push(s); });
   const vehicles = wfLists.vehicles.filter(v => v.VehicleTypeID === sc.VehicleTypeID);
   return `<select id="wf-${side}-sc" onchange="wfPrefs.${side}={scenarioId:this.value,vehicleId:''};saveWfPrefs_();drawWaterfallTool_()">
-      ${Object.keys(byType).map(t => `<optgroup label="${esc(t)}">${byType[t].map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === sel.scenarioId ? ' selected' : ''}>${esc(t + ' ' + scenarioLabel(s))}</option>`).join('')}</optgroup>`).join('')}
+      ${Object.keys(byType).map(t => `<optgroup label="${esc(t)}">${byType[t].filter(s => !s.isSnapshot).map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === sel.scenarioId ? ' selected' : ''}>${esc(t + ' ' + scenarioLabel(s))}</option>`).join('')}</optgroup>` +
+        (byType[t].some(s => s.isSnapshot) ? `<optgroup label="${esc(t)} 情境快照">${byType[t].filter(s => s.isSnapshot).map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === sel.scenarioId ? ' selected' : ''}>${esc(t + ' ' + scenarioLabel(s))}</option>`).join('')}</optgroup>` : '')).join('')}
     </select>
     ${onlyWeighted ? '' : `<select id="wf-${side}-v" onchange="wfPrefs.${side}.vehicleId=this.value;saveWfPrefs_();runWaterfall_()">
       <option value="">加權平均</option>

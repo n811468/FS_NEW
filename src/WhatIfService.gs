@@ -416,7 +416,101 @@ function getWaterfallSources() {
   return {
     scenarios: getScenarios().map(function (s) {
       return { ScenarioID: s.ScenarioID, VehicleTypeID: s.VehicleTypeID, Gate: s.Gate || '', ScenarioName: s.ScenarioName || '', ScenarioType: s.ScenarioType || '' };
-    }),
+    }).concat([].concat.apply([], getVehicleTypes().map(function (t) {
+      return snapshotScenarioOptions_(t.VehicleTypeID).map(function (o) { o.VehicleTypeID = t.VehicleTypeID; return o; });
+    }))),
     vehicles: getVehicles().map(function (v) { return { VehicleID: v.VehicleID, VehicleTypeID: v.VehicleTypeID, VehicleCode: v.VehicleCode || '' }; })
   };
+}
+
+/**
+ * 目標反推的結果另存成新情境：複製來源情境的全部資料，再把反推出來的假設「寫實」到新情境的資料上 ——
+ *   月總銷量  各車系月銷量(與攤提基準月台數)等比例調整
+ *   建議零售價 各車系建議零售價等比例調整
+ *   某科目    該科目的輸入金額(各車系、各幣別)等比例調整；開發攤提科目則調整攤提到它的開發總投金額
+ *   開發總投  全部開發總投金額等比例調整
+ *   參數/匯率 新情境直接設成反推出來的值(全車系)
+ * 寫完重算一次，回傳新情境的營業淨利與試算值，兩者應該相同(科目有車系個別公式時才可能有差，會一併回報)。
+ * levers = [{ driver, value }]，meta = { Gate, ScenarioName, ScenarioType, Notes }
+ */
+function saveWhatIfAsScenario(scenarioId, levers, meta) {
+  if (!scenarioId) throw new Error('請先選擇情境');
+  meta = meta || {};
+  if (!String(meta.ScenarioName || '').trim()) throw new Error('請輸入新情境名稱');
+  var src = getScenarios().filter(function (s) { return s.ScenarioID === scenarioId; })[0];
+  if (!src) throw new Error('找不到情境：' + scenarioId);
+  var o = { scenarioId: scenarioId };
+  var notes = [];
+  var dg = function (v) { return Math.abs(v) < 100 ? Math.round(v * 100) / 100 : Math.round(v); };
+  (levers || []).forEach(function (l) {
+    if (!l || !l.driver || l.value === '' || l.value === null || l.value === undefined) return;
+    var b = driverBase_(scenarioId, l.driver);
+    var v = toNumber_(l.value);
+    if (Math.abs(v - b.value) < 1e-9) return;
+    o = mergeOverrides_(o, driverOverrides_(scenarioId, l.driver, v, b.value));
+    notes.push(b.label + ' ' + dg(b.value) + ' → ' + dg(v) + (b.unit ? ' ' + b.unit : '') +
+      (b.value ? '（' + (v / b.value - 1 >= 0 ? '+' : '') + (Math.round((v / b.value - 1) * 1000) / 10) + '%）' : ''));
+  });
+  if (!notes.length) throw new Error('沒有任何調整，不需要另存');
+  var expected = withOverrides_(o, function () { return whatIfMetric_(scenarioId, { code: 'K', basis: 'unit' }); });
+
+  return withLock_(function () {
+    var row = {
+      ScenarioID: '', Gate: meta.Gate || src.Gate, ScenarioName: String(meta.ScenarioName).trim(),
+      ScenarioType: meta.ScenarioType || src.ScenarioType || '目標', VehicleTypeID: src.VehicleTypeID,
+      Notes: (meta.Notes ? meta.Notes + '\n' : '') + '由「' + [src.Gate, src.ScenarioName].join(' ') + '」目標反推：' + notes.join('；')
+    };
+    if (toNumber_(src.AmortMonthlyVolume) > 0) row.AmortMonthlyVolume = toNumber_(src.AmortMonthlyVolume) * (o.volume || 1);
+    if (src.AmortLifeCycleYears !== undefined && src.AmortLifeCycleYears !== '') row.AmortLifeCycleYears = src.AmortLifeCycleYears;
+    var saved = saveScenario(row);
+    var newId = saved.ScenarioID;
+    copyScenarioData(scenarioId, newId, ['salesmix', 'costofsales', 'devinvestment', 'operatingexpense', 'parameters', 'linenotes', 'actions'], { keepChallenge: true });
+
+    var scaleRows = function (sheetName, pk, fieldFactor) {
+      var ups = [];
+      (sheetToObjects_(sheetName) || []).filter(function (r) { return r.ScenarioID === newId; }).forEach(function (r) {
+        var changed = fieldFactor(r);
+        if (!changed) return;
+        var c = {};
+        SCHEMA[sheetName].forEach(function (h) { c[h] = r[h]; });
+        Object.keys(changed).forEach(function (k) { c[k] = changed[k]; });
+        ups.push(c);
+      });
+      if (ups.length) batchWriteRows_(sheetName, pk, ups, []);
+    };
+    var lineScale = o.lineScale || {};
+    if (o.volume || o.price) {
+      scaleRows(SHEETS.SALES_MIX, 'RowID', function (r) {
+        var c = {};
+        if (o.volume && r.MonthlyVolume !== '' && r.MonthlyVolume !== undefined) c.MonthlyVolume = toNumber_(r.MonthlyVolume) * o.volume;
+        if (o.price && r.ListPriceTaxIncl !== '' && r.ListPriceTaxIncl !== undefined) c.ListPriceTaxIncl = toNumber_(r.ListPriceTaxIncl) * o.price;
+        return Object.keys(c).length ? c : null;
+      });
+    }
+    if (Object.keys(lineScale).length) {
+      [[SHEETS.COST_OF_SALES, 'RowID'], [SHEETS.OPERATING_EXPENSE, 'RowID']].forEach(function (t) {
+        scaleRows(t[0], t[1], function (r) {
+          return lineScale[r.LineCode] !== undefined ? { Amount: toNumber_(r.Amount) * lineScale[r.LineCode] } : null;
+        });
+      });
+    }
+    if (o.dev || Object.keys(lineScale).length) {
+      scaleRows(SHEETS.DEV_INVESTMENT, 'RowID', function (r) {
+        var f = (o.dev || 1) * (lineScale[r.TargetLineCode] !== undefined ? lineScale[r.TargetLineCode] : 1);
+        return f !== 1 ? { Amount: toNumber_(r.Amount) * f } : null;
+      });
+    }
+    if (o.params || o.fx) {
+      var p = o.params || {}, fx = o.fx || {};
+      var dels = (sheetToObjects_(SHEETS.PARAMETERS) || []).filter(function (r) {
+        return r.ScenarioID === newId && (p[r.ParamName] !== undefined || (r.ParamName === COST_FX_PARAM_NAME && fx[r.Currency] !== undefined));
+      }).map(function (r) { return r.ParamID; });
+      var adds = Object.keys(p).map(function (name) { return { ParamID: '', ScenarioID: newId, VehicleID: '', ParamName: name, Currency: '', Value: p[name], EffectiveDate: '' }; })
+        .concat(Object.keys(fx).map(function (cur) { return { ParamID: '', ScenarioID: newId, VehicleID: '', ParamName: COST_FX_PARAM_NAME, Currency: cur, Value: fx[cur], EffectiveDate: '' }; }));
+      batchWriteRows_(SHEETS.PARAMETERS, 'ParamID', adds, dels);
+    }
+    resetCalcMemo_();
+    var actual = whatIfMetric_(newId, { code: 'K', basis: 'unit' });
+    return { scenario: getScenarios().filter(function (s) { return s.ScenarioID === newId; })[0], expected: expected, actual: actual, notes: notes };
+  });
 }

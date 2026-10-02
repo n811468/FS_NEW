@@ -376,6 +376,7 @@ function calculateComparison(selections) {
   };
 
   var columns = selections.map(function (sel) {
+    if (isSnapshotId_(sel.ScenarioID)) return snapshotColumn_(sel);
     var scenario = scenarios.filter(function (s) { return s.ScenarioID === sel.ScenarioID; })[0] || {};
     var vehicle = vehicles.filter(function (v) { return v.VehicleID === sel.VehicleID; })[0];
     var vehicleType = vehicleTypes.filter(function (t) { return t.VehicleTypeID === scenario.VehicleTypeID; })[0] || {};
@@ -422,7 +423,8 @@ function calculateComparison(selections) {
     };
   });
 
-  var allDefs = unionLineDefs_(columns.map(function (c) { return defsOf(c.vehicleTypeId); }));
+  var allDefs = unionLineDefs_(columns.map(function (c) { return c.snapshotLines || defsOf(c.vehicleTypeId); }));
+  columns.forEach(function (c) { delete c.snapshotLines; });
   var depth = lineDepths_(allDefs);
   // 只列出至少有一個比較欄位真的算出數字的科目(不同車型科目不同時，表格才不會塞滿空列)
   var usedLines = allDefs.filter(function (def) {
@@ -563,6 +565,10 @@ function getComparisonOptions() {
       vehicles: vehicles.filter(function (v) { return v.VehicleTypeID === t.VehicleTypeID; })
         .map(function (v) { return { VehicleID: v.VehicleID, VehicleCode: v.VehicleCode || '' }; })
     };
+  }).map(function (t) {
+    // 情境快照當成「唯讀情境」一起列出(代號 snap:xxx)，儀表板、瀑布圖工具就能直接拿來比較
+    t.scenarios = t.scenarios.concat(snapshotScenarioOptions_(t.VehicleTypeID));
+    return t;
   });
 }
 

@@ -139,7 +139,10 @@ function runGoalSeek_() {
           ${pct !== null ? `<span class="muted">（${signed_(pct, 1)}%）</span>` : ''}</div>
         <div class="muted">${esc(whatIfMetricLabel_(g.metric, g.basis))}：目前 ${fmt(r.metricBase)} → ${fmt(r.achieved)}（目標 ${fmt(num(g.target))}）。
           ${info.driver && info.driver.type === 'volume' ? '台數變動時，開發總投的攤提台數也一起變。' : ''}其他假設都維持目前的數字。</div>
+        <div class="field-row" style="margin-top:8px;"><button type="button" class="btn secondary sm" id="wi-goal-save">另存成新情境…</button></div>
       </div>`;
+      const btn = document.getElementById('wi-goal-save');
+      if (btn) btn.onclick = () => saveWhatIfScenarioDialog_([{ driver: driverFromKey_(g.driver), value: r.value }], `${r.label} ${fmt(r.base, digits)} → ${fmt(r.value, digits)}`);
     }))
     .withFailureHandler(err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; })
     .solveGoal(currentScenarioId, { code: g.metric, basis: g.basis }, num(g.target), driverFromKey_(g.driver));
@@ -305,5 +308,38 @@ function multiGoalResultHtml_(r) {
     </table></div>
     <p class="help">貢獻依列表順序逐項加入計算（各項之間有交互作用，例如售價變動也會影響佣金與貨物稅），加總 = 總改善 ${total >= 0 ? '+' : ''}${fmt(total)}。拖曳 ⠿ 可以換順序。只在畫面上試算，不會改到存檔的數字。</p>
     <div class="waterfall-card">${wfSvg_(multiGoalSteps_(r), { width: 900, height: 320, labels: true, fmtV: wfShortFmt_(multiGoalSteps_(r)) })}</div>
-    <div class="field-row" style="margin-top:8px;"><button type="button" class="btn secondary sm" onclick="openInWaterfallTool_(multiGoalSteps_(lastMultiResult_), '組合拳：' + whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))">在瀑布圖工具開啟（可編輯、下載 PNG）</button></div>`;
+    <div class="field-row" style="margin-top:8px;">
+      <button type="button" class="btn secondary sm" onclick="saveWhatIfScenarioDialog_(lastMultiResult_.levers.map(l => ({ driver: l.driver, value: l.value })), lastMultiResult_.levers.map(l => l.label).join('、'))">另存成新情境…</button>
+      <button type="button" class="btn secondary sm" onclick="openInWaterfallTool_(multiGoalSteps_(lastMultiResult_), '組合拳：' + whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))">在瀑布圖工具開啟（可編輯、下載 PNG）</button></div>`;
+}
+
+/**
+ * 把反推出來的假設寫成一個新情境(複製目前情境的全部資料，再把調整寫實)：
+ * 之後就能像一般情境一樣在儀表板比較、在 GATE 報告當目標、繼續修改。
+ */
+function saveWhatIfScenarioDialog_(levers, summary) {
+  const cur = currentScenario || {};
+  openModal({
+    title: '另存成新情境',
+    body: `<p class="help">複製「${esc(scenarioLabel(cur))}」的全部資料（銷售構成、成本、開發總投、費用、參數、說明、作法），再把這次反推的調整寫進去：<br><b>${esc(summary || '')}</b></p>`,
+    fields: [
+      { name: 'Gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, value: cur.Gate || 'GATE F' },
+      { name: 'ScenarioName', label: '情境名稱', value: (cur.ScenarioName || '') + ' 反推' },
+      { name: 'ScenarioType', label: '類型', type: 'select', options: ['目標', '現況'], value: '目標' }
+    ],
+    okText: '建立情境',
+    validate: v => String(v.ScenarioName || '').trim() ? '' : '請輸入情境名稱'
+  }).then(v => {
+    if (!v) return;
+    google.script.run
+      .withSuccessHandler(safeHandler(res => {
+        const diff = Math.abs(res.actual - res.expected);
+        toast(`已建立「${res.scenario.Gate} ${res.scenario.ScenarioName}」，營業淨利 ${fmt(res.actual)} 元/台` + (diff > 1 ? `（與試算差 ${fmt(diff)}，有科目使用車系個別公式，請檢查）` : ''), diff > 1 ? 'warn' : 'ok', 4000);
+        confirmModal('新情境已建立', `要切換到「${esc(res.scenario.Gate + ' ' + res.scenario.ScenarioName)}」嗎？`, '切換過去').then(ok => {
+          loadScenarioSelector(ok ? res.scenario.ScenarioID : currentScenarioId);
+        });
+      }))
+      .withFailureHandler(err => toast(err.message, 'err', 4000))
+      .saveWhatIfAsScenario(currentScenarioId, levers, v);
+  });
 }

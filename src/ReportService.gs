@@ -143,3 +143,160 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
     generatedAt: new Date().toISOString()
   };
 }
+
+/* ---------------------------------------------------------------
+ * 情境快照(版本紀錄)
+ * 審議前後數字常常改：存一份快照，之後就能比較「現在跟審議那一版差在哪」。
+ * 快照存的是計算結果(不是輸入資料)，所以科目表、公式、輸入資料之後怎麼改都不會影響它。
+ * 在比較功能裡，快照用代號 snap:<SnapshotID> 當成唯讀情境，儀表板/瀑布圖工具直接可用。
+ * --------------------------------------------------------------- */
+var SNAPSHOT_PREFIX = 'snap:';
+var SNAPSHOT_MEMO_ = {};
+function isSnapshotId_(id) { return String(id || '').indexOf(SNAPSHOT_PREFIX) === 0; }
+
+/** 舊的試算表沒有 Snapshots 分頁：第一次用到時補建 */
+function ensureSnapshotSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (ss.getSheetByName(SHEETS.SNAPSHOTS)) return;
+  var sheet = ss.insertSheet(SHEETS.SNAPSHOTS);
+  sheet.getRange(1, 1, 1, SCHEMA.Snapshots.length).setValues([SCHEMA.Snapshots]);
+  sheet.setFrozenRows(1);
+  invalidateSheetCache_();
+}
+function snapshotRows_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(SHEETS.SNAPSHOTS)) return [];
+  return sheetToObjects_(SHEETS.SNAPSHOTS) || [];
+}
+function snapshotMeta_(r) {
+  return {
+    SnapshotID: r.SnapshotID, VehicleTypeID: r.VehicleTypeID || '', ScenarioID: r.ScenarioID || '',
+    SnapshotName: r.SnapshotName || '', CreatedAt: r.CreatedAt ? String(r.CreatedAt) : '', CreatedBy: r.CreatedBy || '', Notes: r.Notes || ''
+  };
+}
+
+/** 某車型的快照清單(新到舊)，含快照當時的情境名稱與加權營業淨利 */
+function getSnapshots(vehicleTypeId) {
+  return snapshotRows_().filter(function (r) { return !vehicleTypeId || r.VehicleTypeID === vehicleTypeId; })
+    .map(function (r) {
+      var m = snapshotMeta_(r);
+      var d = snapshotData_(r.SnapshotID);
+      m.scenarioLabel = d ? [d.scenario.Gate, d.scenario.ScenarioName].filter(function (x) { return x; }).join(' ') : '';
+      m.scenarioType = d ? d.scenario.ScenarioType || '' : '';
+      var w = d ? d.columns.filter(function (c) { return !c.vehicleId; })[0] : null;
+      m.K = w && w.amounts.K !== undefined ? w.amounts.K : null;
+      m.scenarioExists = getScenarios().some(function (s) { return s.ScenarioID === r.ScenarioID; });
+      return m;
+    })
+    .sort(function (a, b) { return String(b.CreatedAt).localeCompare(String(a.CreatedAt)); });
+}
+
+function snapshotData_(snapshotId) {
+  if (SNAPSHOT_MEMO_[snapshotId]) return SNAPSHOT_MEMO_[snapshotId];
+  var r = snapshotRows_().filter(function (x) { return x.SnapshotID === snapshotId; })[0];
+  if (!r) return null;
+  var d = null;
+  try { d = JSON.parse(r.Data); } catch (e) { d = null; }
+  if (!d || !d.columns) return null;
+  d.meta = snapshotMeta_(r);
+  SNAPSHOT_MEMO_[snapshotId] = d;
+  return d;
+}
+
+/** 建立快照：加權平均 + 銷售構成裡每個車系，各存一份完整的損益金額 */
+function createSnapshot(scenarioId, name, notes) {
+  if (!scenarioId || isSnapshotId_(scenarioId)) throw new Error('請選擇要存快照的情境');
+  name = String(name || '').trim();
+  if (!name) throw new Error('請輸入快照名稱');
+  var scenario = getScenarios().filter(function (s) { return s.ScenarioID === scenarioId; })[0];
+  if (!scenario) throw new Error('找不到情境：' + scenarioId);
+  var sels = [{ ScenarioID: scenarioId, VehicleID: '' }].concat(calcSalesMix_(scenarioId).map(function (r) { return { ScenarioID: scenarioId, VehicleID: r.VehicleID }; }));
+  var cmp = calculateComparison(sels);
+  var round = function (v) { return typeof v === 'number' ? Math.round(v * 100) / 100 : v; };
+  var data = {
+    v: 1,
+    scenario: { Gate: scenario.Gate || '', ScenarioName: scenario.ScenarioName || '', ScenarioType: scenario.ScenarioType || '', VehicleTypeID: scenario.VehicleTypeID || '' },
+    lines: cmp.lines.map(function (l) {
+      return { LineCode: l.LineCode, LineName: l.LineName, Category: l.Category, ParentLine: l.ParentLine, SortOrder: l.SortOrder,
+        CalcType: l.CalcType, Formula: l.Formula, AutoSource: l.AutoSource };
+    }),
+    columns: cmp.columns.map(function (c) {
+      var amounts = {};
+      Object.keys(c.amounts).forEach(function (k) { amounts[k] = round(c.amounts[k]); });
+      return { vehicleId: c.vehicleId, vehicleLabel: c.vehicleLabel, isWeighted: c.isWeighted, amounts: amounts,
+        revenue: round(c.revenue), exFactoryPrice: round(c.exFactoryPrice),
+        volume: { monthlyVolume: c.volume.monthlyVolume, lifeCycleYears: c.volume.lifeCycleYears, units: c.volume.units, salesMixPct: c.volume.salesMixPct, mix: c.volume.mix || [] } };
+    })
+  };
+  var json = JSON.stringify(data);
+  if (json.length > 48000) throw new Error('這個情境的資料太多，超過單一快照可以存的大小（' + json.length + ' 字）');
+  return withLock_(function () {
+    ensureSnapshotSheet_();
+    var user = '';
+    try { user = Session.getActiveUser().getEmail(); } catch (e) { user = ''; }
+    var row = { SnapshotID: generateId_('SNAP'), VehicleTypeID: scenario.VehicleTypeID || '', ScenarioID: scenarioId, SnapshotName: name,
+      CreatedAt: new Date().toISOString(), CreatedBy: user, Notes: notes || '', Data: json };
+    batchWriteRows_(SHEETS.SNAPSHOTS, 'SnapshotID', [row], []);
+    SNAPSHOT_MEMO_ = {};
+    return snapshotMeta_(row);
+  });
+}
+function renameSnapshot(snapshotId, name, notes) {
+  name = String(name || '').trim();
+  if (!name) throw new Error('請輸入快照名稱');
+  return withLock_(function () {
+    var r = snapshotRows_().filter(function (x) { return x.SnapshotID === snapshotId; })[0];
+    if (!r) throw new Error('找不到快照');
+    var c = {};
+    SCHEMA.Snapshots.forEach(function (h) { c[h] = r[h]; });
+    c.SnapshotName = name;
+    if (notes !== undefined) c.Notes = notes;
+    batchWriteRows_(SHEETS.SNAPSHOTS, 'SnapshotID', [c], []);
+    SNAPSHOT_MEMO_ = {};
+    return snapshotMeta_(c);
+  });
+}
+function deleteSnapshot(snapshotId) {
+  return withLock_(function () {
+    if (!snapshotRows_().some(function (x) { return x.SnapshotID === snapshotId; })) return true;
+    batchWriteRows_(SHEETS.SNAPSHOTS, 'SnapshotID', [], [snapshotId]);
+    SNAPSHOT_MEMO_ = {};
+    return true;
+  });
+}
+
+function snapshotLabel_(d) {
+  var day = String(d.meta.CreatedAt || '').slice(5, 10).replace('-', '/');
+  return [d.scenario.Gate, d.scenario.ScenarioName].filter(function (x) { return x; }).join(' ') + '［快照 ' + d.meta.SnapshotName + (day ? ' ' + day : '') + '］';
+}
+/** 比較選單用：快照當成唯讀情境 */
+function snapshotScenarioOptions_(vehicleTypeId) {
+  return snapshotRows_().filter(function (r) { return r.VehicleTypeID === vehicleTypeId; })
+    .map(function (r) { return snapshotData_(r.SnapshotID); })
+    .filter(function (d) { return d; })
+    .sort(function (a, b) { return String(b.meta.CreatedAt).localeCompare(String(a.meta.CreatedAt)); })
+    .map(function (d) {
+      var label = snapshotLabel_(d);
+      return { ScenarioID: SNAPSHOT_PREFIX + d.meta.SnapshotID, Gate: '', ScenarioName: label, ScenarioType: d.scenario.ScenarioType || '', isSnapshot: true };
+    });
+}
+/** calculateComparison 用：快照的一欄(跟一般欄位同樣的欄位，另帶 snapshotLines 給科目聯集) */
+function snapshotColumn_(sel) {
+  var id = String(sel.ScenarioID).slice(SNAPSHOT_PREFIX.length);
+  var d = snapshotData_(id);
+  if (!d) throw new Error('找不到快照（可能已被刪除）');
+  var col = d.columns.filter(function (c) { return (c.vehicleId || '') === (sel.VehicleID || ''); })[0];
+  var vehicle = getVehicles().filter(function (v) { return v.VehicleID === sel.VehicleID; })[0];
+  var label = snapshotLabel_(d);
+  var vehicleLabel = sel.VehicleID ? ((col && col.vehicleLabel) || (vehicle && vehicle.VehicleCode) || sel.VehicleID) : '加權平均';
+  var amounts = col ? col.amounts : {};
+  return {
+    scenarioId: sel.ScenarioID, vehicleId: sel.VehicleID || '', vehicleTypeId: d.scenario.VehicleTypeID,
+    vehicleTypeLabel: d.scenario.VehicleTypeID, scenarioLabel: label, scenarioType: d.scenario.ScenarioType || '',
+    scenarioNotes: d.meta.Notes || '', vehicleLabel: vehicleLabel, isWeighted: !sel.VehicleID, isSnapshot: true,
+    volume: col ? col.volume : { monthlyVolume: 0, units: 0, mix: [] }, traces: null, errors: {},
+    label: [d.scenario.VehicleTypeID, label, vehicleLabel].filter(function (p) { return p; }).join(' / '),
+    amounts: amounts, revenue: amounts.A || 0, exFactoryPrice: amounts.P8 || 0, checks: [],
+    snapshotLines: d.lines.map(function (l) { var c = {}; Object.keys(l).forEach(function (k) { c[k] = l[k]; }); c.SortOrder = toNumber_(l.SortOrder); return c; })
+  };
+}
