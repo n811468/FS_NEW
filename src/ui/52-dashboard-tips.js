@@ -51,7 +51,8 @@ function colTipText_(el) {
     parts.push(`月銷量 ${fmt(v.monthlyVolume)} 台 × 12 × LC ${fmt(v.lifeCycleYears)} 年 = ${fmt(v.units)} 台・構成比 ${fmt(v.salesMixPct, 1)}%`);
   }
   parts.push(`廠價(未稅) ${fmt(col.exFactoryPrice)}　收入 ${fmt(col.revenue)}`);
-  if (col.amounts.K !== undefined && col.amounts.K !== null) parts.push(`營業淨利 ${fmt(col.amounts.K)}（對廠價 ${pctText_(col.amounts.K, col.exFactoryPrice)}）`);
+  const k = col.amounts[profitCodeOf_(col)];
+  if (k !== undefined && k !== null) parts.push(`營業淨利 ${fmt(k)}（對廠價 ${pctText_(k, col.exFactoryPrice)}）`);
   if (volumeBasis !== 'unit') {
     parts.push(`表上金額 = ${basisFormula_(col)}`);
     const warn = weightedTotalCaveat_(col);

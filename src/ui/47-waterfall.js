@@ -217,7 +217,7 @@ function wfTrim_(deltas) {
 function wfBridgeSteps_(cmp) {
   const [cf, ct] = cmp.columns;
   const lines = cmp.lines;
-  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : 'K';
+  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : profitCodeOf_(cmp.columns[0]);
   const endLine = lines.find(l => l.LineCode === end) || { LineName: end };
   const items = wfItems_(lines, end, wfPrefs.level).filter(it => !it.isResult);
   const ff = wfFactor_(cf, wfPrefs.basis), ft = wfFactor_(ct, wfPrefs.basis);
@@ -246,7 +246,7 @@ function wfBridgeSteps_(cmp) {
 function wfStructureSteps_(cmp) {
   const col = cmp.columns[0];
   const lines = cmp.lines;
-  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : 'K';
+  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : profitCodeOf_(cmp.columns[0]);
   const f = wfFactor_(col, wfPrefs.basis);
   const items = wfItems_(lines, end, wfPrefs.level);
   const steps = [];
@@ -272,7 +272,7 @@ function wfStructureSteps_(cmp) {
 
 function wfActionSteps_(cmp, actions) {
   const [cf, ct] = cmp.columns;
-  const mFrom = Number(cf.amounts.K) || 0, mTo = Number(ct.amounts.K) || 0;
+  const mFrom = Number(cf.amounts[profitCodeOf_(cf)]) || 0, mTo = Number(ct.amounts[profitCodeOf_(ct)]) || 0;
   const nameOf = code => { const l = cmp.lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : ''; };
   const deltas = actions.filter(a => String(a.Title || '').trim() && num(a.Effect)).map(a => ({
     label: a.Title, value: num(a.Effect), kind: 'delta',
@@ -410,7 +410,7 @@ function runWaterfall_() {
       })).getActions(p.to.scenarioId);
       return;
     }
-    const endLine = cmp.lines.find(l => l.LineCode === p.end) || cmp.lines.find(l => l.LineCode === 'K') || {};
+    const endLine = cmp.lines.find(l => l.LineCode === p.end) || cmp.lines.find(l => l.LineCode === profitCodeOf_(cmp.columns[0])) || {};
     const basis = wfBasisLabel_(p.basis);
     if (p.mode === 'bridge') {
       wfLast = { steps: wfBridgeSteps_(cmp), title: `${shortLineName(endLine.LineName || '')}差異：${colName(cmp.columns[0])} → ${colName(cmp.columns[1])}（${basis}）` };

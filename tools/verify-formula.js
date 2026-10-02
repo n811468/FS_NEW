@@ -390,6 +390,35 @@ check('所有科目、參數都可以刪除/改名：預設小計(K)可刪，預
   gs.deleteScenario(zs.ScenarioID);
 });
 
+check('另建營業淨利再刪掉 K：儀表板、GATE 報告、目標反推、快照改看新的淨利科目，數字不變', () => {
+  reset();
+  gs.saveVehicleType({ VehicleTypeID: 'DQ' });
+  gs.saveVehicle({ VehicleID: 'Q1', VehicleTypeID: 'DQ', VehicleCode: 'Q車' });
+  const qs = gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE F', ScenarioName: '淨利替換', ScenarioType: '現況', VehicleTypeID: 'DQ' }, '', []);
+  gs.saveSalesMixGrid(qs.ScenarioID, 'DQ', [{ RowID: '', VehicleID: 'Q1', SalesMixPct: 100, MonthlyVolume: 50, LifeCycleYears: 5, ListPriceTaxIncl: 800000 }]);
+  const before = gs.calculateComparison([{ ScenarioID: qs.ScenarioID, VehicleID: '' }]).columns[0];
+  assert(before.profitCode === 'K', '還有 K 時營業淨利就是 K：' + before.profitCode);
+  const bev0 = gs.getGateReport('', qs.ScenarioID, '').target.breakEvenVolume;
+  const y = gs.saveChartLine('DQ', { LineCode: '', LineName: '營業淨利Y', ParentLine: '', CalcType: 'FORMULA', Formula: 'I - J' }).line.LineCode;
+  gs.deletePLLineItem('K', 'DQ');
+  reset();
+  const cmp = gs.calculateComparison([{ ScenarioID: qs.ScenarioID, VehicleID: '' }]);
+  const col = cmp.columns[0];
+  assert(col.profitCode === y, '刪掉 K 後營業淨利應改看 ' + y + '：' + col.profitCode);
+  near(col.amounts[y], before.amounts.K, '新淨利科目的金額跟原本 K 相同');
+  const yl = cmp.lines.find(l => l.LineCode === y);
+  assert(yl && yl.isProfit && yl.isSubtotal, '新淨利科目在損益表上標成淨利/小計');
+  const rpt = gs.getGateReport('', qs.ScenarioID, '');
+  assert(rpt.profitCode === y && rpt.lines.find(l => l.LineCode === y).isProfit, 'GATE 報告的營業淨利科目');
+  near(rpt.target.breakEvenVolume, bev0, '損益兩平月銷量不變', 0.5);
+  assert(gs.getWhatIfOptions(qs.ScenarioID).profitCode === y, '目標反推的預設指標');
+  near(gs.whatIfMetric_(qs.ScenarioID, { code: 'K', basis: 'unit' }), before.amounts.K, '存下來的指標還是 K 也看新的淨利科目');
+  assert(gs.getChartEditor('DQ', qs.ScenarioID).profitCode === y, '科目編輯器的營業淨利');
+  assert(!gs.getChartEditor('DQ', qs.ScenarioID).problems.some(p => p.code === y), '新淨利科目本身不該被提醒「沒有算進營業淨利」');
+  gs.createSnapshot(qs.ScenarioID, '刪 K 後', '');
+  near(gs.getSnapshots('DQ')[0].K, before.amounts.K, '快照清單的營業淨利');
+});
+
 check('預設公式下 Gate F 數字不變(回歸)', () => {
   reset();
   const all = gs.calculatePLAllVehicles(sid);

@@ -419,12 +419,18 @@ function calculateComparison(selections) {
       amounts: amounts,
       revenue: amounts.A || 0,
       exFactoryPrice: amounts.P8 || 0,
-      checks: subtotalChecks_(amounts, lineDefs)
+      checks: subtotalChecks_(amounts, lineDefs),
+      profitCode: profitLineCode_(lineDefs)
     };
   });
 
   var allDefs = unionLineDefs_(columns.map(function (c) { return c.snapshotLines || defsOf(c.vehicleTypeId); }));
-  columns.forEach(function (c) { delete c.snapshotLines; });
+  columns.forEach(function (c) {
+    if (c.snapshotLines) c.profitCode = profitLineCode_(c.snapshotLines);
+    delete c.snapshotLines;
+  });
+  var profitCodes = {};
+  columns.forEach(function (c) { if (c.profitCode) profitCodes[c.profitCode] = true; });
   var depth = lineDepths_(allDefs);
   // 只列出至少有一個比較欄位真的算出數字的科目(不同車型科目不同時，表格才不會塞滿空列)
   var usedLines = allDefs.filter(function (def) {
@@ -440,12 +446,27 @@ function calculateComparison(selections) {
       Formula: def.CalcType === CALC_TYPES.FORMULA ? def.Formula : '',
       AutoSource: resultAutoSource_(def),
       Depth: depth[def.LineCode] || 0,
-      isSubtotal: PROTECTED_LINE_CODES.indexOf(def.LineCode) !== -1 || isGroupLine_(def, allDefs),
+      isSubtotal: PROTECTED_LINE_CODES.indexOf(def.LineCode) !== -1 || !!profitCodes[def.LineCode] || isGroupLine_(def, allDefs),
+      isProfit: !!profitCodes[def.LineCode],
       isPriceStructure: String(def.Category || '') === '售價結構'
     };
   });
 
   return { columns: columns, lines: usedLines, subtotalCodes: PROTECTED_LINE_CODES };
+}
+
+/**
+ * 哪一個科目是「營業淨利」：預設是 K。K 被刪掉時(例如另外新增一個淨利科目、再把原本的刪掉)，
+ * 改用損益表最後一行不計入任何小計、也不是售價結構的科目，也就是損益表最底下的總計。
+ * 儀表板重點指標、GATE 報告、損益兩平、目標反推的預設指標都看這裡，不寫死 K。
+ */
+function profitLineCode_(defs) {
+  defs = defs || [];
+  if (defs.some(function (d) { return d.LineCode === 'K'; })) return 'K';
+  var top = displayOrderDefs_(defs.slice()).filter(function (d) {
+    return !d.ParentLine && String(d.Category || '') !== '售價結構';
+  });
+  return top.length ? top[top.length - 1].LineCode : '';
 }
 
 /** 科目的縮排層級(父科目鏈長度) */

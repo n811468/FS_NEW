@@ -114,6 +114,8 @@ function rAmt_(v) { return v === undefined || v === null ? '' : fmt(Number(v) / 
 function rSigned_(v) { return v === undefined || v === null ? '' : signed_(Number(v) / reportUnit, reportUnit === 1000 ? 1 : 0); }
 function rUnit_() { return reportUnit === 1000 ? '千元/台' : '元/台'; }
 function rPct_(v, base) { return base ? (Number(v) / base * 100).toFixed(1) + '%' : ''; }
+/** 營業淨利科目(預設 K；K 被刪掉時後端指定損益表最後一行總計) */
+function rK_() { return profitCodeOf_(reportData); }
 function reportLineName_(code) { const l = reportData.lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : code; }
 function reportCodeNameMap_() { const m = {}; reportData.lines.forEach(l => { m[l.LineCode] = shortLineName(l.LineName); }); return m; }
 function noteFor_(block, code) {
@@ -191,7 +193,7 @@ function drawReport_() {
 
 function reportSummaryHtml_() {
   const R = reportData, T = R.target, B = R.base;
-  const tK = T.weighted.K || 0, bK = B ? (B.weighted.K || 0) : null;
+  const tK = T.weighted[rK_()] || 0, bK = B ? (B.weighted[rK_()] || 0) : null;
   const tRev = T.weighted.P8 || T.weighted.A || 0, bRev = B ? (B.weighted.P8 || B.weighted.A || 0) : 0;
   const tVol = T.volume.monthlyVolume || 0;
   const gap = B ? tK - bK : null;
@@ -201,7 +203,7 @@ function reportSummaryHtml_() {
   reportActions.forEach(a => { byStatus[a.Status] = (byStatus[a.Status] || 0) + num(a.Effect); });
   const statusColors = { '已結案': '#6a3dbd', '已確認': '#1c8a59', '進行中': '#3157d5', '規劃中': '#a3acc0' };
   const hero = (cls, label, numV, sub) => `<div class="hero ${cls}"><div class="hero-label">${label}</div><div class="hero-num${numV < 0 ? ' negative' : ''}">${rAmt_(numV)}</div><div class="hero-sub">${sub}</div></div>`;
-  const keyCodes = ['A', 'B', 'C', 'E', 'G', 'I', 'K'].filter(c => T.weighted[c] !== undefined);
+  const keyCodes = ['A', 'B', 'C', 'E', 'G', 'I'].concat([rK_()]).filter((c, i, a) => a.indexOf(c) === i && T.weighted[c] !== undefined);
   return `
     <div class="kpi-hero">
       ${B ? hero('base', '現況 營業淨利/台', bK, `淨利率 ${rPct_(bK, bRev)}・月 ${fmt((B.volume.monthlyVolume || 0))} 台・月淨利 ${fmt(bK * (B.volume.monthlyVolume || 0) / 10000, 0)} 萬`) : ''}
@@ -222,7 +224,7 @@ function reportSummaryHtml_() {
         const line = R.lines.find(l => l.LineCode === c) || { LineCode: c };
         const d = B ? (T.weighted[c] || 0) - (B.weighted[c] || 0) : 0;
         const good = (c === 'B' ? -d : d) > 0.5, bad = (c === 'B' ? -d : d) < -0.5;
-        return `<tr class="${c === 'K' ? 'key' : 'subtotal'}"><td class="name">${esc(reportLineName_(c))}</td>
+        return `<tr class="${c === rK_() ? 'key' : 'subtotal'}"><td class="name">${esc(reportLineName_(c))}</td>
           ${B ? `<td>${rAmt_(B.weighted[c])}</td><td class="pct">${rPct_(B.weighted[c], bRev)}</td>` : ''}
           <td>${rAmt_(T.weighted[c])}</td><td class="pct">${rPct_(T.weighted[c], tRev)}</td>
           ${B ? `<td class="${good ? 'gap-good' : bad ? 'gap-bad' : ''}">${rSigned_(d)}</td>` : ''}
@@ -242,7 +244,7 @@ function reportBridgeHtml_() {
     const d = ((T.weighted[l.LineCode] || 0) - (B.weighted[l.LineCode] || 0)) * sign;
     return Math.abs(d) >= 0.5 ? { code: l.LineCode, label: shortLineName(l.LineName), value: d } : null;
   }).filter(x => x).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
-  const start = B.weighted.K || 0, end = T.weighted.K || 0;
+  const start = B.weighted[rK_()] || 0, end = T.weighted[rK_()] || 0;
   const top = contribs.slice(0, 10);
   const rest = contribs.slice(10).reduce((s, c) => s + c.value, 0);
   const explained = top.reduce((s, c) => s + c.value, 0) + rest;
@@ -317,7 +319,7 @@ function reportCompareHtml_() {
       const eff = d * sign;
       const cls = !sign || Math.abs(eff) < 0.5 ? '' : eff > 0 ? 'gap-good' : 'gap-bad';
       const acts = actionsByCode[l.LineCode] || [];
-      return head + `<tr class="${l.LineCode === 'K' ? 'key' : l.isSubtotal ? 'subtotal' : ''}">
+      return head + `<tr class="${l.LineCode === rK_() ? 'key' : l.isSubtotal ? 'subtotal' : ''}">
         <td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
         <td>${rAmt_(bv)}</td><td class="pct">${l.isPriceStructure ? '' : rPct_(bv, bRev)}</td>
         <td>${rAmt_(tv)}</td><td class="pct">${l.isPriceStructure ? '' : rPct_(tv, tRev)}</td>
@@ -337,7 +339,7 @@ function reportFsHtml_(block, tableId) {
     <thead><tr><th style="text-align:left;">車型</th>${vehicles.map(v => `<th>${esc(v.VehicleCode)}</th>`).join('')}<th>${esc(R.vehicleTypeId)} 加權平均</th><th>%</th><th style="text-align:left;">說明</th></tr>
       <tr class="sub"><th style="text-align:left;">銷售構成比</th>${vehicles.map(v => `<th>${fmt(v.salesMixPct, 1)}%</th>`).join('')}<th>100%</th><th></th><th></th></tr>
       <tr class="sub"><th style="text-align:left;">預估銷售台數(月)</th>${vehicles.map(v => `<th>${fmt(v.monthlyVolume)}</th>`).join('')}<th>${fmt(block.volume.monthlyVolume)}</th><th></th><th style="text-align:left;">L/C ${esc(String(block.volume.lifeCycleYears || ''))} 年，合計 ${fmt(block.volume.units)} 台</th></tr></thead>
-    <tbody>${rows.map(l => `<tr class="${l.LineCode === 'K' ? 'key' : l.isSubtotal ? 'subtotal' : ''}">
+    <tbody>${rows.map(l => `<tr class="${l.LineCode === rK_() ? 'key' : l.isSubtotal ? 'subtotal' : ''}">
       <td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
       ${vehicles.map(v => { const x = v.amounts[l.LineCode]; return `<td class="${x < 0 ? 'negative' : ''}">${x === undefined ? '' : rAmt_(x)}</td>`; }).join('')}
       <td class="${block.weighted[l.LineCode] < 0 ? 'negative' : ''}" style="font-weight:700;">${rAmt_(block.weighted[l.LineCode])}</td>
@@ -355,7 +357,7 @@ function reportActionsHtml_() {
 }
 function reportActionsTableHtml_() {
   const R = reportData, T = R.target, B = R.base;
-  const gap = B ? (T.weighted.K || 0) - (B.weighted.K || 0) : null;
+  const gap = B ? (T.weighted[rK_()] || 0) - (B.weighted[rK_()] || 0) : null;
   const vol = T.volume.monthlyVolume || 0;
   const lineOpts = R.lines.filter(l => !l.isPriceStructure && !l.isSubtotal);
   const total = reportActions.reduce((s, a) => s + num(a.Effect), 0);
@@ -389,7 +391,7 @@ function reportActionsTableHtml_() {
 function reportActionWfSteps_() {
   const R = reportData, T = R.target, B = R.base;
   if (!B) return [];
-  const start = B.weighted.K || 0, end = T.weighted.K || 0;
+  const start = B.weighted[rK_()] || 0, end = T.weighted[rK_()] || 0;
   let acts = reportActions.filter(a => String(a.Title || '').trim() && num(a.Effect))
     .map(a => ({ label: a.Title, value: num(a.Effect), kind: 'delta', tip: `${a.Title}\n${[a.LineCode ? reportLineName_(a.LineCode) : '', a.Owner, a.Status].filter(x => x).join('｜')}\n${signed_(num(a.Effect))} 元/台` }));
   if (acts.length > 10) {
@@ -398,10 +400,10 @@ function reportActionWfSteps_() {
     acts = acts.filter(a => drop.indexOf(a) === -1);
     acts.push({ label: `其他 ${drop.length} 項作法`, value: drop.reduce((s, a) => s + a.value, 0), kind: 'delta' });
   }
-  const steps = [{ label: `現況 ${reportLineName_('K')}`, value: start, kind: 'total' }].concat(acts);
+  const steps = [{ label: `現況 ${reportLineName_(rK_())}`, value: start, kind: 'total' }].concat(acts);
   const remain = (end - start) - acts.reduce((s, a) => s + a.value, 0);
   if (Math.abs(remain) >= 0.5) steps.push({ label: remain > 0 ? '其他改善（沒有寫成作法）' : '作法高估或其他惡化', value: remain, kind: 'delta', remain: true });
-  steps.push({ label: `目標 ${reportLineName_('K')}`, value: end, kind: 'total' });
+  steps.push({ label: `目標 ${reportLineName_(rK_())}`, value: end, kind: 'total' });
   return steps;
 }
 function reportActionWaterfallHtml_() {
@@ -433,7 +435,7 @@ function updateReportActionTotals_() {
   const t = document.getElementById('rpt-act-total'); if (t) t.textContent = fmt(total);
   const tm = document.getElementById('rpt-act-total-m'); if (tm) tm.textContent = fmt(total * vol / 10000, 1);
   if (R.base) {
-    const gap = (R.target.weighted.K || 0) - (R.base.weighted.K || 0);
+    const gap = (R.target.weighted[rK_()] || 0) - (R.base.weighted[rK_()] || 0);
     const r = document.getElementById('rpt-act-remain');
     if (r) { r.textContent = fmt(gap - total); r.className = gap - total > 0.5 ? 'negative' : 'good'; }
   }
@@ -475,10 +477,10 @@ function reportPrevHtml_() {
         const d = (tv || 0) - (pv || 0);
         const sign = l.isSubtotal ? (l.LineCode === 'B' ? -1 : 1) : profitSign_(l);
         const cls = !sign || Math.abs(d) < 0.5 ? '' : d * sign > 0 ? 'gap-good' : 'gap-bad';
-        return `<tr class="${l.LineCode === 'K' ? 'key' : l.isSubtotal ? 'subtotal' : ''}"><td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
+        return `<tr class="${l.LineCode === rK_() ? 'key' : l.isSubtotal ? 'subtotal' : ''}"><td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
           <td>${rAmt_(pv)}</td><td>${rAmt_(tv)}</td><td class="${cls}">${Math.abs(d) < 0.5 ? '' : rSigned_(d)}</td>${noteCellHtml_(T, l.LineCode)}</tr>`;
       }).join('')}
-      <tr class="key"><td class="name">營業淨利(每月)</td><td>${fmt((P.weighted.K || 0) * vol(P) / 10000, 0)} 萬</td><td>${fmt((T.weighted.K || 0) * vol(T) / 10000, 0)} 萬</td><td>${signed_(((T.weighted.K || 0) * vol(T) - (P.weighted.K || 0) * vol(P)) / 10000, 0)} 萬</td><td class="note"></td></tr>
+      <tr class="key"><td class="name">營業淨利(每月)</td><td>${fmt((P.weighted[rK_()] || 0) * vol(P) / 10000, 0)} 萬</td><td>${fmt((T.weighted[rK_()] || 0) * vol(T) / 10000, 0)} 萬</td><td>${signed_(((T.weighted[rK_()] || 0) * vol(T) - (P.weighted[rK_()] || 0) * vol(P)) / 10000, 0)} 萬</td><td class="note"></td></tr>
     </tbody></table></div>`;
 }
 
@@ -502,7 +504,7 @@ function reportDevHtml_() {
 /** 科目對營業淨利的方向(對帳用)：收入/毛利/淨利 +1；成本與費用(含自訂群組) −1；售價結構 0 */
 function reconSign_(l) {
   if (!l || l.isPriceStructure) return 0;
-  if (['A', 'C', 'E', 'G', 'I', 'K'].indexOf(l.LineCode) !== -1) return 1;
+  if (l.isProfit || ['A', 'C', 'E', 'G', 'I', 'K'].indexOf(l.LineCode) !== -1) return 1;
   let cur = l, guard = 0;
   while (cur && cur.ParentLine && guard++ < 20) {
     if (cur.ParentLine === 'A') return 1;

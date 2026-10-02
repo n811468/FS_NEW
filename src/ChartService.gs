@@ -725,13 +725,14 @@ function chartProblems_(defs, vehicleTypeId) {
   });
 
   // 沒有被算進營業淨利的科目
-  if (byCode.K) {
+  var profitCode = profitLineCode_(defs);
+  if (profitCode) {
     var reach = {};
     (function mark(code) {
       if (reach[code]) return;
       reach[code] = true;
       (deps[code] || []).forEach(mark);
-    })('K');
+    })(profitCode);
     defs.forEach(function (d) {
       if (reach[d.LineCode] || d.Category === '售價結構') return;
       if (d.ParentLine && !reach[d.ParentLine]) return;   // 父科目已經會被提醒，不重複
@@ -770,6 +771,7 @@ function getChartEditor(vehicleTypeId, scenarioId) {
       return out;
     }),
     vehicles: vehicles,
+    profitCode: profitLineCode_(defs),
     variables: SYSTEM_VARIABLES,
     params: getParamDefs(),
     calcTypeLabels: CALC_TYPE_LABELS,

@@ -696,6 +696,7 @@ function chartPreviewHtml_() {
   const vehicles = (chartEditor.vehicles || []).filter(v => (cur && cur.values[v.VehicleID]) || (next && next.values[v.VehicleID]));
   if (!vehicles.length) return '<p class="muted">這個情境還沒有銷售構成資料，無法試算。</p>';
   const code = chartDraft.LineCode;
+  const kCode = profitCodeOf_(chartEditor);
   const map = chartCodeNameMap_();
   const row = (label, a, b, k0, k1, cls) => {
     const changed = b !== undefined && a !== undefined && Math.abs(a - b) > 0.5;
@@ -715,10 +716,10 @@ function chartPreviewHtml_() {
       <thead><tr><th>車系</th><th>目前</th><th>修改後</th><th>營業淨利變化</th></tr></thead>
       <tbody>${vehicles.map(v => {
         const a = cur && cur.values[v.VehicleID] || {}, b = next && next.values[v.VehicleID] || null;
-        return row(v.VehicleCode || v.VehicleID, a[code], b ? b[code] : undefined, a.K, b ? b.K : undefined);
+        return row(v.VehicleCode || v.VehicleID, a[code], b ? b[code] : undefined, a[kCode], b ? b[kCode] : undefined);
       }).join('')}
       ${row('加權平均', chartWeightedValue_(code, cur), next ? chartWeightedValue_(code, next) : undefined,
-        chartWeightedValue_('K', cur), next ? chartWeightedValue_('K', next) : undefined, 'subtotal')}</tbody>
+        chartWeightedValue_(kCode, cur), next ? chartWeightedValue_(kCode, next) : undefined, 'subtotal')}</tbody>
     </table>
     <details class="trace-box"><summary class="link-btn">看計算過程</summary>${traces}</details>`;
 }
@@ -752,8 +753,15 @@ function cancelChartEdit() {
 }
 function deleteChartLine() {
   const d = chartDraft;
+  let profitNote = '';
+  if (d.LineCode === profitCodeOf_(chartEditor)) {
+    // 刪掉營業淨利：儀表板重點指標、GATE 報告、目標反推會改看損益表最後一行總計(同後端 profitLineCode_)
+    const rest = chartEditor.lines.filter(l => l.LineCode !== d.LineCode && !l.ParentLine && l.Category !== '售價結構');
+    const next = rest[rest.length - 1];
+    profitNote = `<div class="callout warn" style="margin-top:10px;"><div>這是目前的營業淨利。刪除後，儀表板重點指標、GATE 報告、目標反推會改用損益表最後一行${next ? `<b>「${esc(next.LineName)}」</b>` : '（目前沒有其他總計科目）'}當營業淨利。只是想換名稱或公式的話，直接改這個科目就好，不必刪除。</div></div>`;
+  }
   confirmModal('刪除科目「' + d.LineName + '」？',
-    `只影響車型 <b>${esc(currentVehicleTypeId)}</b>。${d.usage ? `這個科目在 ${esc(currentVehicleTypeId)} 的情境裡有 <b>${d.usage}</b> 筆輸入金額，會一起清掉。` : ''}被其他公式引用、或底下還有子科目時會被擋下來。`,
+    `只影響車型 <b>${esc(currentVehicleTypeId)}</b>。${d.usage ? `這個科目在 ${esc(currentVehicleTypeId)} 的情境裡有 <b>${d.usage}</b> 筆輸入金額，會一起清掉。` : ''}被其他公式引用、或底下還有子科目時會被擋下來。${profitNote}`,
     '刪除', true).then(ok => {
     if (!ok) return;
     google.script.run
