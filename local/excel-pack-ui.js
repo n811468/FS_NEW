@@ -82,7 +82,7 @@
     S.notes = sug.notes;
     S.restored = false;
     S.signature = E.signature(S.rows);
-    S.useFormulas = true; S.formulaOff = {}; S.paramNames = {};
+    S.useFormulas = true; S.formulaOff = {}; S.paramNames = {}; S.useAmort = true; S.amortOff = {}; S.backcalc = {};
     var saved = storeGet(MAP_KEY + S.signature);
     if (saved && saved.roles) {
       S.rows.forEach(function (r) { if (saved.roles[r.row]) S.roles[r.row] = saved.roles[r.row]; });
@@ -90,6 +90,9 @@
       if (saved.useFormulas === false) S.useFormulas = false;
       S.formulaOff = saved.formulaOff || {};
       S.paramNames = saved.paramNames || {};
+      if (saved.useAmort === false) S.useAmort = false;
+      S.amortOff = saved.amortOff || {};
+      S.backcalc = saved.backcalc || {};
       S.restored = true;
     }
     S.scenarios = {};
@@ -107,7 +110,8 @@
     var plan = {
       typeId: S.typeId.trim(), typeNotes: S.typeNotes, vehicles: layout.vehicles, weightedCol: S.weightedCol,
       noteCol: S.noteCol, labelCol: S.labelCol, firstRow: S.firstRow, rows: S.rows, roles: S.roles,
-      useFormulas: S.useFormulas !== false, formulaOff: S.formulaOff || {}, paramNames: S.paramNames || {}
+      useFormulas: S.useFormulas !== false, formulaOff: S.formulaOff || {}, paramNames: S.paramNames || {},
+      workbook: S.wb, useAmort: S.useAmort !== false, amortOff: S.amortOff || {}, backcalc: S.backcalc || {}
     };
     plan.scenarios = includedSheets().map(function (i) { return scenarioOf(i, plan); });
     return plan;
@@ -243,11 +247,15 @@
     var plan = planOf();
     var tr = safeTranslate(plan);
     var lastFallback = S.result && S.result.plan ? (S.result.plan.fallback || {}) : {};
-    var counts = { formula: 0, input: 0 };
-    Object.keys(tr.rows).forEach(function (k) { counts[tr.rows[k].mode === 'input' || lastFallback[k] ? 'input' : 'formula']++; });
+    var counts = { formula: 0, amort: 0, input: 0 };
+    Object.keys(tr.rows).forEach(function (k) {
+      var m = tr.rows[k].mode;
+      counts[lastFallback[k] || m === 'input' ? 'input' : (m === 'amort' || m === 'backcalc' ? 'amort' : 'formula')]++;
+    });
     html += '<div class="xp-row" style="margin:6px 0 10px"><label><input type="checkbox" id="xp-use-formulas"' + (S.useFormulas !== false ? ' checked' : '') +
-      '> 把 Excel 公式轉成系統公式</label><span class="xp-sub" style="margin:0">' +
-      (S.useFormulas !== false ? '明細 ' + (counts.formula + counts.input) + ' 列：' + counts.formula + ' 列轉成公式、' + counts.input + ' 列帶入數字(滑鼠移到原因上看完整說明)' : '關閉時所有明細都帶入 Excel 算好的數字') + '</span></div>';
+      '> 把 Excel 公式轉成系統公式</label><label><input type="checkbox" id="xp-use-amort"' + (S.useAmort !== false ? ' checked' : '') +
+      '> 開發攤提追到開發總投明細</label><span class="xp-sub" style="margin:0">明細 ' + (counts.formula + counts.amort + counts.input) + ' 列：' +
+      counts.formula + ' 列公式、' + counts.amort + ' 列開發攤提、' + counts.input + ' 列帶入數字</span></div>';
     html += '<div class="xp-scroll" style="max-height:70vh"><table class="xp-table"><thead><tr><th>列</th><th>Excel 科目</th>' +
       vehicles.map(function (v) { return '<th>' + esc(v.name) + '</th>'; }).join('') +
       '<th>Excel 公式</th><th>在系統裡是</th><th>掛在哪個小計底下</th><th>系統怎麼算</th></tr></thead><tbody>';
@@ -267,7 +275,7 @@
   }
 
   function safeTranslate(plan) {
-    try { return F.translatePlan(plan); } catch (e) { return { rows: {}, params: {} }; }
+    try { return E.translateAll(plan); } catch (e) { return { rows: {}, params: {}, units: [] }; }
   }
 
   /** Excel 公式欄：有公式就顯示公式；沒有公式但由數字推斷出是小計，就顯示推斷的算式 */
@@ -287,6 +295,7 @@
     if (/^check:/.test(ro.role)) return '<span class="xp-tag">售價結構</span> 系統公式';
     var t = tr.rows[r.row];
     if (!t) return '';
+    if ((t.mode === 'amort' || t.mode === 'backcalc') && !lastFallback[r.row]) return amortCell(r, t, plan);
     var why = lastFallback[r.row] || t.reason;
     var toggle = '';
     var canToggle = S.useFormulas !== false && (t.mode !== 'input' || S.formulaOff[r.row]) && !lastFallback[r.row];
@@ -301,15 +310,40 @@
       return toggle + '<span class="xp-tag ok">公式</span> ' + body;
     }
     var note = t.note ? '<span class="xp-why">' + esc(t.note) + '</span>' : '';
+    var amortOn = t.amortReason && /手動/.test(t.amortReason)
+      ? '<div class="xp-per"><label class="xp-mini"><input type="checkbox" data-aon="' + r.row + '">用開發攤提</label></div>' : '';
+    var amortWhy = t.amortReason && !/手動/.test(t.amortReason) ? '<div class="xp-per" title="' + esc(t.amortReason) + '">' + esc(t.amortReason) + '</div>' : '';
+    // 名稱像開發攤提、但 Excel 直接打單台金額：可以用攤提台數回推投資總額，讓台數變動時攤提跟著動
+    var back = t.looksDev && t.mode === 'input' && !lastFallback[r.row] && S.useAmort !== false
+      ? '<div class="xp-per"><label class="xp-mini" title="開發總投 = 單台金額 × 攤提台數(第 4 步)，之後改台數、做損益兩平時攤提會跟著變"><input type="checkbox" data-bcalc="' + r.row + '"' +
+        (S.backcalc[r.row] ? ' checked' : '') + '>當成開發攤提(用攤提台數回推總額)</label></div>' : '';
     return toggle + '<span class="xp-tag' + (why ? ' warn' : '') + '">數字</span> ' +
-      (why ? '<span class="xp-why" title="' + esc(why) + '">' + esc(why) + '</span>' : note);
+      (why ? '<span class="xp-why" title="' + esc(why) + '">' + esc(why) + '</span>' : note) + amortWhy + amortOn + back;
+  }
+
+  /** 開發攤提：來源分頁、幾筆投資、÷ 攤提台數；滑鼠移上去看部門明細 */
+  function amortCell(r, t, plan) {
+    if (t.mode === 'backcalc') {
+      return '<label class="xp-mini"><input type="checkbox" data-bcalc="' + r.row + '" checked>當成開發攤提</label> <span class="xp-tag ok">開發攤提</span> ' +
+        '<span class="xp-why">單台金額 × 攤提台數回推投資總額(' + esc(t.category) + ')</span>';
+    }
+    var a = t.amort[0];
+    var total = a.investments.reduce(function (sum, x) { return sum + x.amount; }, 0);
+    var detail = a.investments.map(function (x) { return x.dept + (x.asset ? '／' + x.asset : '') + '：' + fmt(x.amount) + (x.coef !== 1 ? '(× ' + x.coef + ')' : ''); }).join('\n');
+    var sources = {};
+    t.amort.forEach(function (x) { sources[x.source] = true; });
+    var cut = t.amort.some(function (x) { return x.investments.some(function (i) { return i.reduction; }); });
+    return '<label class="xp-mini"><input type="checkbox" data-aon="' + r.row + '" checked>用開發攤提</label> <span class="xp-tag ok">開發攤提</span> ' +
+      '<span title="' + esc(detail) + '">「' + esc(a.source) + '」' + a.investments.length + ' 筆投資 ' + fmt(total) + ' ÷ ' + fmt(a.units.value) + ' 台(' + esc(t.category) + ')</span>' +
+      (Object.keys(sources).length > 1 ? '<div class="xp-per">各情境來源：' + esc(Object.keys(sources).join('、')) + '</div>' : '') +
+      (cut ? '<div class="xp-per">含「原始 × (1 - 低減率)」：目標情境會帶原始金額與挑戰低減%</div>' : '');
   }
 
   function renderParams(plan, tr) {
     var used = {};
     Object.keys(tr.rows).forEach(function (k) {
       var t = tr.rows[k];
-      if (t.mode === 'input') return;
+      if (t.mode === 'input' || t.mode === 'amort' || t.mode === 'backcalc') return;
       [t.formula].concat(Object.keys(t.vehicleFormulas).map(function (x) { return t.vehicleFormulas[x]; }))
         .forEach(function (f) { String(f || '').replace(/⟦p:([^⟧]+)⟧/g, function (m, key) { used[key] = true; return m; }); });
     });
@@ -342,7 +376,9 @@
       '<label class="xp-field" style="flex:1">車型備註<input id="xp-type-notes" value="' + esc(S.typeNotes) + '"></label></div>' +
       '<p class="xp-sub" style="margin-top:12px">營業稅率、銷售佣金率是從 Excel 的營業稅、銷售佣金列反推的(%)；構成比用來算加權平均。</p>' +
       '<div class="xp-scroll"><table class="xp-table"><thead><tr><th>分頁</th><th>情境名稱</th><th>GATE</th><th>性質</th><th>營業稅率%</th><th>銷售佣金率%</th>' +
-      plan.vehicles.map(function (v) { return '<th>構成比% ' + esc(v.name) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      plan.vehicles.map(function (v) { return '<th>構成比% ' + esc(v.name) + '</th>'; }).join('') + '<th>開發攤提台數</th></tr></thead><tbody>';
+    var trS = safeTranslate(plan);
+    var needUnits = Object.keys(trS.rows).some(function (k) { return trS.rows[k].mode === 'backcalc'; });
     includedSheets().forEach(function (i, n) {
       var sc = plan.scenarios[n];
       html += '<tr><td>' + esc(S.wb.sheets[i].name) + '</td>' +
@@ -352,6 +388,9 @@
         '<td><input type="number" step="any" data-sc="' + n + '" data-f="rate:營業稅率" value="' + sc.rates.營業稅率 + '"></td>' +
         '<td><input type="number" step="any" data-sc="' + n + '" data-f="rate:銷售佣金率" value="' + sc.rates.銷售佣金率 + '"></td>' +
         plan.vehicles.map(function (v, vi) { return '<td><input type="number" step="any" data-sc="' + n + '" data-f="mix:' + vi + '" value="' + sc.mix[vi] + '"></td>'; }).join('') +
+        '<td>' + (trS.units[n]
+          ? fmt(trS.units[n].value) + ' 台' + (trS.units[n].months ? '(' + fmt(trS.units[n].months) + ' 個月)' : '') + ' <span class="xp-why">「' + esc(trS.units[n].source) + '」</span>'
+          : needUnits ? '<input type="number" step="any" data-sc="' + n + '" data-f="amortUnits" value="' + esc(sc.amortUnits || '') + '" placeholder="必填">' : '') + '</td>' +
         '</tr>';
     });
     $('#xp-sc').innerHTML = html + '</tbody></table></div>' + renderParams(plan, safeTranslate(plan));
@@ -373,9 +412,11 @@
     var plan = R.plan;
     var fb = plan.fallback || {};
     var fbRows = Object.keys(fb).filter(function (k) { return !(plan.formulaOff || {})[k]; });
-    var nFormula = Object.keys(R.built.formulaRows).length;
-    if (plan.useFormulas !== false) {
-      html += '<div class="xp-note">' + nFormula + ' 列明細轉成系統公式' +
+    var modes = R.built.formulaRows;
+    var nFormula = Object.keys(modes).filter(function (k) { return !/amort|backcalc/.test(modes[k]); }).length;
+    var nAmort = Object.keys(modes).length - nFormula;
+    if (plan.useFormulas !== false || plan.useAmort !== false) {
+      html += '<div class="xp-note">' + nFormula + ' 列明細轉成系統公式、' + nAmort + ' 列改成開發攤提(開發總投頁有部門明細，改台數會連動)' +
         (fbRows.length ? '；以下 ' + fbRows.length + ' 列在建立或驗算時改為帶入數字：<ul>' + fbRows.map(function (k) {
           var row = plan.rows.filter(function (r) { return String(r.row) === String(k); })[0];
           return '<li>第 ' + k + ' 列「' + esc(row ? row.label : '') + '」：' + esc(fb[k]) + '</li>';
@@ -415,6 +456,7 @@
       S.result = { plan: res.plan, verify: res.verify, built: res.built, pack: pack };
       storeSet(MAP_KEY + S.signature, {
         roles: S.roles, typeId: S.typeId, useFormulas: S.useFormulas, formulaOff: S.formulaOff, paramNames: S.paramNames,
+        useAmort: S.useAmort, amortOff: S.amortOff, backcalc: S.backcalc,
         savedAt: new Date().toISOString()
       });
     } catch (e) {
@@ -466,6 +508,9 @@
     }
     if (t.dataset.parent !== undefined) { S.roles[t.dataset.parent].parent = t.value; changed('rows'); return; }
     if (t.id === 'xp-use-formulas') { S.useFormulas = t.checked; changed('rows'); return; }
+    if (t.id === 'xp-use-amort') { S.useAmort = t.checked; changed('rows'); return; }
+    if (t.dataset.aon !== undefined) { if (t.checked) delete S.amortOff[t.dataset.aon]; else S.amortOff[t.dataset.aon] = true; changed('rows'); return; }
+    if (t.dataset.bcalc !== undefined) { if (t.checked) S.backcalc[t.dataset.bcalc] = true; else delete S.backcalc[t.dataset.bcalc]; changed('rows'); return; }
     if (t.dataset.fon !== undefined) { if (t.checked) delete S.formulaOff[t.dataset.fon]; else S.formulaOff[t.dataset.fon] = true; changed('rows'); return; }
     if (t.dataset.pname !== undefined) { if (t.value.trim()) S.paramNames[t.dataset.pname] = t.value.trim(); else delete S.paramNames[t.dataset.pname]; changed('rows'); return; }
     if (t.id === 'xp-type') { S.typeId = t.value.trim(); changed(); return; }
@@ -475,6 +520,7 @@
       var f = t.dataset.f;
       if (f.indexOf('rate:') === 0) sc.rates[f.slice(5)] = Number(t.value);
       else if (f.indexOf('mix:') === 0) sc.mix[Number(f.slice(4))] = Number(t.value);
+      else if (f === 'amortUnits') sc.amortUnits = Number(t.value) || '';
       else sc[f] = t.value;
       changed();
     }

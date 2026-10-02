@@ -138,6 +138,7 @@ function buildExcelPackHtml() {
     read(path.join(LOCAL_DIR, 'host.js')),
     read(path.join(LOCAL_DIR, 'xlsx-reader.js')),
     read(path.join(LOCAL_DIR, 'excel-formula.js')),
+    read(path.join(LOCAL_DIR, 'excel-amort.js')),
     read(path.join(LOCAL_DIR, 'excel-pack.js')),
     read(path.join(LOCAL_DIR, 'excel-pack-ui.js'))
   ].map(inlineScript).join('\n');

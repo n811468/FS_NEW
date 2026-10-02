@@ -237,6 +237,89 @@ function minimalFs() {
   return { sheet: { name: 'XS 簡表', cells }, expected: v };
 }
 
+/**
+ * 開發總投攤提的測試檔：損益表 2 個車系，單台攤提引用「開發」分頁，各種寫法：
+ *   7  模具費       =開發!C11(= C9/$B$16，C9 = SUM(C4:C8))             → 開發攤提(模具)
+ *   8  設備費       =開發!D11(D9 只加到第 7 列，不含治具)               → 開發攤提(設備)，不含治具
+ *   9  CMC開發費    =開發!E13(= E11 - E12，費用總計 - 上汽；E13 那列有標籤「CMC費用」) → 上汽相消
+ *   10 上汽開發費   =開發!E12(= E4/$B$16，E4 = 3000000*$E$1/0.8 含匯率)  → 1 筆投資
+ *   11 治具攤提     =ROUND(開發!D8/開發!$B$16,0)                         → 四捨五入，帶入數字
+ *   12 檢具攤提     直接打 1500                                          → 可選「用攤提台數回推」
+ * 頂規一律 =D 欄(照抄)。攤提台數 B16 = 40000、L/C 月 C16 = 48。
+ * 目標分頁引用「開發低減」：投資寫成「原始 × (1 - $G$1)」(低減 10%)。
+ */
+function devSheet(name, reduced) {
+  const amounts = { 4: [0, 0, 3000000 * 4.65 / 0.8], 5: [300000000 / 0.9, 0, 20000000], 6: [0, 250000000, 8000000], 7: [0, 5000000, 0], 8: [0, 12000000, 0] };
+  const depts = { 4: '上汽開發費', 5: '開發部', 6: '生技部', 7: '品管部', 8: '治具' };
+  const cells = { B3: '部門', C3: '模具', D3: '設備', E3: '費用', F3: '說明', E1: 4.65, D1: '匯率', G1: 0.1, F1: '低減率',
+    B15: 'L/C台數', C15: 'L/C月', B16: 40000, C16: 48, D12: '上汽單台', D13: 'CMC費用', B11: '' };
+  const cut = reduced ? 0.9 : 1;
+  const val = {};
+  const cols = ['C', 'D', 'E'];
+  Object.keys(depts).forEach(r => {
+    cells['B' + r] = depts[r];
+    cols.forEach((c, i) => {
+      const v = amounts[r][i];
+      if (!v) return;
+      const orig = +r === 4 ? { f: '3000000*$E$1/0.8', v } : (+r === 5 && i === 0 ? { f: '300000000/0.9', v } : v);
+      if (reduced && +r !== 4) {
+        // 原始金額放在 I/J/K 欄，低減後的金額 = 原始 × (1 - $G$1)
+        const oc = ['I', 'J', 'K'][i];
+        cells[oc + r] = typeof orig === 'object' ? orig : v;
+        cells[c + r] = { f: `${oc}${r}*(1-$G$1)`, v: v * cut };
+        val[c + r] = v * cut;
+      } else {
+        cells[c + r] = orig;
+        val[c + r] = v;
+      }
+    });
+  });
+  cells.F5 = '開發四門，尾門改K';
+  const sum = (c, a, b) => { let t = 0; for (let r = a; r <= b; r++) t += val[c + r] || 0; return t; };
+  const tot = { C: sum('C', 4, 8), D: sum('D', 4, 7), E: sum('E', 4, 8) };
+  cells.B9 = '總計';
+  cells.C9 = { f: 'SUM(C4:C8)', v: tot.C };
+  cells.D9 = { f: 'SUM(D4:D7)', v: tot.D };
+  cells.E9 = { f: 'SUM(E4:E8)', v: tot.E };
+  const U = 40000;
+  cells.C11 = { f: 'C9/$B$16', v: tot.C / U };
+  cells.D11 = { f: 'D9/$B$16', v: tot.D / U };
+  cells.E11 = { f: 'E9/$B$16', v: tot.E / U };
+  cells.E12 = { f: 'E4/$B$16', v: val.E4 / U };
+  cells.E13 = { f: 'E11-E12', v: tot.E / U - val.E4 / U };
+  delete cells.B11;
+  return { sheet: { name, cells }, perUnit: { mold: tot.C / U, equip: tot.D / U, cmc: tot.E / U - val.E4 / U, saic: val.E4 / U, jig: Math.round(val.D8 / U) } };
+}
+
+function amortFs(name, devName, per) {
+  const cells = { D3: '入門', E3: '頂規', D4: 'TWD', E4: 'TWD' };
+  const labels = { 5: '收入', 6: '材料', 7: '模具費', 8: '設備費', 9: 'CMC開發費', 10: '上汽開發費', 11: '治具攤提', 12: '檢具攤提', 13: '成本合計', 14: '毛利' };
+  Object.keys(labels).forEach(r => { cells['B' + r] = labels[r]; });
+  const v = { 5: [900000, 950000], 6: [500000, 540000], 7: [per.mold, per.mold], 8: [per.equip, per.equip], 9: [per.cmc, per.cmc],
+    10: [per.saic, per.saic], 11: [per.jig, per.jig], 12: [1500, 1500] };
+  v[13] = [0, 1].map(i => [6, 7, 8, 9, 10, 11, 12].reduce((s, r) => s + v[r][i], 0));
+  v[14] = [0, 1].map(i => v[5][i] - v[13][i]);
+  const ref = { 7: 'C11', 8: 'D11', 9: 'E13', 10: 'E12' };
+  [5, 6, 12].forEach(r => { cells['D' + r] = v[r][0]; cells['E' + r] = v[r][1]; });
+  Object.keys(ref).forEach(r => {
+    cells['D' + r] = { f: `${devName}!${ref[r]}`, v: v[r][0] };
+    cells['E' + r] = { f: `D${r}`, v: v[r][1] };
+  });
+  cells.D11 = { f: `ROUND(${devName}!D8/${devName}!$B$16,0)`, v: v[11][0] };
+  cells.E11 = { f: 'D11', v: v[11][1] };
+  ['D', 'E'].forEach((c, i) => {
+    cells[c + 13] = { f: `SUM(${c}6:${c}12)`, v: v[13][i] };
+    cells[c + 14] = { f: `${c}5-${c}13`, v: v[14][i] };
+  });
+  return { sheet: { name, cells }, expected: v };
+}
+
+function amortWorkbook() {
+  const dev = devSheet('開發', false), devCut = devSheet('開發低減', true);
+  const base = amortFs('XA FS', '開發', dev.perUnit), target = amortFs('XA FS 目標', '開發低減', devCut.perUnit);
+  return { bytes: makeXlsx([base.sheet, target.sheet, dev.sheet, devCut.sheet]), expected: [base.expected, target.expected], perUnit: [dev.perUnit, devCut.perUnit] };
+}
+
 function fixtureWorkbook() {
   const a = fullFs('DQ FS_現況');
   const b = fullFs('DQ FS_目標', { lp: 0.95, promo: 3000, variant: true });
@@ -245,4 +328,4 @@ function fixtureWorkbook() {
   return { bytes: makeXlsx([a.sheet, b.sheet, other, flat]), expected: [a.expected, b.expected] };
 }
 
-module.exports = { makeXlsx, fullFs, minimalFs, valuesOnly, fixtureWorkbook, crc32 };
+module.exports = { makeXlsx, fullFs, minimalFs, valuesOnly, fixtureWorkbook, amortWorkbook, crc32 };

@@ -6397,6 +6397,357 @@ function reportMaintenance_(message) {
 </script>
 <script>
 /**
+ * 開發總投攤提的追蹤：把「單台攤提」的 Excel 公式一路追進開發總投分頁，展開成
+ *     Σ(係數 × 部門投資儲存格) ÷ 攤提台數儲存格
+ * 追得到就在系統裡建成「開發總投攤提」科目 + 開發總投明細(部門 × 攤提落點 × 金額) + 情境的攤提基準台數，
+ * 改台數、做損益兩平、目標情境填挑戰低減% 都會跟著連動；追不到就照舊帶入數字並說明原因。
+ *
+ * 會遇到的寫法與對策：
+ *   =開發總投!C22，C22 = C20/$B$27，C20 = SUM(C5:C19)     → 展開到各部門(C5…C19)，÷ B27
+ *   =開發總投!E24，E24 = E22 - E23(費用總計 - 上汽開發費)    → 係數相消：E5 一加一減 = 0，只留其他部門
+ *   頂規 = 入門(G23 = D23)                                   → 兩個車系展開結果相同，共用同一組投資
+ *   各情境引用不同的開發總投分頁(低減 10% 版)                  → 每個情境各自展開、各自一組投資與攤提台數
+ *   ROUND(總額/台數)、各車系來源不同、除以兩種不同的台數、展開出非線性的算式 → 帶入數字(說明原因)
+ *   直接打單台金額(沒有公式可追)                              → 可選「用攤提台數回推總額」(excel-pack.js)
+ *
+ * 「葉節點」(停止展開、當成一筆投資)：有部門名稱的列(左邊有文字、不是合計/總計列)上的數字，
+ * 而且它的公式不是彙總(沒有 SUM、沒有除以儲存格)。例如 E5 = 9000000*$E$2/0.8+…(含匯率換算)整格就是一筆投資。
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./xlsx-reader.js'), require('./excel-formula.js'));
+  else root.FSExcelAmort = factory(root.FSXlsx, root.FSExcelFormula);
+}(typeof self !== 'undefined' ? self : this, function (X, F) {
+  'use strict';
+
+  var TOTAL_LABEL = /合計|總計|小計|總額|total|sum/i;
+  var DEV_LABEL = /模具|設備|治具|檢具|開發費|開發|攤提|專用|試驗|認證|工裝/;
+
+  function str(v) { return v === undefined || v === null ? '' : String(v); }
+  function clean(s) { return str(s).replace(/[\r\n\t]+/g, '').replace(/\s{2,}/g, ' ').trim(); }
+  function num(cell) { return cell && typeof cell.v === 'number' && isFinite(cell.v) ? cell.v : null; }
+  function text(cell) { return cell && typeof cell.v === 'string' ? clean(cell.v) : ''; }
+  function fail(reason) { var e = new Error(reason); e.amort = true; return e; }
+
+  /* ---------------- Excel 算式 → 語法樹 ---------------- */
+  function parse(f) {
+    var tokens = F.tokenize(f), i = 0;
+    var peek = function () { return tokens[i]; };
+    var isOp = function (v) { var t = peek(); return t && t.t === 'op' && t.v === v; };
+    function expr() { return add(); }
+    function add() {
+      var n = mul();
+      while (isOp('+') || isOp('-')) { var op = tokens[i++].v; n = { t: 'bin', op: op, l: n, r: mul() }; }
+      return n;
+    }
+    function mul() {
+      var n = pow();
+      while (isOp('*') || isOp('/')) { var op = tokens[i++].v; n = { t: 'bin', op: op, l: n, r: pow() }; }
+      return n;
+    }
+    function pow() {
+      var n = unary();
+      while (isOp('^')) { i++; n = { t: 'bin', op: '^', l: n, r: unary() }; }
+      return n;
+    }
+    function unary() {
+      if (isOp('-')) { i++; return { t: 'neg', x: unary() }; }
+      if (isOp('+')) { i++; return unary(); }
+      var n = primary();
+      while (isOp('%')) { i++; n = { t: 'bin', op: '*', l: n, r: { t: 'num', v: 0.01 } }; }
+      return n;
+    }
+    function primary() {
+      var t = tokens[i++];
+      if (!t) throw fail('算式不完整');
+      if (t.t === 'num') return { t: 'num', v: Number(t.v) };
+      if (t.t === 'ref') return { t: 'ref', sheet: null, ref: t.ref };
+      if (t.t === 'xref') return { t: 'ref', sheet: t.sheet, ref: t.ref };
+      if (t.t === 'func') {
+        if (!isOp('(')) throw fail('算式不完整');
+        i++;
+        var args = [];
+        if (!isOp(')')) { args.push(expr()); while (isOp(',')) { i++; args.push(expr()); } }
+        if (!isOp(')')) throw fail('括號不成對');
+        i++;
+        return { t: 'func', name: t.v, args: args };
+      }
+      if (t.t === 'op' && t.v === '(') {
+        var e = expr();
+        if (!isOp(')')) throw fail('括號不成對');
+        i++;
+        return e;
+      }
+      throw fail('看不懂的寫法：' + (t.v || t.t));
+    }
+    var root = expr();
+    if (i < tokens.length) throw fail('看不懂的寫法：' + (tokens[i].v || tokens[i].t));
+    return root;
+  }
+
+  /* ---------------- 線性展開 ---------------- */
+  // Lin = { terms: { 'sheet!ref': 係數 }, c: 常數, div: 'sheet!ref' | null }
+  var ZERO = function () { return { terms: {}, c: 0, div: null }; };
+  function isConst(a) { return !a.div && !Object.keys(a.terms).length; }
+  function isZero(a) { return isConst(a) && Math.abs(a.c) < 1e-12; }
+  function scale(a, k) {
+    var out = { terms: {}, c: a.c * k, div: a.div };
+    Object.keys(a.terms).forEach(function (key) { out.terms[key] = a.terms[key] * k; });
+    return out;
+  }
+  function plus(a, b, sign) {
+    if (isZero(b)) return a;
+    if (isZero(a)) return sign > 0 ? b : scale(b, -1);
+    if (a.div !== b.div) throw fail(a.div && b.div ? '除以兩種不同的攤提台數' : '有的部分除以攤提台數、有的沒有');
+    var out = { terms: Object.assign({}, a.terms), c: a.c + sign * b.c, div: a.div };
+    Object.keys(b.terms).forEach(function (key) {
+      out.terms[key] = (out.terms[key] || 0) + sign * b.terms[key];
+      if (Math.abs(out.terms[key]) < 1e-12) delete out.terms[key];
+    });
+    return out;
+  }
+
+  /**
+   * 彙總格(要繼續展開)還是一筆投資(葉節點)：有 SUM、除以儲存格、或用相對參照引用同一欄的其他格(I23 = I21 - I22)
+   * 都是彙總；E5 = 9000000*$E$2/0.8(絕對參照的匯率)、I6 = E6*(1-$G$3)(同列別欄 × 低減率)是一筆投資。
+   */
+  function isAggregate(f, col) {
+    var s = str(f).replace(/"[^"]*"/g, '');
+    if (/SUM\s*\(/i.test(s)) return true;
+    if (/\/\s*('[^']+'!|[^\s!()+\-*/^,'"]+!)?\$?[A-Z]{1,3}\$?\d/.test(s)) return true;
+    var re = /(^|[^A-Za-z0-9_.!$])(\$?)([A-Z]{1,3})(\$?)(\d+)(?![\d(])/g, m;
+    while ((m = re.exec(s))) {
+      if (X.colToNum(m[3]) === col && !m[4]) return true;
+    }
+    return false;
+  }
+
+  function sheetByName(wb, name) { return wb.sheets.filter(function (s) { return s.name === name; })[0]; }
+
+  /** 這一列的「名稱」：同一列左邊最近的文字 */
+  function rowLabel(sheet, r, c) {
+    for (var cc = c - 1; cc >= 1; cc--) {
+      var t = text(X.cell(sheet, r, cc));
+      if (t) return t;
+    }
+    return '';
+  }
+  /** 欄標題：往上找第一個文字 */
+  function colHeader(sheet, r, c) {
+    for (var rr = r - 1; rr >= 1 && rr >= r - 30; rr--) {
+      var t = text(X.cell(sheet, rr, c));
+      if (t) return t;
+    }
+    return '';
+  }
+
+  /**
+   * ctx = { wb, mainSheet, isMainData(r,c): 損益表本身的車系欄資料格(一律展開，不當成葉節點) }
+   */
+  function linOfCell(ctx, sheet, r, c, depth, visiting) {
+    var key = sheet.name + '!' + X.numToCol(c) + r;
+    var cell = X.cell(sheet, r, c);
+    if (!cell || (cell.v === null && !cell.f)) return ZERO();
+    if (depth > 30 || visiting[key]) throw fail('攤提公式繞太多層或互相引用');
+    var main = sheet === ctx.mainSheet && ctx.isMainData(r, c);
+    if (!main) {
+      var label = rowLabel(sheet, r, c);
+      var aggregate = cell.f && isAggregate(cell.f, c);
+      if (num(cell) !== null && label && !TOTAL_LABEL.test(label) && !aggregate) {
+        var leaf = { terms: {}, c: 0, div: null };
+        leaf.terms[key] = 1;
+        return leaf;
+      }
+      if (!cell.f) {
+        if (num(cell) === null) throw fail(key + ' 不是數字');
+        var lone = { terms: {}, c: 0, div: null };   // 沒有名稱的數字格(例如攤提台數 50000)
+        lone.terms[key] = 1;
+        return lone;
+      }
+    } else if (!cell.f) {
+      throw fail('損益表上的 ' + key + ' 是直接打的數字');
+    }
+    visiting[key] = true;
+    try { return lin(ctx, parse(cell.f), sheet, depth + 1, visiting); } finally { delete visiting[key]; }
+  }
+
+  function lin(ctx, n, sheet, depth, visiting) {
+    if (n.t === 'num') return { terms: {}, c: n.v, div: null };
+    if (n.t === 'neg') return scale(lin(ctx, n.x, sheet, depth, visiting), -1);
+    if (n.t === 'ref') {
+      var target = n.sheet ? sheetByName(ctx.wb, n.sheet) : sheet;
+      if (!target) throw fail('找不到分頁「' + n.sheet + '」');
+      var parts = n.ref.replace(/\$/g, '').split(':');
+      if (parts.length > 1) throw fail('範圍只能放在 SUM 裡');
+      var p = X.parseRef(parts[0]);
+      return linOfCell(ctx, target, p.r, p.c, depth, visiting);
+    }
+    if (n.t === 'func') {
+      if (n.name !== 'SUM') throw fail('攤提公式用了 ' + n.name + '(例如四捨五入)，系統的攤提不會這樣算');
+      var acc = ZERO();
+      n.args.forEach(function (a) {
+        if (a.t === 'ref' && /:/.test(a.ref)) {
+          var t2 = a.sheet ? sheetByName(ctx.wb, a.sheet) : sheet;
+          if (!t2) throw fail('找不到分頁「' + a.sheet + '」');
+          var ab = a.ref.replace(/\$/g, '').split(':').map(X.parseRef);
+          for (var rr = Math.min(ab[0].r, ab[1].r); rr <= Math.max(ab[0].r, ab[1].r); rr++) {
+            for (var cc = Math.min(ab[0].c, ab[1].c); cc <= Math.max(ab[0].c, ab[1].c); cc++) {
+              acc = plus(acc, linOfCell(ctx, t2, rr, cc, depth, visiting), 1);
+            }
+          }
+        } else acc = plus(acc, lin(ctx, a, sheet, depth, visiting), 1);
+      });
+      return acc;
+    }
+    if (n.t === 'bin') {
+      var a1 = lin(ctx, n.l, sheet, depth, visiting), b1 = lin(ctx, n.r, sheet, depth, visiting);
+      if (n.op === '+') return plus(a1, b1, 1);
+      if (n.op === '-') return plus(a1, b1, -1);
+      if (n.op === '*') {
+        if (isConst(a1)) return scale(b1, a1.c);
+        if (isConst(b1)) return scale(a1, b1.c);
+        throw fail('攤提公式裡有兩個儲存格相乘');
+      }
+      if (n.op === '/') {
+        if (isConst(b1)) { if (!b1.c) throw fail('除以 0'); return scale(a1, 1 / b1.c); }
+        var keys = Object.keys(b1.terms);
+        if (!b1.div && keys.length === 1 && Math.abs(b1.terms[keys[0]] - 1) < 1e-12 && Math.abs(b1.c) < 1e-12 && !a1.div) {
+          return { terms: a1.terms, c: a1.c, div: keys[0] };
+        }
+        throw fail('除數不是單一個攤提台數儲存格');
+      }
+      throw fail('攤提公式裡有 ' + n.op);
+    }
+    throw fail('看不懂的寫法');
+  }
+
+  function cellOfKey(wb, key) {
+    var i = key.lastIndexOf('!');
+    var sheet = sheetByName(wb, key.slice(0, i));
+    var p = X.parseRef(key.slice(i + 1));
+    return { sheet: sheet, r: p.r, c: p.c, ref: key.slice(i + 1), cell: X.cell(sheet, p.r, p.c) };
+  }
+
+  /**
+   * 低減版的投資常寫成「原始金額 × (1 - 低減率)」(I6 = E6*(1-$G$3)、G9 = C9*(1-10%))：
+   * 對應系統開發總投的「原始金額 + 挑戰低減%」(只有目標情境會套用低減)。回傳 { original, pct } 或 null。
+   */
+  function reductionOf(loc, coef) {
+    var f = loc.cell && loc.cell.f ? loc.cell.f.replace(/\s+/g, '') : '';
+    var m = /^(\$?[A-Z]{1,3}\$?\d+)\*\(1-(\$?[A-Z]{1,3}\$?\d+|\d*\.?\d+%?)\)$/.exec(f);
+    if (!m) return null;
+    var p = X.parseRef(m[1].replace(/\$/g, ''));
+    var original = num(X.cell(loc.sheet, p.r, p.c));
+    var rate;
+    if (/^\$?[A-Z]/.test(m[2])) { var q = X.parseRef(m[2].replace(/\$/g, '')); rate = num(X.cell(loc.sheet, q.r, q.c)); }
+    else rate = /%$/.test(m[2]) ? Number(m[2].slice(0, -1)) / 100 : Number(m[2]);
+    if (original === null || rate === null || !isFinite(rate) || rate < 0 || rate >= 1) return null;
+    return { original: original * coef, pct: Math.round(rate * 100 * 1e9) / 1e9 };
+  }
+
+  function categoryOf(textValue) {
+    if (/模具/.test(textValue)) return '模具';
+    if (/設備|治具|檢具|工裝/.test(textValue)) return '設備';
+    return '費用';
+  }
+
+  /** 攤提台數儲存格附近(上下 4 列、左右 4 欄)找 L/C 月數：本身的標籤(左邊或正上方)含「月」的數字 */
+  function monthsNear(loc) {
+    var best = null;
+    for (var dr = -4; dr <= 4; dr++) {
+      for (var dc = -4; dc <= 4; dc++) {
+        if (!dr && !dc) continue;
+        var r = loc.r + dr, c = loc.c + dc;
+        if (r < 1 || c < 1) continue;
+        var v = num(X.cell(loc.sheet, r, c));
+        if (v === null || v <= 0 || v > 600) continue;
+        var label = text(X.cell(loc.sheet, r, c - 1)) + '|' + text(X.cell(loc.sheet, r - 1, c));
+        if (!/月/.test(label) || /台/.test(label)) continue;
+        var dist = Math.abs(dr) + Math.abs(dc);
+        if (!best || dist < best.dist) best = { v: v, dist: dist };
+      }
+    }
+    return best ? best.v : null;
+  }
+
+  /**
+   * 展開損益表上某一格(某車系某列)的攤提公式。
+   * 回傳 { units: { key, value, label, months }, investments: [{ key, dept, asset, category, amount, notes }], signature }
+   * 轉不過去丟出 e.amort = true 的錯誤。
+   */
+  function traceCell(wb, plan, sheet, row, vi) {
+    var v = plan.vehicles[vi];
+    var cell = X.cell(sheet, row, v.col);
+    if (!cell || !cell.f) throw fail('是直接打的數字，沒有公式可追');
+    var vehicleCols = {};
+    plan.vehicles.forEach(function (x) { vehicleCols[x.col] = true; });
+    if (plan.weightedCol) vehicleCols[plan.weightedCol] = true;
+    var ctx = {
+      wb: wb, mainSheet: sheet,
+      isMainData: function (r, c) { return vehicleCols[c] && r >= plan.firstRow; }
+    };
+    var res = lin(ctx, parse(cell.f), sheet, 0, {});
+    if (!res.div) throw fail('公式沒有除以攤提台數');
+    if (!Object.keys(res.terms).length && Math.abs(res.c) < 1e-9) throw fail('展開後沒有任何投資金額');
+    var unitsLoc = cellOfKey(wb, res.div);
+    var units = num(unitsLoc.cell);
+    if (!units || units <= 0) throw fail('攤提台數 ' + res.div + ' 不是正數');
+    var investments = Object.keys(res.terms).sort().map(function (key) {
+      var loc = cellOfKey(wb, key);
+      var value = num(loc.cell) || 0;
+      var dept = rowLabel(loc.sheet, loc.r, loc.c) || key;
+      var asset = colHeader(loc.sheet, loc.r, loc.c);
+      var note = '';
+      for (var cc = loc.c + 1; cc <= loc.c + 8; cc++) {
+        var t = text(X.cell(loc.sheet, loc.r, cc));
+        if (t.length >= 4) { note = str(X.cell(loc.sheet, loc.r, cc).v).replace(/\r\n/g, '\n').trim(); break; }
+      }
+      return {
+        key: key, dept: dept, asset: asset, category: categoryOf(asset + dept),
+        amount: value * res.terms[key], coef: res.terms[key], notes: note,
+        reduction: reductionOf(loc, res.terms[key])
+      };
+    }).filter(function (x) { return Math.abs(x.amount) > 1e-9; });
+    if (Math.abs(res.c) > 1e-9) investments.push({ key: '', dept: '(Excel 公式裡的常數)', asset: '', category: '費用', amount: res.c, coef: 1, notes: '' });
+    if (!investments.length) throw fail('展開後沒有任何投資金額');
+    var sig = JSON.stringify([res.div, Object.keys(res.terms).sort().map(function (k) { return k + '*' + res.terms[k]; }), res.c]);
+    return {
+      units: { key: res.div, value: units, label: rowLabel(unitsLoc.sheet, unitsLoc.r, unitsLoc.c) || colHeader(unitsLoc.sheet, unitsLoc.r, unitsLoc.c), months: monthsNear(unitsLoc) },
+      investments: investments, signature: sig
+    };
+  }
+
+  /**
+   * 損益表上某一列在某個分頁的攤提展開(所有車系要展開成同一組投資)。
+   * 回傳 { units, investments, category, source } 或丟出原因。
+   */
+  function traceRow(wb, plan, sheet, row) {
+    var first = null;
+    plan.vehicles.forEach(function (v, vi) {
+      var t;
+      try { t = traceCell(wb, plan, sheet, row, vi); } catch (e) {
+        if (!e.amort) throw e;
+        throw fail((plan.vehicles.length > 1 ? v.name + '：' : '') + e.message);
+      }
+      if (!first) first = t;
+      else if (t.signature !== first.signature) throw fail('各車系的攤提來源不同(' + plan.vehicles[0].name + ' 與 ' + v.name + ')，系統的開發總投是全車系共用');
+    });
+    var cats = {};
+    first.investments.forEach(function (x) { cats[x.category] = (cats[x.category] || 0) + Math.abs(x.amount); });
+    var category = Object.keys(cats).sort(function (a, b) { return cats[b] - cats[a]; })[0] || '費用';
+    var f = X.cell(sheet, row, plan.vehicles[0].col).f || '';
+    var m = /^(?:'((?:[^']|'')+)'|([^\s!'"()+\-*/^,:=<>&%;]+))!/.exec(f);
+    return { units: first.units, investments: first.investments, category: category, source: m ? (m[1] || m[2]) : sheet.name };
+  }
+
+  /** 科目名稱像不像開發攤提(直接打數字時，提示可以用攤提台數回推) */
+  function looksLikeDev(label) { return DEV_LABEL.test(label); }
+
+  return { parse: parse, traceCell: traceCell, traceRow: traceRow, looksLikeDev: looksLikeDev, categoryOf: categoryOf };
+}));
+
+</script>
+<script>
+/**
  * Excel 損益試算表 → 資料包：「Excel 轉資料包」工具的核心邏輯(純函式 + 呼叫後端 API，不碰畫面)。
  *
  * 流程：
@@ -6413,11 +6764,12 @@ function reportMaintenance_(message) {
  * 明細的 Excel 公式盡量轉成系統公式(規則與轉不過去的情況見 local/excel-formula.js)，轉不過去的帶入 Excel 算好的數字；
  * 小計由系統依科目樹計算。最後逐格比對，轉成公式卻對不起來的列自動改回帶入數字(buildAndVerify)。
  * 整張表是貼上值、沒有公式時，小計改由數字推斷(F.inferShapes)。
+ * 開發總投的單台攤提追進開發總投分頁(A.traceRow)，建成開發總投攤提科目 + 部門投資明細 + 攤提基準台數(translateAll)。
  */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./xlsx-reader.js'), require('./excel-formula.js'));
-  else root.FSExcelPack = factory(root.FSXlsx, root.FSExcelFormula);
-}(typeof self !== 'undefined' ? self : this, function (X, F) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./xlsx-reader.js'), require('./excel-formula.js'), require('./excel-amort.js'));
+  else root.FSExcelPack = factory(root.FSXlsx, root.FSExcelFormula, root.FSExcelAmort);
+}(typeof self !== 'undefined' ? self : this, function (X, F, A) {
   'use strict';
 
   var TOLERANCE = 0.01;
@@ -6792,6 +7144,7 @@ function reportMaintenance_(message) {
       names[v.name] = true;
     });
     if (!/^[A-Za-z0-9][\w\-]*$/.test(str(plan.typeId))) errs.push('車型代號請用英數字(例如 D5X)');
+
     Object.keys(roles).forEach(function (k) {
       var ro = roles[k];
       if (ro.role !== 'group' && ro.role !== 'detail') return;
@@ -6807,6 +7160,69 @@ function reportMaintenance_(message) {
       }
     });
     return errs;
+  }
+
+  /**
+   * 明細列在系統裡怎麼算：公式轉換(F.translatePlan) + 開發攤提追蹤(優先)。
+   * 每一列多了 mode：'amort'(追到開發總投) / 'backcalc'(使用者選擇用攤提台數回推)，以及 amort: [各分頁的追蹤結果]。
+   * 回傳同 F.translatePlan，另附 units: [各分頁的攤提台數 { value, months, label, source }]
+   */
+  function translateAll(plan) {
+    var tr = F.translatePlan(plan);
+    tr.units = plan.scenarios.map(function () { return null; });
+    var wb = plan.workbook;
+    var sheets = plan.scenarios.map(function (s) { return s.sheet; });
+    var fb = plan.fallback || {}, off = plan.amortOff || {}, back = plan.backcalc || {};
+    var amortRows = [];
+    Object.keys(tr.rows).forEach(function (row) {
+      var t = tr.rows[row];
+      var label = (plan.rows.filter(function (r) { return String(r.row) === String(row); })[0] || {}).label || '';
+      t.looksDev = A.looksLikeDev(label);
+      if (!wb || plan.useAmort === false || fb[row]) return;
+      if (off[row]) { t.amortReason = '手動改為不用開發攤提'; return; }
+      var traces = [];
+      try {
+        sheets.forEach(function (sheet) { traces.push(A.traceRow(wb, plan, sheet, Number(row))); });
+      } catch (e) {
+        if (!e.amort) throw e;
+        if (t.looksDev) t.amortReason = '開發攤提追不到：' + e.message;
+        return;
+      }
+      t.prev = { mode: t.mode, reason: t.reason };
+      t.mode = 'amort'; t.amort = traces; t.reason = '';
+      t.category = traces[0].category;
+      amortRows.push(row);
+    });
+    // 同一個情境只有一個攤提基準台數：跟多數不同的列改回原本的算法
+    sheets.forEach(function (sheet, si) {
+      var count = {};
+      amortRows.forEach(function (row) { var u = tr.rows[row].amort[si].units.value; count[u] = (count[u] || 0) + 1; });
+      var major = Object.keys(count).sort(function (a, b) { return count[b] - count[a]; })[0];
+      amortRows.forEach(function (row) {
+        var t = tr.rows[row];
+        if (t.mode !== 'amort') return;
+        if (String(t.amort[si].units.value) !== String(major)) {
+          t.mode = t.prev.mode; t.reason = t.prev.reason;
+          t.amortReason = '「' + sheet.name + '」的攤提台數(' + t.amort[si].units.value + ')跟其他攤提列(' + major + ')不同，系統一個情境只有一個攤提台數';
+          delete t.amort;
+        }
+      });
+      var first = amortRows.filter(function (row) { return tr.rows[row].mode === 'amort'; })[0];
+      if (first) tr.units[si] = Object.assign({ source: tr.rows[first].amort[si].source }, tr.rows[first].amort[si].units);
+    });
+    // 直接打數字、名稱像開發攤提：使用者選擇「用攤提台數回推」
+    Object.keys(back).forEach(function (row) {
+      var t = tr.rows[row];
+      if (!t || t.mode !== 'input' || !back[row]) return;
+      var r = plan.rows.filter(function (x) { return String(x.row) === String(row); })[0];
+      var bad = sheets.filter(function (sheet) {
+        var vals = plan.vehicles.map(function (v) { return num(X.cell(sheet, Number(row), v.col)); });
+        return vals.some(function (v) { return v === null || Math.abs(v - vals[0]) > 1e-6; });
+      })[0];
+      if (bad) { t.amortReason = '「' + bad.name + '」各車系的單台金額不同，不能用同一筆投資回推'; return; }
+      t.mode = 'backcalc'; t.category = A.categoryOf(r.label); t.reason = '';
+    });
+    return tr;
   }
 
   /** 父科目鏈最後落在哪個結構小計(B → 銷貨成本頁，其他 → 營業費用頁) */
@@ -6915,12 +7331,12 @@ function reportMaintenance_(message) {
     plan.vehicles.forEach(function (v, i) { api.saveVehicle({ VehicleID: vehicleIds[i], VehicleTypeID: T, VehicleCode: clean(v.name) }); });
 
     // Excel 公式 → 系統公式。參數要先定義好(公式存檔時會檢查 [名稱] 存不存在)
-    var tr = F.translatePlan(plan);
+    var tr = translateAll(plan);
     var formulaRows = {}, fallbacks = {}, usedParams = {};
     var textsOf = function (t) { return [t.formula].concat(Object.keys(t.vehicleFormulas).map(function (k) { return t.vehicleFormulas[k]; })); };
     Object.keys(tr.rows).forEach(function (row) {
       var t = tr.rows[row];
-      if (t.mode === 'input') return;
+      if (t.mode === 'input' || t.mode === 'amort' || t.mode === 'backcalc') return;
       textsOf(t).forEach(function (f) { str(f).replace(/⟦p:([^⟧]+)⟧/g, function (m, k) { usedParams[k] = true; return m; }); });
     });
     Object.keys(usedParams).forEach(function (key) {
@@ -6936,6 +7352,15 @@ function reportMaintenance_(message) {
     Object.keys(tr.rows).forEach(function (row) {
       var t = tr.rows[row];
       if (t.mode === 'input' || !codes[row]) return;
+      if (t.mode === 'amort' || t.mode === 'backcalc') {
+        try {
+          api.saveChartLine(T, { LineCode: codes[row], LineName: rowOf[row].label, CalcType: 'DEV_AMORT', DevAmortCategory: t.category || '費用', VehicleFormulas: {} });
+          formulaRows[row] = t.mode;
+        } catch (e) {
+          fallbacks[row] = '系統不接受改成開發攤提(' + e.message + ')，改為帶入數字';
+        }
+        return;
+      }
       var main = t.mode === 'formula' ? F.resolveFormula(t.formula, codes, tr.params) : '';
       var vf = {}, ok = main !== null;
       Object.keys(t.vehicleFormulas).forEach(function (vi) {
@@ -6985,13 +7410,48 @@ function reportMaintenance_(message) {
       api.saveRateGrid(sid, Object.keys(rateMap).map(function (k) { return Object.assign({ ParamID: '' }, rateMap[k]); }));
       if (fx.length) api.saveFxGrid(sid, fx);
 
+      // 開發總投：攤提基準台數 + 部門投資明細(目標情境且 Excel 寫成「原始 × (1 - 低減率)」時，帶原始金額與低減%)
+      var si = plan.scenarios.indexOf(sc);
+      var devRows = [];
+      var units = tr.units[si] ? tr.units[si].value : Number(sc.amortUnits) || 0;
+      var months = tr.units[si] ? tr.units[si].months : null;
+      Object.keys(formulaRows).forEach(function (row) {
+        var t = tr.rows[row];
+        if (formulaRows[row] === 'amort') {
+          t.amort[si].investments.forEach(function (inv) {
+            var useCut = (sc.type || '現況') === '目標' && inv.reduction;
+            devRows.push({
+              RowID: '', Department: inv.dept, TargetLineCode: codes[row], Currency: 'TWD',
+              Amount: useCut ? inv.reduction.original : inv.amount, ChallengeReductionPct: useCut ? inv.reduction.pct : 0,
+              Notes: [inv.notes, inv.key ? 'Excel ' + inv.key + (inv.coef !== 1 ? ' × ' + inv.coef : '') : ''].filter(Boolean).join('｜'),
+              VehicleScope: ''
+            });
+          });
+        } else if (formulaRows[row] === 'backcalc') {
+          var perUnit = val(Number(row), 0) || 0;
+          devRows.push({
+            RowID: '', Department: rowOf[row].label + '(由單台回推)', TargetLineCode: codes[row], Currency: 'TWD',
+            Amount: perUnit * units, ChallengeReductionPct: 0,
+            Notes: 'Excel 單台 ' + perUnit + ' × 攤提台數 ' + units, VehicleScope: ''
+          });
+        }
+      });
+      if (Object.keys(formulaRows).some(function (row) { return formulaRows[row] === 'backcalc'; }) && !(units > 0)) {
+        throw new Error('「' + sc.name + '」有列要用攤提台數回推開發總投，請在第 4 步填攤提台數');
+      }
+      if (devRows.length && units > 0) {
+        var years = months ? months / 12 : 1;
+        api.saveAmortBasis(sid, units / 12 / years, years);
+        api.saveDevInvestmentGrid(sid, devRows);
+      }
+
       var cost = [], opex = [];
       rolesOf('detail').forEach(function (r) {
         var target = rootParent(roles, r.row) === 'B' ? cost : opex;
         var fm = formulaRows[r.row];
         plan.vehicles.forEach(function (v, i) {
           // 轉成公式的車系不帶數字(帶了也不會用到，反而讓人以為那是輸入值)
-          if (fm === 'formula' || (fm === 'mixed' && tr.rows[r.row].vehicleFormulas[i] !== undefined)) return;
+          if (fm === 'formula' || fm === 'amort' || fm === 'backcalc' || (fm === 'mixed' && tr.rows[r.row].vehicleFormulas[i] !== undefined)) return;
           var amount = val(r.row, i);
           if (amount === null) return;
           target.push({ RowID: '', VehicleID: vehicleIds[i], LineCode: codes[r.row], Amount: amount, Currency: 'TWD', Notes: '' });
@@ -7033,7 +7493,8 @@ function reportMaintenance_(message) {
         v.rows.forEach(function (row) {
           if (!built.formulaRows[row.row] || bad[row.row]) return;
           var c = row.cells.filter(function (x) { return x.ok === false; })[0];
-          if (c) bad[row.row] = '轉成公式後跟 Excel 對不起來(「' + v.sheetName + '」Excel ' + c.excel + '、系統 ' + c.system + ')，改為帶入數字';
+          if (c) bad[row.row] = (/amort|backcalc/.test(built.formulaRows[row.row]) ? '改成開發攤提後' : '轉成公式後') +
+            '跟 Excel 對不起來(「' + v.sheetName + '」Excel ' + c.excel + '、系統 ' + c.system + ')，改為帶入數字';
         });
       });
       if (!Object.keys(bad).length) return last;
@@ -7112,6 +7573,7 @@ function reportMaintenance_(message) {
     TOLERANCE: TOLERANCE, ROLE_LABELS: ROLE_LABELS, PARENTS: PARENTS, STRUCTURE: STRUCTURE,
     analyzeSheet: analyzeSheet, extractRows: extractRows, suggestRoles: suggestRoles, inferRates: inferRates,
     formulaShape: formulaShape, planProblems: planProblems, buildFromPlan: buildFromPlan, verifyPlan: verifyPlan, buildAndVerify: buildAndVerify,
+    translateAll: translateAll,
     sameLayout: sameLayout, mixFor: mixFor, signature: signature, clean: clean
   };
 }));
@@ -7202,7 +7664,7 @@ function reportMaintenance_(message) {
     S.notes = sug.notes;
     S.restored = false;
     S.signature = E.signature(S.rows);
-    S.useFormulas = true; S.formulaOff = {}; S.paramNames = {};
+    S.useFormulas = true; S.formulaOff = {}; S.paramNames = {}; S.useAmort = true; S.amortOff = {}; S.backcalc = {};
     var saved = storeGet(MAP_KEY + S.signature);
     if (saved && saved.roles) {
       S.rows.forEach(function (r) { if (saved.roles[r.row]) S.roles[r.row] = saved.roles[r.row]; });
@@ -7210,6 +7672,9 @@ function reportMaintenance_(message) {
       if (saved.useFormulas === false) S.useFormulas = false;
       S.formulaOff = saved.formulaOff || {};
       S.paramNames = saved.paramNames || {};
+      if (saved.useAmort === false) S.useAmort = false;
+      S.amortOff = saved.amortOff || {};
+      S.backcalc = saved.backcalc || {};
       S.restored = true;
     }
     S.scenarios = {};
@@ -7227,7 +7692,8 @@ function reportMaintenance_(message) {
     var plan = {
       typeId: S.typeId.trim(), typeNotes: S.typeNotes, vehicles: layout.vehicles, weightedCol: S.weightedCol,
       noteCol: S.noteCol, labelCol: S.labelCol, firstRow: S.firstRow, rows: S.rows, roles: S.roles,
-      useFormulas: S.useFormulas !== false, formulaOff: S.formulaOff || {}, paramNames: S.paramNames || {}
+      useFormulas: S.useFormulas !== false, formulaOff: S.formulaOff || {}, paramNames: S.paramNames || {},
+      workbook: S.wb, useAmort: S.useAmort !== false, amortOff: S.amortOff || {}, backcalc: S.backcalc || {}
     };
     plan.scenarios = includedSheets().map(function (i) { return scenarioOf(i, plan); });
     return plan;
@@ -7363,11 +7829,15 @@ function reportMaintenance_(message) {
     var plan = planOf();
     var tr = safeTranslate(plan);
     var lastFallback = S.result && S.result.plan ? (S.result.plan.fallback || {}) : {};
-    var counts = { formula: 0, input: 0 };
-    Object.keys(tr.rows).forEach(function (k) { counts[tr.rows[k].mode === 'input' || lastFallback[k] ? 'input' : 'formula']++; });
+    var counts = { formula: 0, amort: 0, input: 0 };
+    Object.keys(tr.rows).forEach(function (k) {
+      var m = tr.rows[k].mode;
+      counts[lastFallback[k] || m === 'input' ? 'input' : (m === 'amort' || m === 'backcalc' ? 'amort' : 'formula')]++;
+    });
     html += '<div class="xp-row" style="margin:6px 0 10px"><label><input type="checkbox" id="xp-use-formulas"' + (S.useFormulas !== false ? ' checked' : '') +
-      '> 把 Excel 公式轉成系統公式</label><span class="xp-sub" style="margin:0">' +
-      (S.useFormulas !== false ? '明細 ' + (counts.formula + counts.input) + ' 列：' + counts.formula + ' 列轉成公式、' + counts.input + ' 列帶入數字(滑鼠移到原因上看完整說明)' : '關閉時所有明細都帶入 Excel 算好的數字') + '</span></div>';
+      '> 把 Excel 公式轉成系統公式</label><label><input type="checkbox" id="xp-use-amort"' + (S.useAmort !== false ? ' checked' : '') +
+      '> 開發攤提追到開發總投明細</label><span class="xp-sub" style="margin:0">明細 ' + (counts.formula + counts.amort + counts.input) + ' 列：' +
+      counts.formula + ' 列公式、' + counts.amort + ' 列開發攤提、' + counts.input + ' 列帶入數字</span></div>';
     html += '<div class="xp-scroll" style="max-height:70vh"><table class="xp-table"><thead><tr><th>列</th><th>Excel 科目</th>' +
       vehicles.map(function (v) { return '<th>' + esc(v.name) + '</th>'; }).join('') +
       '<th>Excel 公式</th><th>在系統裡是</th><th>掛在哪個小計底下</th><th>系統怎麼算</th></tr></thead><tbody>';
@@ -7387,7 +7857,7 @@ function reportMaintenance_(message) {
   }
 
   function safeTranslate(plan) {
-    try { return F.translatePlan(plan); } catch (e) { return { rows: {}, params: {} }; }
+    try { return E.translateAll(plan); } catch (e) { return { rows: {}, params: {}, units: [] }; }
   }
 
   /** Excel 公式欄：有公式就顯示公式；沒有公式但由數字推斷出是小計，就顯示推斷的算式 */
@@ -7407,6 +7877,7 @@ function reportMaintenance_(message) {
     if (/^check:/.test(ro.role)) return '<span class="xp-tag">售價結構</span> 系統公式';
     var t = tr.rows[r.row];
     if (!t) return '';
+    if ((t.mode === 'amort' || t.mode === 'backcalc') && !lastFallback[r.row]) return amortCell(r, t, plan);
     var why = lastFallback[r.row] || t.reason;
     var toggle = '';
     var canToggle = S.useFormulas !== false && (t.mode !== 'input' || S.formulaOff[r.row]) && !lastFallback[r.row];
@@ -7421,15 +7892,40 @@ function reportMaintenance_(message) {
       return toggle + '<span class="xp-tag ok">公式</span> ' + body;
     }
     var note = t.note ? '<span class="xp-why">' + esc(t.note) + '</span>' : '';
+    var amortOn = t.amortReason && /手動/.test(t.amortReason)
+      ? '<div class="xp-per"><label class="xp-mini"><input type="checkbox" data-aon="' + r.row + '">用開發攤提</label></div>' : '';
+    var amortWhy = t.amortReason && !/手動/.test(t.amortReason) ? '<div class="xp-per" title="' + esc(t.amortReason) + '">' + esc(t.amortReason) + '</div>' : '';
+    // 名稱像開發攤提、但 Excel 直接打單台金額：可以用攤提台數回推投資總額，讓台數變動時攤提跟著動
+    var back = t.looksDev && t.mode === 'input' && !lastFallback[r.row] && S.useAmort !== false
+      ? '<div class="xp-per"><label class="xp-mini" title="開發總投 = 單台金額 × 攤提台數(第 4 步)，之後改台數、做損益兩平時攤提會跟著變"><input type="checkbox" data-bcalc="' + r.row + '"' +
+        (S.backcalc[r.row] ? ' checked' : '') + '>當成開發攤提(用攤提台數回推總額)</label></div>' : '';
     return toggle + '<span class="xp-tag' + (why ? ' warn' : '') + '">數字</span> ' +
-      (why ? '<span class="xp-why" title="' + esc(why) + '">' + esc(why) + '</span>' : note);
+      (why ? '<span class="xp-why" title="' + esc(why) + '">' + esc(why) + '</span>' : note) + amortWhy + amortOn + back;
+  }
+
+  /** 開發攤提：來源分頁、幾筆投資、÷ 攤提台數；滑鼠移上去看部門明細 */
+  function amortCell(r, t, plan) {
+    if (t.mode === 'backcalc') {
+      return '<label class="xp-mini"><input type="checkbox" data-bcalc="' + r.row + '" checked>當成開發攤提</label> <span class="xp-tag ok">開發攤提</span> ' +
+        '<span class="xp-why">單台金額 × 攤提台數回推投資總額(' + esc(t.category) + ')</span>';
+    }
+    var a = t.amort[0];
+    var total = a.investments.reduce(function (sum, x) { return sum + x.amount; }, 0);
+    var detail = a.investments.map(function (x) { return x.dept + (x.asset ? '／' + x.asset : '') + '：' + fmt(x.amount) + (x.coef !== 1 ? '(× ' + x.coef + ')' : ''); }).join('\n');
+    var sources = {};
+    t.amort.forEach(function (x) { sources[x.source] = true; });
+    var cut = t.amort.some(function (x) { return x.investments.some(function (i) { return i.reduction; }); });
+    return '<label class="xp-mini"><input type="checkbox" data-aon="' + r.row + '" checked>用開發攤提</label> <span class="xp-tag ok">開發攤提</span> ' +
+      '<span title="' + esc(detail) + '">「' + esc(a.source) + '」' + a.investments.length + ' 筆投資 ' + fmt(total) + ' ÷ ' + fmt(a.units.value) + ' 台(' + esc(t.category) + ')</span>' +
+      (Object.keys(sources).length > 1 ? '<div class="xp-per">各情境來源：' + esc(Object.keys(sources).join('、')) + '</div>' : '') +
+      (cut ? '<div class="xp-per">含「原始 × (1 - 低減率)」：目標情境會帶原始金額與挑戰低減%</div>' : '');
   }
 
   function renderParams(plan, tr) {
     var used = {};
     Object.keys(tr.rows).forEach(function (k) {
       var t = tr.rows[k];
-      if (t.mode === 'input') return;
+      if (t.mode === 'input' || t.mode === 'amort' || t.mode === 'backcalc') return;
       [t.formula].concat(Object.keys(t.vehicleFormulas).map(function (x) { return t.vehicleFormulas[x]; }))
         .forEach(function (f) { String(f || '').replace(/⟦p:([^⟧]+)⟧/g, function (m, key) { used[key] = true; return m; }); });
     });
@@ -7462,7 +7958,9 @@ function reportMaintenance_(message) {
       '<label class="xp-field" style="flex:1">車型備註<input id="xp-type-notes" value="' + esc(S.typeNotes) + '"></label></div>' +
       '<p class="xp-sub" style="margin-top:12px">營業稅率、銷售佣金率是從 Excel 的營業稅、銷售佣金列反推的(%)；構成比用來算加權平均。</p>' +
       '<div class="xp-scroll"><table class="xp-table"><thead><tr><th>分頁</th><th>情境名稱</th><th>GATE</th><th>性質</th><th>營業稅率%</th><th>銷售佣金率%</th>' +
-      plan.vehicles.map(function (v) { return '<th>構成比% ' + esc(v.name) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      plan.vehicles.map(function (v) { return '<th>構成比% ' + esc(v.name) + '</th>'; }).join('') + '<th>開發攤提台數</th></tr></thead><tbody>';
+    var trS = safeTranslate(plan);
+    var needUnits = Object.keys(trS.rows).some(function (k) { return trS.rows[k].mode === 'backcalc'; });
     includedSheets().forEach(function (i, n) {
       var sc = plan.scenarios[n];
       html += '<tr><td>' + esc(S.wb.sheets[i].name) + '</td>' +
@@ -7472,6 +7970,9 @@ function reportMaintenance_(message) {
         '<td><input type="number" step="any" data-sc="' + n + '" data-f="rate:營業稅率" value="' + sc.rates.營業稅率 + '"></td>' +
         '<td><input type="number" step="any" data-sc="' + n + '" data-f="rate:銷售佣金率" value="' + sc.rates.銷售佣金率 + '"></td>' +
         plan.vehicles.map(function (v, vi) { return '<td><input type="number" step="any" data-sc="' + n + '" data-f="mix:' + vi + '" value="' + sc.mix[vi] + '"></td>'; }).join('') +
+        '<td>' + (trS.units[n]
+          ? fmt(trS.units[n].value) + ' 台' + (trS.units[n].months ? '(' + fmt(trS.units[n].months) + ' 個月)' : '') + ' <span class="xp-why">「' + esc(trS.units[n].source) + '」</span>'
+          : needUnits ? '<input type="number" step="any" data-sc="' + n + '" data-f="amortUnits" value="' + esc(sc.amortUnits || '') + '" placeholder="必填">' : '') + '</td>' +
         '</tr>';
     });
     $('#xp-sc').innerHTML = html + '</tbody></table></div>' + renderParams(plan, safeTranslate(plan));
@@ -7493,9 +7994,11 @@ function reportMaintenance_(message) {
     var plan = R.plan;
     var fb = plan.fallback || {};
     var fbRows = Object.keys(fb).filter(function (k) { return !(plan.formulaOff || {})[k]; });
-    var nFormula = Object.keys(R.built.formulaRows).length;
-    if (plan.useFormulas !== false) {
-      html += '<div class="xp-note">' + nFormula + ' 列明細轉成系統公式' +
+    var modes = R.built.formulaRows;
+    var nFormula = Object.keys(modes).filter(function (k) { return !/amort|backcalc/.test(modes[k]); }).length;
+    var nAmort = Object.keys(modes).length - nFormula;
+    if (plan.useFormulas !== false || plan.useAmort !== false) {
+      html += '<div class="xp-note">' + nFormula + ' 列明細轉成系統公式、' + nAmort + ' 列改成開發攤提(開發總投頁有部門明細，改台數會連動)' +
         (fbRows.length ? '；以下 ' + fbRows.length + ' 列在建立或驗算時改為帶入數字：<ul>' + fbRows.map(function (k) {
           var row = plan.rows.filter(function (r) { return String(r.row) === String(k); })[0];
           return '<li>第 ' + k + ' 列「' + esc(row ? row.label : '') + '」：' + esc(fb[k]) + '</li>';
@@ -7535,6 +8038,7 @@ function reportMaintenance_(message) {
       S.result = { plan: res.plan, verify: res.verify, built: res.built, pack: pack };
       storeSet(MAP_KEY + S.signature, {
         roles: S.roles, typeId: S.typeId, useFormulas: S.useFormulas, formulaOff: S.formulaOff, paramNames: S.paramNames,
+        useAmort: S.useAmort, amortOff: S.amortOff, backcalc: S.backcalc,
         savedAt: new Date().toISOString()
       });
     } catch (e) {
@@ -7586,6 +8090,9 @@ function reportMaintenance_(message) {
     }
     if (t.dataset.parent !== undefined) { S.roles[t.dataset.parent].parent = t.value; changed('rows'); return; }
     if (t.id === 'xp-use-formulas') { S.useFormulas = t.checked; changed('rows'); return; }
+    if (t.id === 'xp-use-amort') { S.useAmort = t.checked; changed('rows'); return; }
+    if (t.dataset.aon !== undefined) { if (t.checked) delete S.amortOff[t.dataset.aon]; else S.amortOff[t.dataset.aon] = true; changed('rows'); return; }
+    if (t.dataset.bcalc !== undefined) { if (t.checked) S.backcalc[t.dataset.bcalc] = true; else delete S.backcalc[t.dataset.bcalc]; changed('rows'); return; }
     if (t.dataset.fon !== undefined) { if (t.checked) delete S.formulaOff[t.dataset.fon]; else S.formulaOff[t.dataset.fon] = true; changed('rows'); return; }
     if (t.dataset.pname !== undefined) { if (t.value.trim()) S.paramNames[t.dataset.pname] = t.value.trim(); else delete S.paramNames[t.dataset.pname]; changed('rows'); return; }
     if (t.id === 'xp-type') { S.typeId = t.value.trim(); changed(); return; }
@@ -7595,6 +8102,7 @@ function reportMaintenance_(message) {
       var f = t.dataset.f;
       if (f.indexOf('rate:') === 0) sc.rates[f.slice(5)] = Number(t.value);
       else if (f.indexOf('mix:') === 0) sc.mix[Number(f.slice(4))] = Number(t.value);
+      else if (f === 'amortUnits') sc.amortUnits = Number(t.value) || '';
       else sc[f] = t.value;
       changed();
     }

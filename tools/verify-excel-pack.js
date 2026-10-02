@@ -9,6 +9,7 @@
  * 4. 建立 + 驗算：兩個分頁(同版面)各成一個情境，每一格跟 Excel 相同(含加權欄)
  * 4b. Excel 公式 → 系統公式：每一種寫法轉成什麼、轉不過去的原因、對不起來時自動改回數字、改參數結果會跟著動
  * 4c. 整張貼上值(沒有公式)：由數字推斷出跟有公式時一樣的結構
+ * 4d. 開發總投攤提：追進開發總投分頁 → 開發攤提科目 + 部門投資 + 攤提台數；相消、低減%、ROUND、直接打數字回推
  * 5. 資料包：合併匯入一台全新的地端版主機後數字不變
  * 6. 沒有售價結構的極簡版面也轉得過去；對應設定有矛盾時會擋下來
  * 7. dist/FS-excel-to-pack.html 是最新的
@@ -43,15 +44,16 @@ const apiOf = host => new Proxy({}, { get: (_, name) => (...args) => host.call(n
 const inflate = b => zlib.inflateRawSync(b);
 
 /** 照工具畫面的預設值組出 plan(使用者什麼都不改、全部採用自動判斷) */
-function autoPlan(wb, refIndex, sheetIndexes, typeId) {
+function autoPlan(wb, refIndex, sheetIndexes, typeId, extra) {
   const sheet = wb.sheets[refIndex];
   const layout = E.analyzeSheet(sheet);
   const rows = E.extractRows(sheet, layout);
   const sug = E.suggestRoles(rows, layout);
   const plan = {
     typeId, typeNotes: '', vehicles: layout.vehicles, weightedCol: layout.weightedCol, noteCol: layout.noteCol,
-    labelCol: layout.labelCol, firstRow: layout.firstRow, rows, roles: sug.roles
+    labelCol: layout.labelCol, firstRow: layout.firstRow, rows, roles: sug.roles, workbook: wb
   };
+  Object.assign(plan, extra || {});
   plan.scenarios = sheetIndexes.map(i => ({
     sheet: wb.sheets[i], name: wb.sheets[i].name, gate: 'GATE F', type: '現況',
     rates: E.inferRates(E.extractRows(wb.sheets[i], layout), sug.roles),
@@ -167,6 +169,48 @@ async function main() {
     '推斷的算式：' + F.describeShape(flatPlan.plan.rows.find(r => r.row === 13).shape, 4));
   const flatRun = E.buildAndVerify(() => { const h = newHost(); return { host: h, api: apiOf(h) }; }, flatPlan.plan);
   assert(flatRun.verify[0].ok, '貼上值的分頁也要逐格相同');
+
+  /* ---- 4d. 開發總投攤提 ---- */
+  const am = fixture.amortWorkbook();
+  const wb3 = await X.readWorkbook(am.bytes, inflate);
+  const ap = autoPlan(wb3, 0, [0, 1], 'XA', { backcalc: { 12: true } });
+  ap.plan.scenarios[1].type = '目標';
+  const aRun = E.buildAndVerify(() => { const h = newHost(); return { host: h, api: apiOf(h) }; }, ap.plan);
+  const aApi = aRun.env.api, aBuilt = aRun.built, aTr = aBuilt.translation;
+  assert(aRun.verify.every(v => v.ok), '開發攤提的兩個情境逐格跟 Excel 相同：' + aRun.verify.map(v => v.mismatches).join('/'));
+  ['7', '8', '9', '10'].forEach(r => assert(aBuilt.formulaRows[r] === 'amort', `第 ${r} 列應該變成開發攤提：${aBuilt.formulaRows[r]} ${aTr.rows[r].amortReason || ''}`));
+  const depts = r => aTr.rows[r].amort[0].investments.map(x => x.dept).sort().join();
+  assert(depts(9) === '生技部,開發部', 'CMC開發費 = 費用總計 - 上汽：上汽要相消，而且「CMC費用」那列不是一筆投資：' + depts(9));
+  assert(depts(8) === '品管部,生技部', '設備費只加 Excel 總計範圍內的部門(不含治具)：' + depts(8));
+  assert(aTr.rows[7].category === '模具' && aTr.rows[8].category === '設備' && aTr.rows[9].category === '費用', '攤提大類依欄標題');
+  assert(/ROUND/.test(aTr.rows[11].amortReason || '') && !aBuilt.formulaRows[11], 'ROUND 的攤提帶入數字並說明：' + aTr.rows[11].amortReason);
+  assert(aBuilt.formulaRows[12] === 'backcalc', '直接打數字的檢具攤提：使用者選擇用攤提台數回推');
+  const aDefs = aApi.getPLLineItems('XA');
+  assert(aDefs.filter(d => d.CalcType === 'DEV_AMORT').length === 5, '5 個開發攤提科目');
+  const [sid0, sid1] = aBuilt.scenarioIds;
+  near(aApi.getLifeCycleUnits(sid0), 40000, '攤提台數(L/C 40000 台)');
+  const sc0 = aApi.getScenarios('XA').find(x => x.ScenarioID === sid0);
+  assert(sc0.AmortLifeCycleYears === 4, 'L/C 48 個月 → 4 年：' + sc0.AmortLifeCycleYears);
+  const dev0 = aApi.getDevInvestmentSummary(sid0), dev1 = aApi.getDevInvestmentSummary(sid1);
+  assert(dev0.rows.length === 7 && dev0.rows.some(x => x.Department === '檢具攤提(由單台回推)' && Math.abs(x.Amount - 1500 * 40000) < 1e-6),
+    '開發總投頁有部門明細與回推的投資：' + dev0.rows.map(x => x.Department + ':' + x.Amount).join(', '));
+  const cut = dev1.rows.filter(x => x.ChallengeReductionPct === 10);
+  assert(cut.length === 5 && cut.some(x => x.Department === '開發部' && Math.abs(x.Amount - 300000000 / 0.9) < 1e-3),
+    '目標情境：「原始 × (1 - 低減率)」帶原始金額與挑戰低減 10%：' + dev1.rows.map(x => x.Department + ':' + x.Amount + '-' + x.ChallengeReductionPct).join(', '));
+  // 連動：攤提台數加倍 → 單台攤提減半(帶入數字的話不會動)
+  const moldCode = aBuilt.codes[7];
+  const moldAt = sid => aApi.calculatePLAllVehicles(sid).vehicles[0].lines.find(l => l.LineCode === moldCode).Amount;
+  const before = moldAt(sid0);
+  aApi.saveAmortBasis(sid0, 40000 / 48 * 2, 4);
+  near(moldAt(sid0), before / 2, '攤提台數加倍，模具單台攤提減半');
+  // 同一份資料改成現況情境：低減不套用(系統的現況情境沒有挑戰低減)，所以不能帶原始金額 → 一定要依情境性質帶
+  const ap2 = autoPlan(wb3, 0, [1], 'XB');
+  const cutRun = E.buildAndVerify(() => { const h = newHost(); return { host: h, api: apiOf(h) }; }, ap2.plan);
+  assert(cutRun.verify[0].ok && cutRun.env.api.getDevInvestmentSummary(cutRun.built.scenarioIds[0]).rows.every(x => !x.ChallengeReductionPct),
+    '現況情境引用低減版：帶低減後金額、不帶低減%');
+  const noAmort = autoPlan(wb3, 0, [0], 'XC', { useAmort: false });
+  const r3 = E.buildAndVerify(() => { const h = newHost(); return { host: h, api: apiOf(h) }; }, noAmort.plan);
+  assert(r3.verify[0].ok && !Object.values(r3.built.formulaRows).some(m => m === 'amort'), '關閉開發攤提追蹤時全部帶入數字');
 
   /* ---- 5. 資料包 ---- */
   const pack = host.exportPack(['DQ']);

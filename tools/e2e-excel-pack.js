@@ -8,6 +8,7 @@
  *   - 選檔後自動判斷欄位與每一列；同版面的分頁標示「可一起轉」
  *   - 故意把一列改成「略過」→ 驗算會抓到不相同；改回來 → 全部相同
  *   - 公式轉換：顯示轉好的系統公式與帶入數字的原因；單列關掉公式、改參數名稱；自動改回數字的列會列出來
+ *   - 開發攤提：追到開發總投的列顯示「開發攤提」、直接打數字的列可以勾選回推；匯入地端版後開發總投頁有部門明細
  *   - 下載資料包 → 在 dist/FS-local.html「合併匯入」→ 車型與兩個情境都在、數字跟 Excel 相同
  *   - 對應設定會記住：重新選同一個檔案時沿用上次的調整
  */
@@ -141,6 +142,36 @@ async function main() {
     const got = k.columns[i].amounts.K;
     assert(Math.abs(got - fx.expected[i][31][3]) < 0.01, `匯入後第 ${i + 1} 個情境的加權營業淨利：${got}，Excel ${fx.expected[i][31][3]}`);
   });
+
+  // 開發攤提
+  const am = fixture.amortWorkbook();
+  const amFile = path.join(tmp, 'xa-fs.xlsx');
+  fs.writeFileSync(amFile, am.bytes);
+  await page.setInputFiles('#xp-file', amFile);
+  await page.waitForSelector('[data-role="7"]');
+  assert(/開發攤提.*「開發」1 筆投資.*÷ 40,000 台/.test(await calc(7)), '模具費顯示開發攤提：' + await calc(7));
+  assert(/ROUND/.test(await calc(11)), '治具攤提顯示追不到的原因：' + await calc(11));
+  await page.check('[data-bcalc="12"]');
+  assert(/開發攤提.*回推/.test(await calc(12)), '勾選後檢具攤提改成回推：' + await calc(12));
+  assert(/40,000 台\(48 個月\)/.test(await page.textContent('#xp-sc')), '第 4 步顯示攤提台數');
+  await page.fill('#xp-type', 'XA');
+  await page.dispatchEvent('#xp-type', 'change');
+  await page.click('#xp-run');
+  await page.waitForSelector('#xp-result .xp-note');
+  assert(/驗算通過/.test(await page.textContent('#xp-result .xp-note')), '開發攤提的檔案驗算通過');
+  assert(/5 列改成開發攤提/.test(await page.textContent('#xp-result')), '結果列出開發攤提列數');
+  const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('#xp-download')]);
+  const amPack = path.join(tmp, 'xa.json');
+  await dl2.saveAs(amPack);
+  await app.setInputFiles('#fs-local-bar input[type=file]', amPack);
+  await app.waitForSelector('#fs-local-dialog[open]');
+  await app.click('#fs-local-dialog button:has-text("合併匯入")');
+  await app.waitForSelector('#fs-local-dialog >> text=確認合併內容');
+  await Promise.all([app.waitForNavigation(), app.click('#fs-local-dialog button:has-text("確定合併")')]);
+  await app.waitForFunction(() => [...document.querySelectorAll('#vehicletype-selector option')].some(o => o.value === 'XA'));
+  const devRows = await app.evaluate(() => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail).getScenarios('XA'))
+    .then(scs => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail).getDevInvestmentSummary(scs[0].ScenarioID))));
+  assert(devRows.rows.length === 7 && devRows.rows.some(x => x.Department === '開發部'), '匯入後開發總投頁有部門明細：' + devRows.rows.map(x => x.Department).join(','));
 
   assert(errors.length === 0, '頁面有 JS 錯誤：' + errors.join(' | '));
   assert(external.length === 0, '不該連外部網路，卻請求了：' + external.join(', '));
