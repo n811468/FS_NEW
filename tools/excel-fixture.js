@@ -102,51 +102,80 @@ function makeXlsx(sheets) {
 
 /* ---------------- 測試用的 FS 版面 ---------------- */
 const VEH = ['D', 'E', 'F'];
+const RMB = ['K', 'L', 'M'];   // 每個車系的 RMB 報價欄(不是車系欄，同一列 × 匯率)
 const round = (x, d) => { const p = Math.pow(10, d || 0); return Math.sign(x) * Math.round(Math.abs(x) * p) / p; };
 
 /**
- * 三個車系 + 加權欄的 FS。opts 調整輸入數字，用來做「同版面的第二個分頁」。
+ * 三個車系 + 加權欄的 FS，明細刻意涵蓋各種 Excel 公式寫法(見 local/excel-formula.js 的轉換規則)：
+ *   16 材料成本-KD   =K16*$P$9*(1+$P$8)      RMB 欄 × 匯率 × (1+關稅率)       → 公式 + 車系別參數 + [CNY匯率] + [關稅率]
+ *   17 內陸運雜      =-2^2+D16*0+3387          Excel 先算 (-2)^2(=4)            → 系統算 -(2^2)，對不起來 → 自動改回數字
+ *   18 直接人工      各車系係數不同              ROUND(D15*0.042,0)…              → 車系個別公式
+ *   19 製造費用      E19 =D19、F19 數字          照抄另一個車系                   → 數字(註明照抄)
+ *   20 貨物稅        =ROUND(D12*$P$10,0)        $P$10 標籤「貨物稅率」             → 內建參數 [貨物稅率]
+ *   22 廣宣費用      =參數!B2                   引用其他分頁                     → 數字(原因)
+ *   23 促銷          =IFERROR(D22*0+23158,0)     系統沒有的函式                   → 數字(原因)
+ *   25 直接歸屬費用  =ROUND(D22*57.52%,0)       百分比常數                       → 公式
+ *   27 固定營業費用  E27 =D27、F27 =E27+0        引用其他車系欄做運算             → 數字(原因)
+ *   29 前瞻費用      兩個分頁的公式不同          =D25*0 / =D22*0                  → 數字(各分頁不一樣)
+ *   30 品牌分攤      D 數字、E/F 公式            =ROUND(E22*0.4,0)                → 數字 + 公式車系用車系個別公式
+ * opts：{ lp, promo, variant } 調整數字，做「同版面的第二個分頁」。
  * 回傳 { sheet, expected: { 列號: [各車系值, 加權] } }
  */
 function fullFs(name, opts) {
-  opts = Object.assign({ lp: 1, promo: 0 }, opts);
+  opts = Object.assign({ lp: 1, promo: 0, variant: false }, opts);
   const mix = [0.2, 0.3, 0.5];
-  const input = {
+  const P = { 8: 0.1, 9: 4.5, 10: 0.1 };         // 關稅率、匯率、貨物稅率
+  const rmb = [75000, 75000, 75000];
+  const per = fn => [0, 1, 2].map(fn);
+  const val = {
     7: [1000000, 1050000, 1299000],
     8: [3990, 3990, 3990],
     15: [433466, 506850, 581823].map(v => round(v * opts.lp, 2)),
-    16: [372148, 372148, 372148],
-    17: [3391, 3391, 3391],
-    18: [18232, 18480, 18626.5],
-    19: [29526, 29934, 30011],
+    19: [29526, 29526, 30011],
     22: [5556, 5556, 5556],
     23: [23158, 23158, 23158].map(v => v - opts.promo),
-    25: [3196, 3196, 3196],
     27: [41131, 41131, 41131],
-    29: [0, 0, 0],
-    30: [2164, 2164, 2164]
+    29: [0, 0, 0]
   };
-  const val = {};
-  Object.keys(input).forEach(r => { val[r] = input[r].slice(); });
-  const per = fn => [0, 1, 2].map(fn);
   val[9] = per(i => val[7][i] - val[8][i]);
   val[10] = per(i => round(val[9][i] / 1.05 * 0.05));
   val[11] = per(i => round((val[9][i] - val[10][i]) * 0.07));
   val[12] = per(i => val[9][i] - val[10][i] - val[11][i]);
+  val[16] = per(i => rmb[i] * P[9] * (1 + P[8]));
+  val[17] = per(i => Math.pow(-2, 2) + val[16][i] * 0 + 3387);   // Excel：負號先算 → 4 + 3387 = 3391
+  const laborK = [0.042, 0.0365, 0.032];
+  val[18] = per(i => round(val[15][i] * laborK[i]));
   val[14] = per(i => val[15][i] + val[16][i] + val[17][i]);
-  val[20] = per(i => round(val[12][i] * 0.1));
+  val[20] = per(i => round(val[12][i] * P[10]));
   val[13] = per(i => val[14][i] + val[18][i] + val[19][i] + val[20][i]);
   val[21] = per(i => val[12][i] - val[13][i]);
   val[24] = per(i => val[21][i] - (val[22][i] + val[23][i]));
+  val[25] = per(i => round(val[22][i] * 0.5752));
   val[26] = per(i => val[24][i] - val[25][i]);
   val[28] = per(i => val[26][i] - val[27][i]);
+  val[30] = [2164, round(val[22][1] * 0.4), round(val[22][2] * 0.4)];
   val[31] = per(i => val[28][i] - val[29][i] - val[30][i]);
 
+  // 公式：f(欄, 車系索引) → 公式文字；回傳 null = 這一格是數字
   const formulas = {
     9: c => `${c}7-${c}8`, 10: c => `ROUND(${c}9/1.05*0.05,0)`, 11: c => `ROUND((${c}9-${c}10)*0.07,0)`,
     12: c => `${c}9-${c}10-${c}11`, 13: c => `${c}14+${c}18+SUM(${c}19:${c}20)`, 14: c => `SUM(${c}15:${c}17)`,
-    20: c => `ROUND(${c}12*0.1,0)`, 21: c => `${c}12-${c}13`, 24: c => `${c}21-SUM(${c}22:${c}23)`,
-    26: c => `${c}24-${c}25`, 28: c => `${c}26-${c}27`, 31: c => `${c}28-${c}29-${c}30`
+    16: (c, i) => `${RMB[i]}16*$P$9*(1+$P$8)`,
+    17: c => `-2^2+${c}16*0+3387`,
+    18: (c, i) => `ROUND(${c}15*${laborK[i]},0)`,
+    19: (c, i) => (i === 1 ? 'D19' : null),
+    20: c => `ROUND(${c}12*$P$10,0)`,
+    21: c => `${c}12-${c}13`,
+    22: () => '參數!B2',
+    23: c => `IFERROR(${c}22*0+${23158 - opts.promo},0)`,
+    24: c => `${c}21-SUM(${c}22:${c}23)`,
+    25: c => `ROUND(${c}22*57.52%,0)`,
+    26: c => `${c}24-${c}25`,
+    27: (c, i) => (i === 1 ? 'D27' : i === 2 ? 'E27+0' : null),
+    28: c => `${c}26-${c}27`,
+    29: c => (opts.variant ? `${c}22*0` : `${c}25*0`),
+    30: (c, i) => (i === 0 ? null : `ROUND(${c}22*0.4,0)`),
+    31: c => `${c}28-${c}29-${c}30`
   };
   const labels = {
     6: '構成比', 7: '建議零售價(含稅)', 8: '廢車處理費(含稅)', 9: '實際零售價(含稅)', 10: '營業稅', 11: '銷售佣金',
@@ -157,20 +186,23 @@ function fullFs(name, opts) {
   const cells = {
     B2: 'DQ 損益試算', D3: 'DQ 開發案', D4: '3人貨車', E4: '9人商用', F4: '9人接駁', G4: '加權平均',
     D5: 'TWD', E5: 'TWD', F5: 'TWD', G5: 'TWD', H4: '3人貨車', H5: '%', J5: '說明',
+    K4: '3人貨車', L4: '9人商用', M4: '9人接駁', K5: 'RMB', L5: 'RMB', M5: 'RMB',
+    O8: '關稅率', P8: P[8], O9: '匯率', P9: P[9], O10: '貨物稅率', P10: P[10],
     B33: { v: '單位：元', inline: true }
   };
+  RMB.forEach((c, i) => { cells[c + 16] = rmb[i]; });
   Object.keys(labels).forEach(r => { cells['B' + r] = labels[r]; });
   VEH.forEach((c, i) => { cells[c + 6] = mix[i]; });
   cells.G6 = { f: 'SUM(D6:F6)', v: 1 };
   const expected = {};
   Object.keys(val).forEach(r => {
-    const w = val[r].reduce((s, v, i) => s + v * mix[i], 0);
+    const w = val[r].reduce((sum, v, i) => sum + v * mix[i], 0);
     expected[r] = val[r].concat([w]);
     VEH.forEach((c, i) => {
-      const f = formulas[r];
+      const f = formulas[r] ? formulas[r](c, i) : null;
       // 第 9 列用水平共用公式(D9 存全文，E9/F9 只寫共用編號)，其他列每格各自一段公式
-      if (f && +r === 9) cells[c + r] = i === 0 ? { f: f(c), v: val[r][i], shared: { si: 1, ref: 'D9:F9' } } : { si: 1, v: val[r][i] };
-      else cells[c + r] = f ? { f: f(c), v: val[r][i] } : val[r][i];
+      if (f && +r === 9) cells[c + r] = i === 0 ? { f, v: val[r][i], shared: { si: 1, ref: 'D9:F9' } } : { si: 1, v: val[r][i] };
+      else cells[c + r] = f ? { f, v: val[r][i] } : val[r][i];
     });
     // 加權欄：往下拖曳的共用公式(G7 存全文)
     cells['G' + r] = +r === 7 ? { f: 'D7*$D$6+E7*$E$6+F7*$F$6', v: w, shared: { si: 0, ref: 'G7:G31' } } : { si: 0, v: w };
@@ -179,6 +211,16 @@ function fullFs(name, opts) {
   cells.J20 = '廠價 × 10%';
   cells.J15 = '依 BOM 估算 & 含運費 <暫估>';
   return { sheet: { name, cells, merges: ['D3:G3'] }, expected };
+}
+
+/** 同一個版面但整張貼上值(沒有任何公式)：小計要由數字推斷 */
+function valuesOnly(sheet, name) {
+  const cells = {};
+  Object.keys(sheet.cells).forEach(ref => {
+    const c = sheet.cells[ref];
+    cells[ref] = c !== null && typeof c === 'object' ? (c.inline ? c : c.v) : c;
+  });
+  return { name, cells, merges: sheet.merges };
 }
 
 /** 沒有售價結構、只有收入與成本的極簡版面(科目名稱在 A 欄、兩個車系、沒有加權欄) */
@@ -197,9 +239,10 @@ function minimalFs() {
 
 function fixtureWorkbook() {
   const a = fullFs('DQ FS_現況');
-  const b = fullFs('DQ FS_目標', { lp: 0.95, promo: 3000 });
-  const other = { name: '參數', hidden: true, cells: { A1: '匯率', B1: 4.65 } };
-  return { bytes: makeXlsx([a.sheet, b.sheet, other]), expected: [a.expected, b.expected] };
+  const b = fullFs('DQ FS_目標', { lp: 0.95, promo: 3000, variant: true });
+  const other = { name: '參數', hidden: true, cells: { A1: '匯率', B1: 4.65, A2: '廣宣', B2: 5556 } };
+  const flat = valuesOnly(a.sheet, 'DQ 貼上值');
+  return { bytes: makeXlsx([a.sheet, b.sheet, other, flat]), expected: [a.expected, b.expected] };
 }
 
-module.exports = { makeXlsx, fullFs, minimalFs, fixtureWorkbook, crc32 };
+module.exports = { makeXlsx, fullFs, minimalFs, valuesOnly, fixtureWorkbook, crc32 };

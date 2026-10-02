@@ -7,6 +7,8 @@
  * 2. 版面判斷：科目名稱欄、車系欄(排除百分比欄與加權欄)、加權欄、說明欄
  * 3. 角色判斷：依 Excel 小計公式找出 B、群組、C、E/G/I/K 損益鏈、K 前面有兩個扣項時 J 變群組
  * 4. 建立 + 驗算：兩個分頁(同版面)各成一個情境，每一格跟 Excel 相同(含加權欄)
+ * 4b. Excel 公式 → 系統公式：每一種寫法轉成什麼、轉不過去的原因、對不起來時自動改回數字、改參數結果會跟著動
+ * 4c. 整張貼上值(沒有公式)：由數字推斷出跟有公式時一樣的結構
  * 5. 資料包：合併匯入一台全新的地端版主機後數字不變
  * 6. 沒有售價結構的極簡版面也轉得過去；對應設定有矛盾時會擋下來
  * 7. dist/FS-excel-to-pack.html 是最新的
@@ -23,6 +25,7 @@ const Pack = require('../local/pack.js');
 const Host = require('../local/host.js');
 const Shim = require('../local/gas-shim.js');
 const build = require('./build-local');
+const F = require('../local/excel-formula.js');
 const fixture = require('./excel-fixture');
 
 const failures = [];
@@ -47,7 +50,7 @@ function autoPlan(wb, refIndex, sheetIndexes, typeId) {
   const sug = E.suggestRoles(rows, layout);
   const plan = {
     typeId, typeNotes: '', vehicles: layout.vehicles, weightedCol: layout.weightedCol, noteCol: layout.noteCol,
-    labelCol: layout.labelCol, rows, roles: sug.roles
+    labelCol: layout.labelCol, firstRow: layout.firstRow, rows, roles: sug.roles
   };
   plan.scenarios = sheetIndexes.map(i => ({
     sheet: wb.sheets[i], name: wb.sheets[i].name, gate: 'GATE F', type: '現況',
@@ -61,7 +64,7 @@ async function main() {
   /* ---- 1. 讀取 ---- */
   const fx = fixture.fixtureWorkbook();
   const wb = await X.readWorkbook(fx.bytes, inflate);
-  assert(wb.sheets.length === 3 && wb.sheets[2].hidden && !wb.sheets[0].hidden, '分頁數與隱藏狀態');
+  assert(wb.sheets.length === 4 && wb.sheets[2].hidden && !wb.sheets[0].hidden, '分頁數與隱藏狀態');
   const s0 = wb.sheets[0];
   const at = ref => { const p = X.parseRef(ref); return X.cell(s0, p.r, p.c); };
   assert(at('B33').v === '單位：元', 'inlineStr 文字：' + JSON.stringify(at('B33')));
@@ -98,11 +101,9 @@ async function main() {
   assert(E.sameLayout(wb.sheets[1], plan).length === 0, '同版面的第二個分頁');
   assert(E.planProblems(plan).length === 0, '自動判斷的對應不應該有矛盾：' + E.planProblems(plan).join(' / '));
 
-  /* ---- 4. 建立 + 驗算 ---- */
-  const host = newHost();
-  const api = apiOf(host);
-  const built = E.buildFromPlan(api, plan);
-  const result = E.verifyPlan(api, plan, built);
+  /* ---- 4. 建立 + 驗算(含公式轉換與自動改回數字) ---- */
+  const run = E.buildAndVerify(() => { const h = newHost(); return { host: h, api: apiOf(h) }; }, plan);
+  const host = run.env.host, api = run.env.api, built = run.built, result = run.verify;
   result.forEach((res, si) => {
     assert(res.checked >= 100, `${res.sheetName} 比對格數太少：${res.checked}`);
     res.rows.forEach(row => row.cells.forEach((c, ci) => {
@@ -122,6 +123,50 @@ async function main() {
   const notesSaved = api.getLineNotes(built.scenarioIds[0]);
   assert(JSON.stringify(notesSaved).indexOf('廠價 × 10%') !== -1, '說明欄帶進科目說明');
   assert(api.getScenarios('DQ').length === 2, '兩個分頁 → 兩個情境');
+
+  /* ---- 4b. 公式轉換 ---- */
+  const tr = built.translation;
+  const show = r => F.displayFormula(tr.rows[r].formula, plan, tr.params);
+  const fb = run.plan.fallback;
+  const lineOf = r => defs.find(d => d.LineCode === built.codes[r]);
+  assert(built.formulaRows[16] === 'formula' && show(16) === '[材料成本-KD(RMB)] × [CNY匯率] × (1 + [關稅率])', '第 16 列 RMB × 匯率 × (1+關稅率)：' + show(16));
+  assert(/對不起來/.test(fb[17] || '') && !built.formulaRows[17], 'Excel 的 -2^2 跟系統算法不同：要自動改回數字：' + fb[17]);
+  assert(built.formulaRows[18] === 'formula' && Object.keys(tr.rows[18].vehicleFormulas).length === 2 &&
+    Object.keys(JSON.parse(lineOf(18).VehicleFormulas || '{}')).length === 2, '各車系係數不同 → 車系個別公式');
+  assert(tr.rows[19].mode === 'input' && !tr.rows[19].reason && /照抄/.test(tr.rows[19].note), '頂規 = 入門(照抄) → 數字並註明：' + JSON.stringify(tr.rows[19]));
+  assert(built.formulaRows[20] && show(20) === 'ROUND([廠價(未稅)] × [貨物稅率], 0)', '標籤是「貨物稅率」→ 內建參數：' + show(20));
+  assert(/其他分頁「參數」B2/.test(tr.rows[22].reason), '引用其他分頁：' + tr.rows[22].reason);
+  assert(/IFERROR/.test(tr.rows[23].reason), '系統沒有的函式：' + tr.rows[23].reason);
+  assert(built.formulaRows[25] && show(25) === 'ROUND([廣宣費用] × (57.52/100), 0)', '百分比常數：' + show(25));
+  assert(/「3人貨車」欄|「9人商用」欄/.test(tr.rows[27].reason), '引用其他車系欄：' + tr.rows[27].reason);
+  assert(/各分頁/.test(tr.rows[29].reason), '兩個分頁的公式不同：' + tr.rows[29].reason);
+  assert(built.formulaRows[30] === 'mixed' && lineOf(30).CalcType === 'INPUT' && Object.keys(JSON.parse(lineOf(30).VehicleFormulas)).length === 2,
+    '一個車系是數字、其他是公式 → 數字 + 車系個別公式');
+  const params = api.getParameters(built.scenarioIds[0]).filter(p => p.ScenarioID === built.scenarioIds[0]);
+  const pv = (n, vid) => (params.find(p => p.ParamName === n && (p.VehicleID || '') === (vid || '')) || {}).Value;
+  assert(pv('關稅率') === 10 && pv('貨物稅率') === 10, '參數值(% 以百分比數值儲存)：關稅率 ' + pv('關稅率') + '、貨物稅率 ' + pv('貨物稅率'));
+  assert(pv('材料成本-KD(RMB)', built.vehicleIds[1]) === 75000, '車系別參數');
+  assert(params.some(p => p.ParamName === '現況匯率' && p.Currency === 'CNY' && p.Value === 4.5), '匯率寫進匯率設定');
+  // 轉成公式之後，改參數結果要跟著動(這就是轉公式的目的)
+  const tariff = params.find(p => p.ParamName === '關稅率' && !p.VehicleID);
+  api.saveRateGrid(built.scenarioIds[0], [{ ParamID: tariff.ParamID, ParamName: '關稅率', VehicleID: '', Value: 20 }]);
+  const kd = api.calculatePLAllVehicles(built.scenarioIds[0]).vehicles[0].lines.find(l => l.LineCode === built.codes[16]).Amount;
+  near(kd, 75000 * 4.5 * 1.2, '關稅率改成 20% 後 KD 成本跟著變');
+  api.saveRateGrid(built.scenarioIds[0], [{ ParamID: tariff.ParamID, ParamName: '關稅率', VehicleID: '', Value: 10 }]);
+
+  // 關掉公式轉換：全部帶入數字，一樣跟 Excel 相同
+  const off = E.buildAndVerify(() => { const h = newHost(); return { host: h, api: apiOf(h) }; }, Object.assign({}, plan, { useFormulas: false }));
+  assert(Object.keys(off.built.formulaRows).length === 0 && off.verify.every(v => v.ok), '關閉公式轉換時全部帶入數字且驗算通過');
+
+  /* ---- 4c. 貼上值 ---- */
+  const flatPlan = autoPlan(wb, 3, [3], 'DQV');
+  const flatRole = r => flatPlan.plan.roles[r] && flatPlan.plan.roles[r].role + (flatPlan.plan.roles[r].parent ? '@' + flatPlan.plan.roles[r].parent : '');
+  const structural = [13, 14, 15, 16, 21, 24, 26, 28, 29, 30, 31, 12, 9];
+  structural.forEach(r => assert(flatRole(r) === want[r], `貼上值第 ${r} 列：${flatRole(r)}，應與有公式時相同(${want[r]})`));
+  assert(flatPlan.plan.rows.find(r => r.row === 14).shape.inferred && F.describeShape(flatPlan.plan.rows.find(r => r.row === 13).shape, 4) === 'D14+SUM(D18:D20)',
+    '推斷的算式：' + F.describeShape(flatPlan.plan.rows.find(r => r.row === 13).shape, 4));
+  const flatRun = E.buildAndVerify(() => { const h = newHost(); return { host: h, api: apiOf(h) }; }, flatPlan.plan);
+  assert(flatRun.verify[0].ok, '貼上值的分頁也要逐格相同');
 
   /* ---- 5. 資料包 ---- */
   const pack = host.exportPack(['DQ']);

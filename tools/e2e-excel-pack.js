@@ -7,6 +7,7 @@
  *   - 不連外部網路、沒有 JS 錯誤；用瀏覽器內建的解壓縮讀 .xlsx
  *   - 選檔後自動判斷欄位與每一列；同版面的分頁標示「可一起轉」
  *   - 故意把一列改成「略過」→ 驗算會抓到不相同；改回來 → 全部相同
+ *   - 公式轉換：顯示轉好的系統公式與帶入數字的原因；單列關掉公式、改參數名稱；自動改回數字的列會列出來
  *   - 下載資料包 → 在 dist/FS-local.html「合併匯入」→ 車型與兩個情境都在、數字跟 Excel 相同
  *   - 對應設定會記住：重新選同一個檔案時沿用上次的調整
  */
@@ -90,12 +91,32 @@ async function main() {
   const summaries = await page.$$eval('#xp-result summary', s => s.map(x => x.textContent));
   assert(summaries.length === 2 && summaries.every(s => /✓/.test(s)), '兩個分頁都通過：' + summaries.join(' | '));
 
+  // 公式轉換
+  const calc = async r => (await page.$eval(`[data-role="${r}"]`, el => el.closest('tr').querySelector('.xp-calc').textContent)).trim();
+  assert(/公式.*\[CNY匯率\].*\[關稅率\]/.test(await calc(16)), '第 16 列顯示轉好的公式：' + await calc(16));
+  assert(/數字.*其他分頁「參數」/.test(await calc(22)), '第 22 列顯示帶入數字的原因：' + await calc(22));
+  assert(/數字.*對不起來/.test(await calc(17)), '驗算後自動改回數字的列要顯示原因：' + await calc(17));
+  const fbNote = await page.$$eval('#xp-result > .xp-note', n => n.map(x => x.textContent).join(' '));
+  assert(/第 17 列「內陸運雜」/.test(fbNote), '結果要列出改回數字的列：' + fbNote);
+  assert(await page.$('[data-pname="cell:P8"]') !== null, '參數表要列出關稅率');
+  await page.fill('[data-pname="cell:P8"]', '進口關稅率');
+  await page.dispatchEvent('[data-pname="cell:P8"]', 'change');
+  await page.uncheck('[data-fon="25"]');
+  assert(/數字.*手動改為帶入數字/.test(await calc(25)), '單列關掉公式：' + await calc(25));
+  await page.click('#xp-run');
+  await page.waitForSelector('#xp-result .xp-note');
+  assert(/驗算通過/.test(await page.textContent('#xp-result .xp-note')), '改參數名稱、關掉一列公式後仍通過');
+  assert(/\[進口關稅率\]/.test(await calc(16)), '公式跟著用新的參數名稱：' + await calc(16));
+
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#xp-download')]);
   const packFile = path.join(tmp, 'pack.json');
   await dl.saveAs(packFile);
   assert(/^FS資料包_DQ_\d{8}-\d{4}\.json$/.test(dl.suggestedFilename()), '下載檔名：' + dl.suggestedFilename());
   const pack = JSON.parse(fs.readFileSync(packFile, 'utf8'));
   assert(pack.format === 'FS-損益試算資料包' && pack.tables.Scenarios.length === 2 && pack.tables.Vehicles.length === 3, '資料包內容');
+  assert(pack.tables.ParamDefs.some(d => d.ParamName === '進口關稅率'), '資料包帶著改過名稱的參數');
+  const kdLine = pack.tables.PLLineItems.find(d => d.LineName === '材料成本-KD');
+  assert(kdLine && kdLine.CalcType === 'FORMULA' && /\[CNY匯率\]/.test(kdLine.Formula), '資料包裡的科目是公式：' + (kdLine && kdLine.Formula));
 
   // 重新選同一個檔：沿用剛才的對應(第 20 列改過的 parent 留著)
   await page.setInputFiles('#xp-file', xlsx);

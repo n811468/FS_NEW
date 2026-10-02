@@ -12,13 +12,14 @@
  *   4. buildFromPlan  用系統自己的後端 API 建車型、科目表、情境與所有輸入(跟使用者在畫面上操作同一條路)
  *   5. verifyPlan     重算後跟 Excel 上的數字逐格比對(含加權欄)
  *
- * 明細一律以 Excel 存檔時算好的值帶入(手動輸入)，小計由系統依科目樹計算 —— 所以逐格比對能驗出
- * 「有沒有漏列、有沒有掛錯小計」。Excel 公式本身不轉成系統公式(各家 Excel 寫法差太多)，需要時到「科目與公式」頁再改。
+ * 明細的 Excel 公式盡量轉成系統公式(規則與轉不過去的情況見 local/excel-formula.js)，轉不過去的帶入 Excel 算好的數字；
+ * 小計由系統依科目樹計算。最後逐格比對，轉成公式卻對不起來的列自動改回帶入數字(buildAndVerify)。
+ * 整張表是貼上值、沒有公式時，小計改由數字推斷(F.inferShapes)。
  */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./xlsx-reader.js'));
-  else root.FSExcelPack = factory(root.FSXlsx);
-}(typeof self !== 'undefined' ? self : this, function (X) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./xlsx-reader.js'), require('./excel-formula.js'));
+  else root.FSExcelPack = factory(root.FSXlsx, root.FSExcelFormula);
+}(typeof self !== 'undefined' ? self : this, function (X, F) {
   'use strict';
 
   var TOLERANCE = 0.01;
@@ -173,6 +174,7 @@
       out.push({
         row: r, label: label, values: values, weighted: weighted,
         formula: first && first.f ? first.f : '',
+        formulas: layout.vehicles.map(function (v) { var c = X.cell(sheet, r, v.col); return c && c.f ? c.f : ''; }),
         note: layout.noteCol ? text(X.cell(sheet, r, layout.noteCol)) : ''
       });
     }
@@ -256,6 +258,7 @@
     var col = layout.vehicles[0] ? layout.vehicles[0].col : 0;
     var byRow = {};
     rows.forEach(function (r) { byRow[r.row] = r; r.shape = formulaShape(r.formula, col); });
+    F.inferShapes(rows);   // 沒有公式的列(貼上值)：由數字推斷是不是小計
     var roles = {};
     var notes = [];
     rows.forEach(function (r) { roles[r.row] = { role: 'skip', parent: '' }; });
@@ -513,6 +516,43 @@
     var vehicleIds = plan.vehicles.map(function (v) { return T + '-' + clean(v.name); });
     plan.vehicles.forEach(function (v, i) { api.saveVehicle({ VehicleID: vehicleIds[i], VehicleTypeID: T, VehicleCode: clean(v.name) }); });
 
+    // Excel 公式 → 系統公式。參數要先定義好(公式存檔時會檢查 [名稱] 存不存在)
+    var tr = F.translatePlan(plan);
+    var formulaRows = {}, fallbacks = {}, usedParams = {};
+    var textsOf = function (t) { return [t.formula].concat(Object.keys(t.vehicleFormulas).map(function (k) { return t.vehicleFormulas[k]; })); };
+    Object.keys(tr.rows).forEach(function (row) {
+      var t = tr.rows[row];
+      if (t.mode === 'input') return;
+      textsOf(t).forEach(function (f) { str(f).replace(/⟦p:([^⟧]+)⟧/g, function (m, k) { usedParams[k] = true; return m; }); });
+    });
+    Object.keys(usedParams).forEach(function (key) {
+      var p = tr.params[key];
+      if (p.kind === 'fx' || p.builtin) return;
+      var first = F.paramValues(p, plan.scenarios[0].sheet);
+      var def = p.kind === 'row' ? first.byVehicle[Object.keys(first.byVehicle)[0]] : first.global;
+      api.saveParamDef({
+        ParamName: p.name, Unit: p.unit, DefaultValue: def === null || def === undefined ? '' : def,
+        Description: '由 Excel ' + (p.kind === 'row' ? '第 ' + p.row + ' 列的 ' + p.token + ' 欄' : p.ref + (p.label ? '「' + p.label + '」' : '')) + '轉入'
+      });
+    });
+    Object.keys(tr.rows).forEach(function (row) {
+      var t = tr.rows[row];
+      if (t.mode === 'input' || !codes[row]) return;
+      var main = t.mode === 'formula' ? F.resolveFormula(t.formula, codes, tr.params) : '';
+      var vf = {}, ok = main !== null;
+      Object.keys(t.vehicleFormulas).forEach(function (vi) {
+        var f = F.resolveFormula(t.vehicleFormulas[vi], codes, tr.params);
+        if (f === null) ok = false; else vf[vehicleIds[vi]] = f;
+      });
+      if (!ok) { fallbacks[row] = '公式引用的列沒有對應到系統科目，改為帶入數字'; return; }
+      try {
+        api.saveChartLine(T, { LineCode: codes[row], LineName: rowOf[row].label, CalcType: t.mode === 'formula' ? 'FORMULA' : 'INPUT', Formula: main, VehicleFormulas: vf });
+        formulaRows[row] = t.mode;
+      } catch (e) {
+        fallbacks[row] = '系統不接受轉換後的公式(' + e.message + ')，改為帶入數字';
+      }
+    });
+
     var scenarioIds = plan.scenarios.map(function (sc) {
       var sid = api.createScenarioFrom({
         ScenarioID: '', Gate: sc.gate || 'GATE F', ScenarioName: sc.name, ScenarioType: sc.type || '現況',
@@ -532,12 +572,28 @@
           HorizontalPartsPriceAdj: '', Notes: ''
         };
       }));
-      api.saveRateGrid(sid, Object.keys(sc.rates || {}).map(function (n) { return { ParamID: '', ParamName: n, VehicleID: '', Value: sc.rates[n] }; }));
+      // 比率與參數：同名(同車系)只留一筆，Excel 參數儲存格的值優先於反推的比率
+      var rateMap = {}, fx = [];
+      Object.keys(sc.rates || {}).forEach(function (n) { rateMap[n + '|'] = { ParamName: n, VehicleID: '', Value: sc.rates[n] }; });
+      Object.keys(usedParams).forEach(function (key) {
+        var p = tr.params[key], v = F.paramValues(p, sc.sheet);
+        if (p.kind === 'fx') { if (v.global !== null) fx.push({ ParamID: '', Currency: p.currency, ParamName: '現況匯率', Value: v.global }); return; }
+        if (p.kind === 'row') {
+          Object.keys(v.byVehicle).forEach(function (vi) {
+            if (v.byVehicle[vi] !== null) rateMap[p.name + '|' + vehicleIds[vi]] = { ParamName: p.name, VehicleID: vehicleIds[vi], Value: v.byVehicle[vi] };
+          });
+        } else if (v.global !== null) rateMap[p.name + '|'] = { ParamName: p.name, VehicleID: '', Value: v.global };
+      });
+      api.saveRateGrid(sid, Object.keys(rateMap).map(function (k) { return Object.assign({ ParamID: '' }, rateMap[k]); }));
+      if (fx.length) api.saveFxGrid(sid, fx);
 
       var cost = [], opex = [];
       rolesOf('detail').forEach(function (r) {
         var target = rootParent(roles, r.row) === 'B' ? cost : opex;
+        var fm = formulaRows[r.row];
         plan.vehicles.forEach(function (v, i) {
+          // 轉成公式的車系不帶數字(帶了也不會用到，反而讓人以為那是輸入值)
+          if (fm === 'formula' || (fm === 'mixed' && tr.rows[r.row].vehicleFormulas[i] !== undefined)) return;
           var amount = val(r.row, i);
           if (amount === null) return;
           target.push({ RowID: '', VehicleID: vehicleIds[i], LineCode: codes[r.row], Amount: amount, Currency: 'TWD', Notes: '' });
@@ -556,7 +612,36 @@
       }
       return sid;
     });
-    return { codes: codes, scenarioIds: scenarioIds, vehicleIds: vehicleIds };
+    return { codes: codes, scenarioIds: scenarioIds, vehicleIds: vehicleIds, translation: tr, formulaRows: formulaRows, fallbacks: fallbacks };
+  }
+
+  /**
+   * 建立 + 驗算，轉成公式卻跟 Excel 對不起來的列自動改回帶入數字，再建一次(最多 5 輪)。
+   * newEnv()：每一輪給一台全新的後端 → { api, host }。
+   * 回傳 { env, plan(含 fallback：哪幾列改回數字、為什麼), built, verify }
+   */
+  function buildAndVerify(newEnv, plan) {
+    var fallback = Object.assign({}, plan.fallback || {});
+    var last = null;
+    for (var round = 0; round < 5; round++) {
+      var p2 = Object.assign({}, plan, { fallback: Object.assign({}, fallback) });
+      var env = newEnv();
+      var built = buildFromPlan(env.api, p2);
+      Object.keys(built.fallbacks).forEach(function (r) { fallback[r] = built.fallbacks[r]; });
+      var verify = verifyPlan(env.api, p2, built);
+      last = { env: env, plan: Object.assign({}, p2, { fallback: Object.assign({}, fallback) }), built: built, verify: verify };
+      var bad = {};
+      verify.forEach(function (v) {
+        v.rows.forEach(function (row) {
+          if (!built.formulaRows[row.row] || bad[row.row]) return;
+          var c = row.cells.filter(function (x) { return x.ok === false; })[0];
+          if (c) bad[row.row] = '轉成公式後跟 Excel 對不起來(「' + v.sheetName + '」Excel ' + c.excel + '、系統 ' + c.system + ')，改為帶入數字';
+        });
+      });
+      if (!Object.keys(bad).length) return last;
+      Object.keys(bad).forEach(function (r) { fallback[r] = bad[r]; });
+    }
+    return last;
   }
 
   /* =====================================================================
@@ -628,7 +713,7 @@
   return {
     TOLERANCE: TOLERANCE, ROLE_LABELS: ROLE_LABELS, PARENTS: PARENTS, STRUCTURE: STRUCTURE,
     analyzeSheet: analyzeSheet, extractRows: extractRows, suggestRoles: suggestRoles, inferRates: inferRates,
-    formulaShape: formulaShape, planProblems: planProblems, buildFromPlan: buildFromPlan, verifyPlan: verifyPlan,
+    formulaShape: formulaShape, planProblems: planProblems, buildFromPlan: buildFromPlan, verifyPlan: verifyPlan, buildAndVerify: buildAndVerify,
     sameLayout: sameLayout, mixFor: mixFor, signature: signature, clean: clean
   };
 }));

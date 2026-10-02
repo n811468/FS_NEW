@@ -5,7 +5,7 @@
  */
 (function () {
   'use strict';
-  var X = window.FSXlsx, E = window.FSExcelPack, Pack = window.FSPack;
+  var X = window.FSXlsx, E = window.FSExcelPack, F = window.FSExcelFormula, Pack = window.FSPack;
   var MAP_KEY = 'fsExcelPack.map.';
   var GATES = ['GATE F', 'GATE E', 'GATE D', 'GATE C', 'GATE B', 'GATE A', 'GATE Z'];
   var STRUCT_NAMES = { B: 'B 銷貨成本', C: 'C = A - B', E: 'E', G: 'G', I: 'I', K: 'K 營業淨利' };
@@ -82,10 +82,14 @@
     S.notes = sug.notes;
     S.restored = false;
     S.signature = E.signature(S.rows);
+    S.useFormulas = true; S.formulaOff = {}; S.paramNames = {};
     var saved = storeGet(MAP_KEY + S.signature);
     if (saved && saved.roles) {
       S.rows.forEach(function (r) { if (saved.roles[r.row]) S.roles[r.row] = saved.roles[r.row]; });
       if (saved.typeId) S.typeId = saved.typeId;
+      if (saved.useFormulas === false) S.useFormulas = false;
+      S.formulaOff = saved.formulaOff || {};
+      S.paramNames = saved.paramNames || {};
       S.restored = true;
     }
     S.scenarios = {};
@@ -102,7 +106,8 @@
     var layout = layoutOf();
     var plan = {
       typeId: S.typeId.trim(), typeNotes: S.typeNotes, vehicles: layout.vehicles, weightedCol: S.weightedCol,
-      noteCol: S.noteCol, labelCol: S.labelCol, rows: S.rows, roles: S.roles
+      noteCol: S.noteCol, labelCol: S.labelCol, firstRow: S.firstRow, rows: S.rows, roles: S.roles,
+      useFormulas: S.useFormulas !== false, formulaOff: S.formulaOff || {}, paramNames: S.paramNames || {}
     };
     plan.scenarios = includedSheets().map(function (i) { return scenarioOf(i, plan); });
     return plan;
@@ -235,9 +240,17 @@
     var notes = (S.restored ? ['已套用上次這份 Excel 的對應設定。<button class="xp-btn" type="button" id="xp-reset-map">改回自動判斷</button>'] : [])
       .concat(S.notes.map(esc));
     var html = notes.length ? '<div class="xp-note"><ul>' + notes.map(function (n) { return '<li>' + n + '</li>'; }).join('') + '</ul></div>' : '';
+    var plan = planOf();
+    var tr = safeTranslate(plan);
+    var lastFallback = S.result && S.result.plan ? (S.result.plan.fallback || {}) : {};
+    var counts = { formula: 0, input: 0 };
+    Object.keys(tr.rows).forEach(function (k) { counts[tr.rows[k].mode === 'input' || lastFallback[k] ? 'input' : 'formula']++; });
+    html += '<div class="xp-row" style="margin:6px 0 10px"><label><input type="checkbox" id="xp-use-formulas"' + (S.useFormulas !== false ? ' checked' : '') +
+      '> 把 Excel 公式轉成系統公式</label><span class="xp-sub" style="margin:0">' +
+      (S.useFormulas !== false ? '明細 ' + (counts.formula + counts.input) + ' 列：' + counts.formula + ' 列轉成公式、' + counts.input + ' 列帶入數字(滑鼠移到原因上看完整說明)' : '關閉時所有明細都帶入 Excel 算好的數字') + '</span></div>';
     html += '<div class="xp-scroll" style="max-height:70vh"><table class="xp-table"><thead><tr><th>列</th><th>Excel 科目</th>' +
       vehicles.map(function (v) { return '<th>' + esc(v.name) + '</th>'; }).join('') +
-      '<th>Excel 公式</th><th>在系統裡是</th><th>掛在哪個小計底下</th></tr></thead><tbody>';
+      '<th>Excel 公式</th><th>在系統裡是</th><th>掛在哪個小計底下</th><th>系統怎麼算</th></tr></thead><tbody>';
     S.rows.forEach(function (r) {
       var ro = S.roles[r.row] || { role: 'skip', parent: '' };
       var cls = ro.role === 'skip' ? 'skip' : (/^sub:|^check:P8|^group/.test(ro.role) ? 'sub' : '');
@@ -245,11 +258,78 @@
       html += '<tr class="' + cls + '"><td>' + r.row + '</td>' +
         '<td><span class="xp-indent" style="width:' + (needsParent ? 14 + depthOf(r.row) * 14 : 0) + 'px"></span>' + esc(r.label) + '</td>' +
         r.values.map(function (v) { return '<td class="num">' + fmt(v) + '</td>'; }).join('') +
-        '<td class="formula" title="' + esc(r.formula) + '">' + (r.formula ? '=' + esc(r.formula) : '') + '</td>' +
+        excelFormulaCell(r, vehicles) +
         '<td><select data-role="' + r.row + '">' + roleOptions(ro.role) + '</select></td>' +
-        '<td>' + (needsParent ? '<select data-parent="' + r.row + '">' + parentOptions(r.row, ro.parent) + '</select>' : '') + '</td></tr>';
+        '<td>' + (needsParent ? '<select data-parent="' + r.row + '">' + parentOptions(r.row, ro.parent) + '</select>' : '') + '</td>' +
+        '<td class="xp-calc">' + calcCell(r, ro, tr, plan, lastFallback) + '</td></tr>';
     });
     $('#xp-rows').innerHTML = html + '</tbody></table></div>';
+  }
+
+  function safeTranslate(plan) {
+    try { return F.translatePlan(plan); } catch (e) { return { rows: {}, params: {} }; }
+  }
+
+  /** Excel 公式欄：有公式就顯示公式；沒有公式但由數字推斷出是小計，就顯示推斷的算式 */
+  function excelFormulaCell(r, vehicles) {
+    if (r.formula) return '<td class="formula" title="' + esc(r.formula) + '">=' + esc(r.formula) + '</td>';
+    var inferred = F.describeShape(r.shape, vehicles[0] ? vehicles[0].col : 1);
+    if (inferred) return '<td class="formula xp-inferred" title="這一列在 Excel 沒有公式(貼上值)，數字剛好等於這個算式">由數字推斷：=' + esc(inferred) + '</td>';
+    return '<td class="formula"></td>';
+  }
+
+  /** 系統怎麼算：小計/公式/帶入數字(與原因) */
+  function calcCell(r, ro, tr, plan, lastFallback) {
+    if (ro.role === 'skip') return '';
+    if (ro.role === 'group') return '<span class="xp-tag">小計</span> 底下明細合計';
+    if (/^sub:/.test(ro.role)) return '<span class="xp-tag">小計</span> 系統損益鏈';
+    if (/^price|^mix/.test(ro.role)) return '<span class="xp-tag">銷售構成</span>';
+    if (/^check:/.test(ro.role)) return '<span class="xp-tag">售價結構</span> 系統公式';
+    var t = tr.rows[r.row];
+    if (!t) return '';
+    var why = lastFallback[r.row] || t.reason;
+    var toggle = '';
+    var canToggle = S.useFormulas !== false && (t.mode !== 'input' || S.formulaOff[r.row]) && !lastFallback[r.row];
+    if (canToggle) toggle = '<label class="xp-mini"><input type="checkbox" data-fon="' + r.row + '"' + (S.formulaOff[r.row] ? '' : ' checked') + '>用公式</label> ';
+    if (t.mode !== 'input' && !lastFallback[r.row]) {
+      var main = t.mode === 'formula' ? F.displayFormula(t.formula, plan, tr.params) : '';
+      var per = Object.keys(t.vehicleFormulas).map(function (vi) {
+        return esc(plan.vehicles[vi].name) + '：' + esc(F.displayFormula(t.vehicleFormulas[vi], plan, tr.params));
+      });
+      var body = (main ? '<code>' + esc(main) + '</code>' : '') +
+        (per.length ? '<div class="xp-per">' + (t.mode === 'mixed' ? '其他車系帶入數字；' : '車系個別公式 ') + per.join('；') + '</div>' : '');
+      return toggle + '<span class="xp-tag ok">公式</span> ' + body;
+    }
+    var note = t.note ? '<span class="xp-why">' + esc(t.note) + '</span>' : '';
+    return toggle + '<span class="xp-tag' + (why ? ' warn' : '') + '">數字</span> ' +
+      (why ? '<span class="xp-why" title="' + esc(why) + '">' + esc(why) + '</span>' : note);
+  }
+
+  function renderParams(plan, tr) {
+    var used = {};
+    Object.keys(tr.rows).forEach(function (k) {
+      var t = tr.rows[k];
+      if (t.mode === 'input') return;
+      [t.formula].concat(Object.keys(t.vehicleFormulas).map(function (x) { return t.vehicleFormulas[x]; }))
+        .forEach(function (f) { String(f || '').replace(/⟦p:([^⟧]+)⟧/g, function (m, key) { used[key] = true; return m; }); });
+    });
+    var keys = Object.keys(used);
+    if (!keys.length) return '';
+    var ref = plan.scenarios[0].sheet;
+    var html = '<h3 class="xp-h3">公式用到的參數</h3><p class="xp-sub">從 Excel 的參數儲存格建立，每個情境帶自己分頁上的值；名稱可以改(匯率會寫進「匯率設定」)。</p>' +
+      '<div class="xp-scroll"><table class="xp-table"><thead><tr><th>參數名稱</th><th>來源</th><th>單位</th><th>「' + esc(ref.name) + '」的值</th></tr></thead><tbody>';
+    keys.sort().forEach(function (key) {
+      var p = tr.params[key];
+      var v = F.paramValues(p, ref);
+      var shown = p.kind === 'row'
+        ? Object.keys(v.byVehicle).map(function (vi) { return esc(plan.vehicles[vi].name) + ' ' + fmt(v.byVehicle[vi]); }).join('、')
+        : fmt(v.global) + (p.unit === '%' ? '%' : '');
+      var src = p.kind === 'row' ? '第 ' + p.row + ' 列的 ' + esc(p.token) + ' 欄(每個車系一個值)' : esc(p.ref) + (p.label ? '「' + esc(p.label) + '」' : '');
+      html += '<tr><td>' + (p.kind === 'fx' || p.builtin ? esc(p.name) + ' <span class="xp-tag">' + (p.kind === 'fx' ? '匯率設定' : '內建參數') + '</span>'
+        : '<input type="text" data-pname="' + esc(key) + '" value="' + esc(p.name) + '">') +
+        '</td><td>' + src + '</td><td>' + esc(p.unit) + '</td><td class="num">' + shown + '</td></tr>';
+    });
+    return html + '</tbody></table></div>';
   }
 
   function renderScenarios() {
@@ -274,7 +354,7 @@
         plan.vehicles.map(function (v, vi) { return '<td><input type="number" step="any" data-sc="' + n + '" data-f="mix:' + vi + '" value="' + sc.mix[vi] + '"></td>'; }).join('') +
         '</tr>';
     });
-    $('#xp-sc').innerHTML = html + '</tbody></table></div>';
+    $('#xp-sc').innerHTML = html + '</tbody></table></div>' + renderParams(plan, safeTranslate(plan));
   }
 
   function renderResult() {
@@ -291,6 +371,16 @@
       ? '<div class="xp-note warn">有 ' + bad + ' 格跟 Excel 不一樣(共比對 ' + total + ' 格)。通常是某一列沒有掛到正確的小計、或漏掉了。仍然可以下載，但建議先調整「逐列對應」。</div>'
       : '<div class="xp-note">驗算通過：' + total + ' 格全部跟 Excel 相同(容差 ' + E.TOLERANCE + ' 元)。下載後在車型損益試算系統按「匯入資料包…」→「合併匯入」。</div>';
     var plan = R.plan;
+    var fb = plan.fallback || {};
+    var fbRows = Object.keys(fb).filter(function (k) { return !(plan.formulaOff || {})[k]; });
+    var nFormula = Object.keys(R.built.formulaRows).length;
+    if (plan.useFormulas !== false) {
+      html += '<div class="xp-note">' + nFormula + ' 列明細轉成系統公式' +
+        (fbRows.length ? '；以下 ' + fbRows.length + ' 列在建立或驗算時改為帶入數字：<ul>' + fbRows.map(function (k) {
+          var row = plan.rows.filter(function (r) { return String(r.row) === String(k); })[0];
+          return '<li>第 ' + k + ' 列「' + esc(row ? row.label : '') + '」：' + esc(fb[k]) + '</li>';
+        }).join('') + '</ul>' : '。') + '</div>';
+    }
     R.verify.forEach(function (v) {
       var heads = plan.vehicles.map(function (x) { return x.name; }).concat(plan.weightedCol ? ['加權'] : []);
       html += '<details class="xp-detail"' + (v.mismatches ? ' open' : '') + '><summary>' + esc(v.sheetName) + ' → 情境「' + esc(v.scenarioName) + '」 ' +
@@ -314,18 +404,23 @@
     S.result = null;
     try {
       var plan = planOf();
-      var host = FSHost.createHost({ factory: FSBackendFactory, shim: FSGasShim, pack: Pack, storage: null, getUser: function () { return 'Excel 轉資料包'; } });
-      host.start();
-      var api = new Proxy({}, { get: function (_, name) { return function () { return host.call(name, Array.prototype.slice.call(arguments)); }; } });
-      var built = E.buildFromPlan(api, plan);
-      var verify = E.verifyPlan(api, plan, built);
-      var pack = host.exportPack([plan.typeId]);
+      var newEnv = function () {
+        var host = FSHost.createHost({ factory: FSBackendFactory, shim: FSGasShim, pack: Pack, storage: null, getUser: function () { return 'Excel 轉資料包'; } });
+        host.start();
+        return { host: host, api: new Proxy({}, { get: function (_, name) { return function () { return host.call(name, Array.prototype.slice.call(arguments)); }; } }) };
+      };
+      var res = E.buildAndVerify(newEnv, plan);
+      var pack = res.env.host.exportPack([plan.typeId]);
       pack.source = { kind: 'excel', file: S.fileName, sheets: plan.scenarios.map(function (s) { return s.sheet.name; }) };
-      S.result = { plan: plan, verify: verify, pack: pack };
-      storeSet(MAP_KEY + S.signature, { roles: S.roles, typeId: S.typeId, savedAt: new Date().toISOString() });
+      S.result = { plan: res.plan, verify: res.verify, built: res.built, pack: pack };
+      storeSet(MAP_KEY + S.signature, {
+        roles: S.roles, typeId: S.typeId, useFormulas: S.useFormulas, formulaOff: S.formulaOff, paramNames: S.paramNames,
+        savedAt: new Date().toISOString()
+      });
     } catch (e) {
       S.result = { error: e };
     }
+    renderRows();
     renderResult();
     $('#xp-card-run').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -370,6 +465,9 @@
       changed('rows'); return;
     }
     if (t.dataset.parent !== undefined) { S.roles[t.dataset.parent].parent = t.value; changed('rows'); return; }
+    if (t.id === 'xp-use-formulas') { S.useFormulas = t.checked; changed('rows'); return; }
+    if (t.dataset.fon !== undefined) { if (t.checked) delete S.formulaOff[t.dataset.fon]; else S.formulaOff[t.dataset.fon] = true; changed('rows'); return; }
+    if (t.dataset.pname !== undefined) { if (t.value.trim()) S.paramNames[t.dataset.pname] = t.value.trim(); else delete S.paramNames[t.dataset.pname]; changed('rows'); return; }
     if (t.id === 'xp-type') { S.typeId = t.value.trim(); changed(); return; }
     if (t.id === 'xp-type-notes') { S.typeNotes = t.value; changed(); return; }
     if (t.dataset.sc !== undefined) {

@@ -9,6 +9,8 @@
 **已經有 Excel 損益試算表？** 用 `dist/FS-excel-to-pack.html`（一樣雙擊就能用）把 Excel 轉成資料包：
 選檔 → 自動判斷欄位與每一列（依 Excel 自己的小計公式找出銷貨成本、各段小計與明細）→ 確認/調整 →
 建立並**逐格跟 Excel 驗算** → 下載資料包。版面相同的多個分頁可以一次轉成同一個車型底下的多個情境。
+明細的 Excel 公式會轉成系統公式(參數儲存格變成參數、外幣 × 匯率變成匯率設定)，轉不過去的帶入數字並說明原因；
+整張貼上值、沒有公式的表，小計由數字推斷。
 
 ## v2 重點
 
@@ -59,7 +61,7 @@ node tools/verify-ui.js                # 損益表版面、% 基準、小計警�
 node tools/verify-write-batching.js    # 整批寫入：跨情境隔離、新增/更新/刪除混合、呼叫次數不隨格數線性成長
 node tools/verify-local.js             # 地端版：數字與驗算層逐格相同、暫存、資料包、合併匯入、dist 為最新
 node tools/e2e-local.js                # 地端版瀏覽器測試（需要 Playwright，找不到時略過）
-node tools/verify-excel-pack.js        # Excel 轉資料包：讀 .xlsx、版面/小計判斷、逐格與 Excel 相同、資料包可匯入
+node tools/verify-excel-pack.js        # Excel 轉資料包：讀 .xlsx、版面/小計判斷、公式轉換的各種情況、貼上值推斷、逐格與 Excel 相同
                                        #   後面可以加一個真實的 .xlsx 路徑，一起跑一次自動轉換並印出比對結果
 node tools/e2e-excel-pack.js           # Excel 轉資料包瀏覽器測試（需要 Playwright）
 ```
