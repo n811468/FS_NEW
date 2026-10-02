@@ -758,6 +758,12 @@ function getChartEditor(vehicleTypeId, scenarioId) {
     preview = chartPreviewValues_(scenarioId, vehicles, null);
   }
   var usage = lineUsageCounts_(vehicleTypeId);
+  // 目前情境的參數值(公式編輯器的選單顯示用；% 參數是小數)
+  var paramValues = {};
+  if (scenarioId) {
+    var scenarioParams = calcParameters_(scenarioId);
+    getParamDefs().forEach(function (p) { paramValues[p.ParamName] = paramValueForFormula_(scenarioParams, p, ''); });
+  }
   return {
     vehicleTypeId: vehicleTypeId || '',
     ownChart: hasOwnChart_(vehicleTypeId),
@@ -772,6 +778,7 @@ function getChartEditor(vehicleTypeId, scenarioId) {
     }),
     vehicles: vehicles,
     profitCode: profitLineCode_(defs),
+    paramValues: paramValues,
     variables: SYSTEM_VARIABLES,
     params: getParamDefs(),
     calcTypeLabels: CALC_TYPE_LABELS,
@@ -800,16 +807,17 @@ function lineUsageCounts_(vehicleTypeId) {
 }
 
 /** 目前情境各車系的科目值；overrideDefs 有值時用改到一半(還沒存)的科目表試算 */
-function chartPreviewValues_(scenarioId, vehicles, overrideDefs) {
+function chartPreviewValues_(scenarioId, vehicles, overrideDefs, probe) {
   var mix = {};
   getSalesMix(scenarioId).forEach(function (r) { mix[r.VehicleID] = true; });
-  var out = { scenarioId: scenarioId, values: {}, errors: {}, traces: {}, weights: {} };
+  var out = { scenarioId: scenarioId, values: {}, errors: {}, traces: {}, weights: {}, probes: {} };
   getSalesMix(scenarioId).forEach(function (r) { out.weights[r.VehicleID] = toNumber_(r.SalesMixPct); });
   vehicles.forEach(function (v) {
     if (!mix[v.VehicleID]) return;
     try {
-      var res = overrideDefs ? calculatePLWithDefs_(scenarioId, v.VehicleID, overrideDefs) : calculatePLCore_(scenarioId, v.VehicleID);
+      var res = overrideDefs ? calculatePLWithDefs_(scenarioId, v.VehicleID, overrideDefs, probe) : calculatePLCore_(scenarioId, v.VehicleID);
       out.values[v.VehicleID] = res.lineValues;
+      if (res.probes) out.probes[v.VehicleID] = res.probes;
       out.errors[v.VehicleID] = res.errors;
       out.traces[v.VehicleID] = res.traces;
     } catch (e) {
@@ -822,21 +830,28 @@ function chartPreviewValues_(scenarioId, vehicles, overrideDefs) {
 /**
  * 科目設定頁「邊打公式邊看結果」：用畫面上還沒存的那一個科目試算，不寫入任何資料。
  * 回傳每個車系的結果與錯誤；公式本身有問題時回傳 problems。
+ * 還沒新增的科目(LineCode 空白)用暫時代碼 NEW_LINE_PREVIEW_CODE 試算。
+ * line.Probes = [公式...]：另外算每一段公式的值(公式編輯器的每一行/每一顆膠囊)，放在 preview.probes。
  */
+var NEW_LINE_PREVIEW_CODE = '__NEW__';
 function previewLineFormula(vehicleTypeId, scenarioId, line) {
   var defs = getPLLineItems(vehicleTypeId);
-  var patched = defs.map(function (d) {
-    if (d.LineCode !== line.LineCode) return d;
+  var code = line.LineCode || NEW_LINE_PREVIEW_CODE;
+  var patchLine = function (d) {
     var p = {};
     Object.keys(d).forEach(function (k) { p[k] = d[k]; });
     ['CalcType', 'Formula', 'CommodityTaxDeduct', 'ParentLine'].forEach(function (f) { if (line[f] !== undefined) p[f] = line[f]; });
     if (line.VehicleFormulas !== undefined) p.VehicleFormulas = JSON.stringify(parseVehicleFormulas_(line.VehicleFormulas));
     return p;
-  });
-  var problems = chartProblems_(patched, vehicleTypeId).filter(function (p) { return p.code === line.LineCode && p.level === 'error'; });
+  };
+  var patched = line.LineCode
+    ? defs.map(function (d) { return d.LineCode === line.LineCode ? patchLine(d) : d; })
+    : defs.concat([patchLine({ LineCode: code, LineName: String(line.LineName || '').trim() || code, ParentLine: '', SortOrder: 9999 })]);
+  var problems = chartProblems_(patched, vehicleTypeId).filter(function (p) { return p.code === code && p.level === 'error'; });
   if (problems.length || !scenarioId) return { problems: problems, preview: null };
   var vehicles = getVehicles(vehicleTypeId).map(function (v) { return { VehicleID: v.VehicleID, VehicleCode: v.VehicleCode || '' }; });
-  return { problems: [], preview: chartPreviewValues_(scenarioId, vehicles, patched) };
+  var probe = Array.isArray(line.Probes) && line.Probes.length ? { code: code, formulas: line.Probes.slice(0, 80).map(String) } : null;
+  return { problems: [], preview: chartPreviewValues_(scenarioId, vehicles, patched, probe) };
 }
 
 /* ---------------------------------------------------------------

@@ -226,7 +226,27 @@ assert(api('chartParentOptions_')('B').indexOf('b1') === -1, '不能把自己的
 api("chartSelected = 'd4'");
 api("chartDraft = JSON.parse(JSON.stringify(chartEditor.lines.find(l => l.LineCode === 'd4')))");
 const paneHtml = api('chartEditorPaneHtml_')();
-assert(paneHtml.indexOf('calc-type-card active') !== -1 && paneHtml.indexOf('id="ce-formula"') !== -1, '公式科目應該選中「公式」並顯示公式編輯框');
+assert(paneHtml.indexOf('calc-type-card active') !== -1 && paneHtml.indexOf('class="fx-rows"') !== -1, '公式科目應該選中「公式」，拆得成一行一項就用一行一項');
+assert(/fx-slot kind-line[^>]*>\s*<span class="nm">廠價\(未稅\)/.test(paneHtml) && /fx-slot kind-param[^>]*>\s*<span class="nm">季Margin率/.test(paneHtml),
+  '季Margin 應該顯示成一行：廠價(未稅) × 季Margin率');
+assert(paneHtml.indexOf('tpl-btn') === -1, '常用寫法按鈕已經拿掉');
+// 公式文字 ⇄ 一行一項 來回轉換：拆得成的轉回去意思不變；拆不成的(函式、括號巢狀)回傳 null 改用膠囊
+const fxRound = f => { const t = api('fxTermsFromToks_')(api('fxTokenize_')(f)); return t ? api('fxTermsText_')(t) : null; };
+[
+  ['[廠價(未稅)] * [季Margin率]', '[廠價(未稅)] * [季Margin率]'],
+  ['C - CHILDREN()', 'C - CHILDREN()'],
+  ['P5-P6-P7', 'P5 - P6 - P7'],
+  ['P2 / (1 + [營業稅率])', 'P2 / (1 + [營業稅率])'],
+  ['REF("SC-1","b4")*1.2', 'REF("SC-1", "b4") * 1.2'],
+  ['-[a] + 15% × [b] ÷ 2', '-[a] + 15% * [b] / 2'],
+  ['', '']
+].forEach(([src, want]) => assert(fxRound(src) === want, `一行一項來回轉換：${src} → ${fxRound(src)}（應為 ${want}）`));
+['ROUND(P5 * [營業稅率] / (1 + [營業稅率]))', '(P8 - [水平配件調降] - TAXDEDUCT()) * [貨物稅完稅價格計算率]', 'IF([月銷量] > 100, 1, 2)', '[a] * ([b] + [c])']
+  .forEach(f => assert(fxRound(f) === null, '拆不成一行一項的公式應改用自由公式：' + f));
+const chipsRound = f => api('fxToksToText_')(api('fxTokenize_')(f));
+['ROUND(P5 * [營業稅率] / (1 + [營業稅率]))', 'IF([月銷量] >= 100, -1, 2)', '(P8 - [水平配件調降] - TAXDEDUCT()) * 91%']
+  .forEach(f => assert(chipsRound(f) === f, `膠囊來回轉換應該不變：${f} → ${chipsRound(f)}`));
+assert(api('fxTokenize_')('IF([x] = "a", 1, 0)') === null, '引號字串只能用文字輸入');
 assert(paneHtml.indexOf('個別車系的算法') !== -1, '應該可以設定車系個別公式');
 assert(api('toNameForm_')('P8 * [季Margin率] + ROUND(B)') === '[廠價(未稅)] * [季Margin率] + ROUND([銷貨成本合計])', '公式應該用科目名稱顯示，函式名稱不動：' + api('toNameForm_')('P8 * [季Margin率] + ROUND(B)'));
 assert(api('toNameForm_')('P2') === 'P2', '科目名稱跟系統變數撞名(強配件售價)時要保留代碼，不然存回去意思會變');

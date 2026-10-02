@@ -148,7 +148,12 @@ function systemVariables_(scenarioId, salesMixRow, salesMix, params, vehicleId) 
  * 公式之間的相依順序由求值時遞迴決定(用到誰就先算誰)，循環引用會被擋下並記錄在 errors。
  * 單一科目的公式出錯不會讓整張損益表掛掉：那一格以 0 計，錯誤訊息放在 errors 給畫面顯示。
  */
-function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
+/**
+ * probe(選用，科目設定頁的公式編輯器用)：{ code, formulas: [...] } —— 整張損益算完之後，
+ * 用 code 這個科目的計算環境(CHILDREN() 指它的子科目)另外算每一段公式，回傳在 probes(算不出來是 null)。
+ * 公式編輯器靠它顯示「每一行」「每一顆膠囊」目前是多少。
+ */
+function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs, probe) {
   var salesMix = calcSalesMix_(scenarioId);
   var salesMixRow = salesMix.filter(function (r) { return r.VehicleID === vehicleId; })[0];
   if (!salesMixRow) throw new Error('找不到 SalesMix 資料：' + scenarioId + ' / ' + vehicleId);
@@ -221,7 +226,13 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
   function evalLineFormula_(code, formula) {
     var ast = parseFormula_(formula);
     var refs = {};
-    var env = {
+    var v = evalFormulaAst_(ast, formulaEnv_(code, refs));
+    traces[code] = { kind: 'formula', formula: formula, refs: refs };
+    return num_(v);
+  }
+
+  function formulaEnv_(code, refs) {
+    return {
       code: function (c) { var x = valueOf(c); refs[c] = x; return x; },
       name: function (n) {
         var x;
@@ -249,14 +260,17 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
         return x;
       }
     };
-    var v = evalFormulaAst_(ast, env);
-    traces[code] = { kind: 'formula', formula: formula, refs: refs };
-    return num_(v);
   }
 
+  var probes = null;
   REF_STACK_.push(String(scenarioId) + '|' + String(vehicleId));
   try {
     defs.forEach(function (d) { valueOf(d.LineCode); });
+    if (probe && probe.formulas) {
+      probes = probe.formulas.map(function (f) {
+        try { return num_(evalFormulaAst_(parseFormula_(f), formulaEnv_(probe.code, {}))); } catch (e) { return null; }
+      });
+    }
   } finally {
     REF_STACK_.pop();
   }
@@ -273,6 +287,7 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
     lineValues: lineValues,
     errors: errors,
     traces: traces,
+    probes: probes,
     lines: buildResultLines_(lineValues, revenue, exFactory, defs)
   };
 }

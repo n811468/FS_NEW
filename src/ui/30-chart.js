@@ -5,7 +5,7 @@
  *     群組可以收合；小計列上的「＋」直接在那一段新增科目；拖曳 ⠿ 調整順序。
  *   - 右邊一步一步：① 怎麼算(三選一) ② 公式/輸入說明 ③ 結果，進階設定收起來。
  *   - 公式一律用「科目名稱」顯示與編輯([材料成本-KD] × [關稅率])，存檔時後端自動換成代碼，
- *     所以科目改名不會讓公式斷掉；輸入 [ 會跳出科目/參數清單；常用寫法有範本按鈕一鍵產生。
+ *     所以科目改名不會讓公式斷掉。編輯介面(一行一項 / 自由公式膠囊 / 文字)在 32-formula-builder.js。
  */
 let chartEditor = null;      // getChartEditor 的結果
 let chartSelected = '';      // 目前選中的科目代碼('' = 沒選；'__new__' = 新增中)
@@ -322,7 +322,7 @@ function chartEditorPaneHtml_() {
       <div style="font-size:30px;opacity:.5;">ƒx</div>
       <h4 style="color:var(--text);margin:8px 0 6px;">點左邊的科目來設定</h4>
       <div class="howto">
-        <div><b>改算法</b>：點科目 → 選「怎麼算」→ 用常用寫法或直接打公式，下面立刻看到結果</div>
+        <div><b>改算法</b>：點科目 → 選「怎麼算」→ 一行一項選科目、乘上比率，每一行旁邊立刻看到結果</div>
         <div><b>加科目</b>：小計那一列右邊的「＋」，直接加在那一段底下</div>
         <div><b>改順序</b>：抓住 ⠿ 拖到想要的位置，放開就存</div>
         <div><b>貼 Excel</b>：成本、費用的金額可以在「銷貨成本」「營業費用」頁直接整塊貼上</div>
@@ -393,7 +393,7 @@ function chartEditorPaneHtml_() {
 
 function chartCalcBodyHtml_() {
   const d = chartDraft;
-  const title = `<div class="ed-step-title"><span class="step-no">2</span>${d.CalcType === 'FORMULA' ? '公式' : d.CalcType === 'DEV_AMORT' ? '攤提設定' : '金額在哪裡填'}</div>`;
+  const title = `<div class="ed-step-title"><span class="step-no">2</span>${d.CalcType === 'DEV_AMORT' ? '攤提設定' : '金額在哪裡填'}</div>`;
   if (d.CalcType === 'INPUT') {
     const isCost = chartIsCostSection_(d);
     return title + `<div class="callout info">每個車系的金額在「${isCost ? '銷貨成本' : '營業費用'}」頁填（也可以從 Excel 整塊貼上）。
@@ -406,32 +406,7 @@ function chartCalcBodyHtml_() {
       <div class="callout info" style="margin-top:10px;">在「開發總投」頁把投資列的攤提落點選成這個科目，金額 ÷ 攤提台數就會出現在這裡（可以只攤給部分車系）。
         <button type="button" class="link-btn" onclick="switchTab('devinvestment')">前往開發總投 →</button></div>`;
   }
-  return title + `
-    <div class="tpl-row"><span class="muted">常用寫法：</span>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('mul')">某科目 × 比率</button>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('sum')">幾個科目相加</button>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('children')">小計（子科目合計）</button>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('minus')">上一段 − 子科目合計</button>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('ref')">參考另一個情境 × 倍率</button>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('const')">固定金額</button>
-    </div>
-    <div class="formula-box" id="ce-formula-box">
-      <textarea id="ce-formula" rows="2" spellcheck="false"
-        oninput="onFormulaInput_(this)" onkeydown="onFormulaKeydown_(event)" onblur="setTimeout(closeFormulaAc_, 150)"
-        placeholder="例：[廠價(未稅)] × [季Margin率]　　輸入 [ 會跳出科目與參數清單">${esc(d.Formula || '')}</textarea>
-      <div class="ac-list" id="ce-ac" hidden></div>
-    </div>
-    <div class="formula-status" id="ce-status"></div>
-    <div class="formula-tools">
-      <button type="button" class="link-btn" onclick="insertFormulaText('[');document.getElementById('ce-formula').dispatchEvent(new Event('input'))">＋ 插入科目或參數</button>
-      <span class="muted">運算：+ − × ÷ ( )，可以直接打 15%</span>
-      <details class="fx-help"><summary class="link-btn">函式與變數說明</summary>
-        <table class="grid-table"><tbody>
-          ${FORMULA_FUNCTIONS_UI.map(f => `<tr><td class="row-head"><code>${esc(f[0])}</code></td><td style="text-align:left;">${esc(f[1])}</td><td><button type="button" class="ins-chip fn" onclick="insertFormulaText('${esc(f[0].replace(/, …/, ''))}')">插入</button></td></tr>`).join('')}
-          ${(chartEditor.variables || []).map(v => `<tr><td class="row-head"><code>[${esc(v.name)}]</code></td><td style="text-align:left;">${esc(v.desc)}</td><td><button type="button" class="ins-chip var" onclick="insertFormulaText('[${esc(v.name)}]')">插入</button></td></tr>`).join('')}
-        </tbody></table>
-      </details>
-    </div>`;
+  return fxEditorHtml_();
 }
 
 function chartIsCostSection_(d) {
@@ -490,8 +465,11 @@ function drawFormulaAc_() {
       <span>${esc(c.label)}</span><span class="muted">${esc(c.hint || '')}</span></div>`;
   }).join('');
   box.hidden = false;
-  const active = box.querySelector('.ac-item.active');
-  if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+  scrollListTo_(box, box.querySelector('.ac-item.active'));
+}
+/** 離開公式框稍後再關清單(讓滑鼠點清單來得及)；到時候游標又回到框裡就不關 —— 不然很快點回來打 [ 時，剛開的清單會被這個舊的計時器關掉 */
+function onFormulaBlur_(ta) {
+  setTimeout(() => { if (document.activeElement !== ta) closeFormulaAc_(); }, 150);
 }
 function closeFormulaAc_() {
   chartAc_ = null;
@@ -544,66 +522,6 @@ function insertFormulaText(text) {
   chartDirty_();
   schedulePreview_();
 }
-function setFormulaText_(text) {
-  const ta = document.getElementById('ce-formula');
-  if (ta) ta.value = text;
-  chartDraft.Formula = text;
-  chartDirty_();
-  schedulePreview_(true);
-}
-
-/** 常用寫法：問幾個問題就幫忙組好公式(名稱版)，使用者不必記語法 */
-function formulaTemplate_(kind) {
-  const lines = chartEditor.lines.filter(l => !chartDraft || l.LineCode !== chartDraft.LineCode);
-  const lineRef = code => { const l = chartLineByCode_(code); return l && chartNameUsable_(l) ? '[' + l.LineName + ']' : code; };
-  const lineOpts = lines.map(l => [l.LineCode, l.LineName]);
-  if (kind === 'children') { setFormulaText_('CHILDREN()'); toast('子科目合計：把其他科目的「計入」選成這個科目，就會被加總進來', 'ok', 4000); return; }
-  if (kind === 'mul') {
-    const params = (chartEditor.params || []).map(p => ['[' + p.ParamName + ']', p.ParamName + (p.Unit === '%' ? '（%）' : '')]);
-    openModal({
-      title: '某科目 × 比率', body: '<p class="help">例：季Margin = 廠價(未稅) × 季Margin率；關稅 = 材料成本-KD × 關稅率。比率可以用參數（到「參數與比率」頁新增），或直接填固定 %。</p>',
-      fields: [
-        { name: 'line', label: '科目', type: 'select', options: lineOpts, value: 'P8' },
-        { name: 'rate', label: '乘以', type: 'select', options: params.concat([['__pct__', '固定百分比（下面填）'], ['__num__', '固定倍數（下面填）']]) },
-        { name: 'value', label: '固定百分比 / 倍數', type: 'number', placeholder: '選固定百分比或倍數時才填，例：0.5 或 1.2' }
-      ], okText: '套用'
-    }).then(v => {
-      if (!v) return;
-      const right = v.rate === '__pct__' ? (num(v.value) + '%') : v.rate === '__num__' ? String(num(v.value)) : v.rate;
-      setFormulaText_(lineRef(v.line) + ' * ' + right);
-    });
-  } else if (kind === 'sum') {
-    openModal({
-      title: '幾個科目相加', wide: true,
-      fields: [{ name: 'codes', label: '勾選要相加的科目', type: 'checks', options: lineOpts.filter(o => !/^P\d$/.test(o[0])) }],
-      okText: '套用', validate: v => v.codes.length < 1 ? '請至少勾一個科目' : ''
-    }).then(v => { if (v) setFormulaText_(v.codes.map(lineRef).join(' + ')); });
-  } else if (kind === 'minus') {
-    openModal({
-      title: '上一段 − 子科目合計', body: '<p class="help">例：銷貨毛利 = 生產毛利 − 銷售費用合計。這個科目底下的子科目就是要扣掉的費用。</p>',
-      fields: [{ name: 'line', label: '上一段', type: 'select', options: lineOpts.filter(o => (chartLineByCode_(o[0]) || {}).isProtected || /CHILDREN/.test((chartLineByCode_(o[0]) || {}).Formula || '')) }],
-      okText: '套用'
-    }).then(v => { if (v) setFormulaText_(lineRef(v.line) + ' - CHILDREN()'); });
-  } else if (kind === 'ref') {
-    openModal({
-      title: '參考另一個情境 × 倍率',
-      body: '<p class="help">例：一般材料以 DE 實績為 BASE × 1.2。對方情境有同一個車系就取同一個車系，否則取它的加權平均。對方的數字改了，這裡會跟著變。</p>',
-      fields: [
-        { name: 'sc', label: '參考的情境（可以是別的車型）', type: 'select', options: (chartEditor.referenceScenarios || []).map(r => [r.ScenarioID, r.label]) },
-        { name: 'code', label: '參考的科目', type: 'select', options: lineOpts, value: chartDraft && chartDraft.LineCode ? chartDraft.LineCode : 'b4', help: '以科目代碼對應；不同車型的科目代碼不同時，打開「顯示代碼」確認' },
-        { name: 'factor', label: '倍率', type: 'number', value: 1 }
-      ], okText: '套用'
-    }).then(v => {
-      if (!v) return;
-      const f = num(v.factor) || 1;
-      setFormulaText_(`REF("${v.sc}", "${v.code}")` + (f === 1 ? '' : ' * ' + f));
-    });
-  } else if (kind === 'const') {
-    openModal({ title: '固定金額', fields: [{ name: 'v', label: '每台金額（元）', type: 'number' }], okText: '套用' })
-      .then(v => { if (v) setFormulaText_(String(num(v.v))); });
-  }
-}
-
 /** 公式的可讀版本(儀表板/報告/矩陣頁用)：代碼換成科目名稱、[名稱] 與函式上色 */
 function formulaReadableHtml_(formula) {
   if (!formula || !String(formula).trim()) return '<span class="muted">（輸入公式後，這裡會用科目名稱顯示）</span>';
@@ -642,7 +560,7 @@ function setChartCalcType(t) {
   document.getElementById('ce-calc-body').innerHTML = chartCalcBodyHtml_();
   afterChartEditorRender_();
   chartDirty_();
-  if (t === 'FORMULA') { const ta = document.getElementById('ce-formula'); if (ta) ta.focus(); }
+  if (t === 'FORMULA' && fxMode === 'text') { const ta = document.getElementById('ce-formula'); if (ta) ta.focus(); }
 }
 function setChartOverride(vehicleId, formula) {
   chartDraft.VehicleFormulas = chartDraft.VehicleFormulas || {};
@@ -667,11 +585,12 @@ function schedulePreview_(immediate) {
   if (chartPreviewTimer_) clearTimeout(chartPreviewTimer_);
   chartPreviewTimer_ = setTimeout(() => {
     if (!chartDraft) return;
-    if (chartSelected === '__new__') { renderChartPreview_(); return; }
+    if (chartDraft.CalcType === 'FORMULA' && !String(chartDraft.Formula || '').trim()) { chartPreview = null; renderChartPreview_(); return; }   // 還沒寫公式不算錯
+    const probes = fxProbeList_();
     google.script.run
-      .withSuccessHandler(res => { chartPreview = res; renderChartPreview_(); })
+      .withSuccessHandler(res => { chartPreview = res; renderChartPreview_(); fxApplyProbes_(res && res.preview, probes); })
       .withFailureHandler(err => { chartPreview = { problems: [{ message: err.message }] }; renderChartPreview_(); })
-      .previewLineFormula(currentVehicleTypeId, currentScenarioId, chartDraftPayload_());
+      .previewLineFormula(currentVehicleTypeId, currentScenarioId, Object.assign(chartDraftPayload_(), { Probes: probes }));
   }, immediate ? 0 : 350);
 }
 function renderChartPreview_() {
@@ -684,18 +603,18 @@ function renderChartPreview_() {
     else if (probs.length) { st.className = 'formula-status err'; st.textContent = '✘ ' + probs.map(p => p.message.replace(/^「[^」]*」/, '')).join('；'); }
     else if (chartPreview) { st.className = 'formula-status ok'; st.innerHTML = '✔ ' + formulaReadableHtml_(chartDraft.Formula); }
   }
+  fxRefreshValues_();
 }
 /** 結果：每個車系「目前 → 修改後」與對營業淨利的影響；計算過程收在展開區 */
 function chartPreviewHtml_() {
   if (!currentScenarioId) return '<p class="muted">右上角選一個情境就能看到試算結果。</p>';
-  if (chartSelected === '__new__') return '<p class="muted">新增之後就能試算。</p>';
   const cur = chartEditor.preview;
   const next = chartPreview && chartPreview.preview;
   const probs = (chartPreview && chartPreview.problems) || [];
   if (!cur && !next) return '<p class="muted">這個情境還沒有銷售構成資料，無法試算。</p>';
   const vehicles = (chartEditor.vehicles || []).filter(v => (cur && cur.values[v.VehicleID]) || (next && next.values[v.VehicleID]));
   if (!vehicles.length) return '<p class="muted">這個情境還沒有銷售構成資料，無法試算。</p>';
-  const code = chartDraft.LineCode;
+  const code = chartSelected === '__new__' ? '__NEW__' : chartDraft.LineCode;   // 還沒新增的科目用暫時代碼試算
   const kCode = profitCodeOf_(chartEditor);
   const map = chartCodeNameMap_();
   const row = (label, a, b, k0, k1, cls) => {
