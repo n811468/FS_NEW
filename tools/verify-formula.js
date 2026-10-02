@@ -273,6 +273,38 @@ check('目標反推與敏感度：解出來的值代回去會達到目標，且�
   near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '試算完存檔的數字不能變', 0.01);
 });
 
+check('多項目標反推：缺口由多個項目分擔、上限、同幅度、固定值，貢獻加總 = 總改善', () => {
+  reset();
+  const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
+  const goal = k0 + 30000;
+  const sum = r => r.levers.reduce((s, l) => s + l.contribution, 0);
+  const a = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, goal, [
+    { driver: { type: 'price' }, share: 50 }, { driver: { type: 'line', code: 'b1' }, share: 30 }, { driver: { type: 'line', code: 'b2' }, share: 20 }
+  ], 'share');
+  assert(a.feasible, '應該達得到：' + a.message);
+  near(a.achieved, goal, '依比例分攤：達到目標', 1);
+  near(sum(a), goal - k0, '逐項貢獻加總 = 總改善', 1);
+  assert(a.levers[0].value > a.levers[0].base && a.levers[1].value < a.levers[1].base, '售價往上、材料往下');
+  near(a.levers[1].contribution / (goal - k0), 0.3, '材料成本-LP 大約負責 30%', 0.05);
+  const c = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, goal, [
+    { driver: { type: 'price' }, share: 50, capPct: 0.5 }, { driver: { type: 'line', code: 'b1' }, share: 50 }
+  ], 'share');
+  near(c.achieved, goal, '售價碰到上限，剩下由材料吸收', 1);
+  assert(c.levers[0].capped && Math.abs(c.levers[0].pct - 0.5) < 1e-6, '售價應標示碰到上限 0.5%：' + JSON.stringify(c.levers[0]));
+  const e = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, goal, [{ driver: { type: 'price' } }, { driver: { type: 'line', code: 'b1' } }], 'equal');
+  near(e.achieved, goal, '同幅度：達到目標', 1);
+  near(e.levers[0].pct, -e.levers[1].pct, '售價漲幾 %、材料就降幾 %', 1e-6);
+  const f = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, goal, [
+    { driver: { type: 'volume' }, fixed: 500 }, { driver: { type: 'line', code: 'b1' } }
+  ], 'share');
+  assert(f.levers[0].fixed && f.levers[0].value === 500, '固定值直接套用');
+  near(f.achieved, goal, '固定銷量後由材料補足', 1);
+  const x = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, k0 + 1e7, [{ driver: { type: 'price' }, capPct: 1 }, { driver: { type: 'line', code: 'b1' }, capPct: 1 }], 'share');
+  assert(!x.feasible && /上限/.test(x.message), '上限內達不到要說明：' + x.message);
+  reset();
+  near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '試算完存檔的數字不能變', 0.01);
+});
+
 check('預設公式下 Gate F 數字不變(回歸)', () => {
   reset();
   const all = gs.calculatePLAllVehicles(sid);

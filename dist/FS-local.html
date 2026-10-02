@@ -512,6 +512,22 @@
   .auto-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); vertical-align: middle; margin-left: 6px; cursor: help; box-shadow: 0 0 0 3px var(--primary-weak); }
   .auto-dot.dev { background: #7c4bd6; box-shadow: 0 0 0 3px #f1e9ff; }
   .err-dot { display: inline-block; color: var(--danger); font-weight: 800; margin-left: 5px; cursor: help; }
+  /* 瀑布圖工具 */
+  .field .inline { display: flex; gap: 6px; }
+  .field.grow { flex: 1; min-width: 220px; }
+  .field.grow input { width: 100%; }
+  .wf-opts { margin-top: 12px; }
+  .wf-manual { margin: 10px 0; }
+  .wf-manual input[type=text] { width: 100%; }
+  .wf-manual input[type=number] { width: 140px; }
+  .wf-table { margin-top: 12px; max-width: 760px; }
+  table.grid-table.wf-table td:first-child, table.grid-table.lever-table td:not(.amt) { text-align: left; }
+  .wf-table td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  .wf-table tr.subtotal td { font-weight: 600; background: var(--surface-2); }
+  .lever-table td input[type=number] { width: 90px; }
+  .lever-table select { max-width: 320px; }
+  .lever-table td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  .lever-cap { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #fefcbf; color: #744210; margin-left: 4px; }
   .row-toggle { appearance: none; border: none; background: transparent; padding: 0; margin-right: 4px; cursor: pointer; color: inherit; display: inline-flex; align-items: center;
     justify-content: center; width: 16px; height: 16px; vertical-align: middle; border-radius: 4px; }
   .row-toggle:hover { background: var(--surface-3); }
@@ -5299,15 +5315,7 @@ function sensitivityTable(scenarioId, metric, rowDriver, rowValues, colDriver, c
   var cells = (rowValues || []).map(function (rv) {
     return (colDriver ? colValues : [null]).map(function (cv) {
       var o = driverOverrides_(scenarioId, rowDriver, rv, rb.value);
-      if (colDriver) {
-        var oc = driverOverrides_(scenarioId, colDriver, cv, cb.value);
-        Object.keys(oc).forEach(function (k) {
-          if (k === 'scenarioId') return;
-          if (o[k] && typeof o[k] === 'object') Object.keys(oc[k]).forEach(function (kk) { o[k][kk] = oc[k][kk]; });
-          else if (o[k] && typeof o[k] === 'number') o[k] = o[k] * oc[k];   // 同一個因子調兩次：倍數相乘
-          else o[k] = oc[k];
-        });
-      }
+      if (colDriver) o = mergeOverrides_(o, driverOverrides_(scenarioId, colDriver, cv, cb.value));
       return withOverrides_(o, function () { return whatIfMetric_(scenarioId, metric); });
     });
   });
@@ -5324,6 +5332,216 @@ function breakEvenVolume_(scenarioId) {
     var r = solveGoal(scenarioId, { code: 'K', basis: 'unit' }, 0, { type: 'volume' });
     return r.feasible ? r.value : null;
   } catch (e) { return null; }
+}
+
+/** 兩組覆寫合併(多個假設同時成立)；同一個倍數因子調兩次 = 倍數相乘 */
+function mergeOverrides_(a, b) {
+  var o = { scenarioId: a.scenarioId || b.scenarioId };
+  [a, b].forEach(function (src) {
+    Object.keys(src).forEach(function (k) {
+      if (k === 'scenarioId') return;
+      var v = src[k];
+      if (v && typeof v === 'object') {
+        o[k] = o[k] || {};
+        Object.keys(v).forEach(function (kk) {
+          o[k][kk] = typeof o[k][kk] === 'number' && k === 'lineScale' ? o[k][kk] * v[kk] : v[kk];
+        });
+      } else if (typeof v === 'number' && typeof o[k] === 'number') o[k] = o[k] * v;
+      else o[k] = v;
+    });
+  });
+  return o;
+}
+
+/**
+ * 找 x 使 g(x) = 0：從 x0 往兩邊擴大找到變號區間，再二分法。找不到回傳 null。
+ * (公式裡有取整、IF，不假設平滑)
+ */
+function solveScalar_(g, x0, step, lowerBound) {
+  var g0 = g(x0);
+  if (Math.abs(g0) < 0.5) return x0;
+  var lo = null, hi = null, gLo;
+  [1, -1].some(function (dir) {
+    var prevX = x0, prevG = g0, st = step;
+    for (var k = 0; k < 22; k++) {
+      var x = x0 + dir * st;
+      if (lowerBound !== null && lowerBound !== undefined && x < lowerBound) x = lowerBound;
+      var gx = g(x);
+      if ((gx > 0) !== (prevG > 0) || gx === 0) { lo = prevX; gLo = prevG; hi = x; return true; }
+      if (lowerBound !== null && lowerBound !== undefined && x === lowerBound) break;
+      prevX = x; prevG = gx; st *= 2;
+    }
+    return false;
+  });
+  if (lo === null) return null;
+  for (var i = 0; i < 60; i++) {
+    var mid = (lo + hi) / 2;
+    var gm = g(mid);
+    if (Math.abs(gm) < 0.5 || Math.abs(hi - lo) < Math.max(1e-6, Math.abs(mid) * 1e-9)) return mid;
+    if ((gm > 0) === (gLo > 0)) { lo = mid; gLo = gm; } else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * 多項目標反推(組合拳)：營業淨利的缺口通常不會只靠一個項目補，而是售價、材料、銷量…一起分擔。
+ *
+ * levers = [{ driver, share, capPct, fixed }]
+ *   fixed   有填 = 這一項已經確定(例：銷量確定是 120 台/月)，直接套用，不參與反推
+ *   share   分攤比例(只在 mode = 'share' 用；全部沒填就平均分攤)
+ *   capPct  最多只能調 ±幾 %(例：售價最多漲 3%)；碰到上限後剩下的缺口由其他項目吸收
+ * mode
+ *   'share' 依比例分攤缺口：每一項先各自算出「負責的那一份缺口」要調多少，再整組一起套用、等比例微調到剛好達標
+ *           (各項目之間有交互作用，例如售價變動也會影響佣金與貨物稅，所以不能單純相加)
+ *   'equal' 同幅度：所有項目往有利的方向調同樣的 %，算出要調幾 %
+ *
+ * 回傳每一項的 目前值 → 調整後、變動 %、是否碰到上限，以及「依列表順序逐項加入」的貢獻(加總剛好等於總改善，可以直接畫瀑布圖)。
+ */
+function solveGoalMulti(scenarioId, metric, target, levers, mode) {
+  if (!scenarioId) throw new Error('請先選擇情境');
+  metric = metric || { code: 'K', basis: 'unit' };
+  target = toNumber_(target);
+  mode = mode === 'equal' ? 'equal' : 'share';
+  levers = (levers || []).filter(function (l) { return l && l.driver && l.driver.type; });
+  if (!levers.length) throw new Error('請至少選一個調整項目');
+  var seen = {};
+  levers.forEach(function (l) {
+    var k = JSON.stringify(l.driver);
+    if (seen[k]) throw new Error('「' + driverLabel_(l.driver) + '」重複選了兩次');
+    seen[k] = true;
+  });
+  var positiveTypes = ['volume', 'price', 'fx', 'line', 'dev'];
+  var items = levers.map(function (l) {
+    var b = driverBase_(scenarioId, l.driver);
+    var fixed = l.fixed !== '' && l.fixed !== null && l.fixed !== undefined && !isNaN(Number(l.fixed));
+    var cap = l.capPct === '' || l.capPct === null || l.capPct === undefined || isNaN(Number(l.capPct)) ? null : Math.abs(Number(l.capPct));
+    return {
+      driver: l.driver, label: b.label, unit: b.unit, base: b.value,
+      fixed: fixed, value: fixed ? Number(l.fixed) : b.value,
+      share: Math.max(0, toNumber_(l.share)), cap: cap,
+      lower: positiveTypes.indexOf(l.driver.type) !== -1 ? 0 : null
+    };
+  });
+  var overridesFor = function (values) {
+    var o = { scenarioId: scenarioId };
+    items.forEach(function (it, i) {
+      if (values[i] === it.base) return;
+      o = mergeOverrides_(o, driverOverrides_(scenarioId, it.driver, values[i], it.base));
+    });
+    return o;
+  };
+  var metricAt = function (values) {
+    return withOverrides_(overridesFor(values), function () { return whatIfMetric_(scenarioId, metric); });
+  };
+  var baseValues = items.map(function (it) { return it.base; });
+  var metricBase = whatIfMetric_(scenarioId, metric);
+  var startValues = items.map(function (it) { return it.value; });   // 固定項目先套用
+  var metricStart = metricAt(startValues);
+  var gap = target - metricStart;
+  var free = items.map(function (it, i) { return it.fixed ? -1 : i; }).filter(function (i) { return i >= 0; });
+  var warnings = [];
+
+  var clampOf = function (it, x) {
+    if (it.cap !== null) {
+      var room = Math.abs(it.base) * it.cap / 100;
+      x = Math.max(it.base - room, Math.min(it.base + room, x));
+    }
+    if (it.lower !== null && x < it.lower) x = it.lower;
+    return x;
+  };
+
+  var finalValues = startValues.slice();
+  var feasible = true, scale = 0, message = '';
+  if (free.length && Math.abs(gap) >= 0.5) {
+    // 每一項的「方向 × 幅度」(s = 1 時的變動量)
+    var delta = items.map(function () { return 0; });
+    if (mode === 'equal') {
+      free.forEach(function (i) {
+        var it = items[i];
+        if (!it.base) throw new Error('「' + it.label + '」目前是 0，不能用同幅度(%)調整，請改用「依比例分攤」');
+        var probe = startValues.slice(); probe[i] = it.base * 1.01;
+        var effect = metricAt(probe) - metricStart;
+        if (Math.abs(effect) < 1e-9) { warnings.push('「' + it.label + '」調整後結果不會變，不參與分攤'); return; }
+        delta[i] = (effect > 0) === (gap > 0) ? it.base * 0.01 : -it.base * 0.01;   // s 的單位 = 1%
+      });
+    } else {
+      var totalShare = free.reduce(function (sum, i) { return sum + items[i].share; }, 0);
+      free.forEach(function (i) {
+        var it = items[i];
+        var share = totalShare > 0 ? it.share / totalShare : 1 / free.length;
+        if (!share) return;
+        var part = metricStart + gap * share;
+        var x = solveScalar_(function (xx) { var v = startValues.slice(); v[i] = xx; return metricAt(v) - part; },
+          it.base, Math.abs(it.base) > 1e-9 ? Math.abs(it.base) * 0.05 : 1, it.lower);
+        if (x === null) { warnings.push('「' + it.label + '」單獨調整達不到它負責的那一份缺口，已由其他項目吸收'); return; }
+        delta[i] = x - it.base;
+      });
+    }
+    var active = free.filter(function (i) { return delta[i] !== 0; });
+    if (!active.length) {
+      feasible = false;
+      message = '選的項目都無法改善這個結果。';
+    } else {
+      var valuesAt = function (sv) {
+        var v = startValues.slice();
+        active.forEach(function (i) { v[i] = clampOf(items[i], items[i].base + sv * delta[i]); });
+        return v;
+      };
+      var h = function (sv) { return metricAt(valuesAt(sv)) - target; };
+      var h0 = metricStart - target;
+      var lo = 0, hi = mode === 'equal' ? 1 : 1, hHi = h(hi), k = 0, prevV = null;
+      while ((hHi > 0) === (h0 > 0) && Math.abs(hHi) >= 0.5 && k++ < 24) {
+        var vNow = JSON.stringify(valuesAt(hi));
+        if (vNow === prevV) break;                  // 全部碰到上限(或 0)了，再放大也沒用
+        prevV = vNow;
+        lo = hi; hi *= 2; hHi = h(hi);
+      }
+      if ((hHi > 0) === (h0 > 0) && Math.abs(hHi) >= 0.5) {
+        feasible = false;
+        finalValues = valuesAt(hi);
+        message = '在設定的上限內達不到目標，最多只能做到 ' + Math.round(metricAt(finalValues)) + '。可以放寬上限或再加一個調整項目。';
+      } else {
+        var hLo = h(lo);
+        for (var it2 = 0; it2 < 60; it2++) {
+          var mid = (lo + hi) / 2, hm = h(mid);
+          if (Math.abs(hm) < 0.5) { lo = hi = mid; break; }
+          if ((hm > 0) === (hLo > 0)) { lo = mid; hLo = hm; } else hi = mid;
+        }
+        scale = (lo + hi) / 2;
+        finalValues = valuesAt(scale);
+      }
+    }
+  }
+
+  // 依列表順序逐項加入，算每一項的貢獻(加總 = 總改善)
+  var running = baseValues.slice(), prevMetric = metricBase;
+  var out = items.map(function (it, i) {
+    running[i] = finalValues[i];
+    var m = metricAt(running);
+    var contribution = m - prevMetric;
+    prevMetric = m;
+    var room = it.cap !== null ? Math.abs(it.base) * it.cap / 100 : null;
+    return {
+      driver: it.driver, label: it.label, unit: it.unit, base: it.base, value: finalValues[i],
+      pct: it.base ? (finalValues[i] / it.base - 1) * 100 : null,
+      fixed: it.fixed, capped: room !== null && !it.fixed && Math.abs(Math.abs(finalValues[i] - it.base) - room) < Math.max(1e-6, room * 1e-6) && room > 0,
+      contribution: contribution
+    };
+  });
+  return {
+    feasible: feasible, mode: mode, metricBase: metricBase, achieved: prevMetric, target: target,
+    equalPct: mode === 'equal' ? scale : null, levers: out, warnings: warnings, message: message
+  };
+}
+
+/** 瀑布圖工具的選單：所有車型的情境與車系(跨車型比較用) */
+function getWaterfallSources() {
+  return {
+    scenarios: getScenarios().map(function (s) {
+      return { ScenarioID: s.ScenarioID, VehicleTypeID: s.VehicleTypeID, Gate: s.Gate || '', ScenarioName: s.ScenarioName || '', ScenarioType: s.ScenarioType || '' };
+    }),
+    vehicles: getVehicles().map(function (v) { return { VehicleID: v.VehicleID, VehicleTypeID: v.VehicleTypeID, VehicleCode: v.VehicleCode || '' }; })
+  };
 }
 
 
@@ -5437,7 +5655,7 @@ function reportMaintenance_(message) {
 }
 
   return {
-    fns: { getSheet_: getSheet_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, saveParamDef: saveParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
+    fns: { getSheet_: getSheet_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, saveParamDef: saveParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, solveGoalMulti: solveGoalMulti, getWaterfallSources: getWaterfallSources, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
     consts: { SCHEMA: SCHEMA, TEXT_COLUMNS: TEXT_COLUMNS, PL_LINE_ITEMS: PL_LINE_ITEMS, LINE_CODE_PREFIX: LINE_CODE_PREFIX },
     // 模擬 Apps Script「每次 google.script.run 都是全新執行」：單次執行內的快取要清掉
     beginExecution: function () { SHEET_CACHE_ = {}; resetCalcMemo_(); LOCK_DEPTH_ = 0; }
@@ -5747,6 +5965,8 @@ function reportMaintenance_(message) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M7 12l3-3 2 2 4-4"/></svg>GATE 報告<span class="nav-badge">簡報</span></button>
           <button class="nav-item" data-tab="whatif" onclick="switchTab('whatif')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>目標反推與敏感度</button>
+          <button class="nav-item" data-tab="waterfall" onclick="switchTab('waterfall')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><rect x="4" y="5" width="3" height="12"/><rect x="10" y="5" width="3" height="4"/><rect x="16" y="9" width="3" height="8"/></svg>瀑布圖工具</button>
         </div>
         <div class="nav-group">
           <div class="nav-group-label">輸入資料（目前情境）</div>
@@ -5810,6 +6030,7 @@ function reportMaintenance_(message) {
         </div>
         <div id="panel-report" class="panel"></div>
         <div id="panel-whatif" class="panel"></div>
+        <div id="panel-waterfall" class="panel"></div>
         <div id="panel-salesmix" class="panel"></div>
         <div id="panel-costofsales" class="panel"></div>
         <div id="panel-devinvestment" class="panel"></div>
@@ -6278,7 +6499,7 @@ function dragHandleHtml(label) {
 }
 
 const PAGE_META = {
-  dashboard: ['結果呈現', '損益儀表板'], report: ['結果呈現', 'GATE 審議報告'], whatif: ['結果呈現', '目標反推與敏感度分析'],
+  dashboard: ['結果呈現', '損益儀表板'], report: ['結果呈現', 'GATE 審議報告'], whatif: ['結果呈現', '目標反推與敏感度分析'], waterfall: ['結果呈現', '瀑布圖工具'],
   salesmix: ['輸入資料', '銷售構成與售價'], costofsales: ['輸入資料', '銷貨成本'],
   devinvestment: ['輸入資料', '開發總投'], operatingexpense: ['輸入資料', '營業費用'],
   lineitems: ['計算設定', '科目與公式'], paramrates: ['計算設定', '參數與比率'], paramfx: ['計算設定', '匯率設定'],
@@ -6331,6 +6552,7 @@ function renderTab(key) {
   if (key === 'dashboard') loadComparisonPicker();
   else if (key === 'report') renderReportPanel();
   else if (key === 'whatif') renderWhatIfPanel();
+  else if (key === 'waterfall') renderWaterfallPanel();
   else if (key === 'lineitems') renderChartPanel();
   else if (GRID_PANELS[key]) window[GRID_PANELS[key]]();
   else if (ENTITIES[key]) renderEntityPanel(key);
@@ -9338,6 +9560,7 @@ let whatIfOptions = null;
 const WHATIF_PREFS_KEY_ = 'plWhatIf.prefs.v1';
 let whatIfPrefs = {
   goal: { metric: 'K', basis: 'unit', target: 0, driver: 'volume' },
+  multi: { metric: 'K', basis: 'unit', target: 0, mode: 'share', levers: null },
   sens: { metric: 'K', basis: 'unit', row: 'volume', rowSteps: '-20,-10,0,10,20', col: 'price', colSteps: '-10,-5,0,5,10', inReport: true }
 };
 function loadWhatIfPrefs_() {
@@ -9345,6 +9568,7 @@ function loadWhatIfPrefs_() {
     const p = JSON.parse(localStorage.getItem(WHATIF_PREFS_KEY_) || 'null');
     if (p && p.goal) Object.assign(whatIfPrefs.goal, p.goal);
     if (p && p.sens) Object.assign(whatIfPrefs.sens, p.sens);
+    if (p && p.multi) Object.assign(whatIfPrefs.multi, p.multi);
   } catch (e) { /* 用預設 */ }
 }
 function saveWhatIfPrefs_() {
@@ -9417,6 +9641,8 @@ function drawWhatIf_() {
       <div id="wi-goal-result"></div>
     </div>
 
+    ${multiGoalCardHtml_()}
+
     <div class="card">
       <div class="card-head"><h3>敏感度分析</h3><span class="muted">兩項假設同時變動時，結果會落在哪裡（中間框起來的是目前的數字）</span>
         <span class="spacer"></span>
@@ -9432,6 +9658,7 @@ function drawWhatIf_() {
       </div>
       <div id="wi-sens-result" style="margin-top:14px;"></div>
     </div>`;
+  installLeverSort_();
   runSensitivity_();
 }
 
@@ -9522,6 +9749,706 @@ function sensitivityTableHtml_(t, rowSteps, colSteps, s, opts) {
     </tr>`).join('')}</tbody>
   </table></div>
   <p class="help">表內數字：${esc(metric)}${s.basis === 'month' ? '（月總額，元）' : '（加權平均，元/台）'}。綠色 = 正、紅色 = 負，顏色越深絕對值越大。</p>`;
+}
+
+/* ---------------- 多項目標反推(組合拳) ----------------
+ * 營業淨利的缺口通常不會只指派一個項目：售價、材料、銷量、開發總投…各負責一部分。
+ * 每一項可以設「分攤比例」「最多調 ±%」或「固定值」(已經確定的數字)，後端 solveGoalMulti 一次算出每一項要調多少。
+ */
+function defaultLevers_() {
+  const lines = whatIfOptions.drivers.filter(d => d.driver.type === 'line').sort((a, b) => Math.abs(b.base) - Math.abs(a.base));
+  const out = [{ driver: 'price', share: 40, capPct: 3, fixed: '' }];
+  if (lines[0]) out.push({ driver: driverKey_(lines[0].driver), share: 40, capPct: 5, fixed: '' });
+  out.push({ driver: 'dev', share: 20, capPct: '', fixed: '' });
+  return out;
+}
+function multiGoalCardHtml_() {
+  const m = whatIfPrefs.multi;
+  if (!Array.isArray(m.levers) || !m.levers.length) m.levers = defaultLevers_();
+  const known = k => whatIfDriverInfo_(k);
+  m.levers = m.levers.filter(l => known(l.driver));
+  const shareMode = m.mode !== 'equal';
+  const basisSeg = `<div class="seg">
+      <button type="button" class="seg-btn${m.basis === 'unit' ? ' active' : ''}" onclick="whatIfPrefs.multi.basis='unit';saveWhatIfPrefs_();drawWhatIf_()">單台</button>
+      <button type="button" class="seg-btn${m.basis === 'month' ? ' active' : ''}" onclick="whatIfPrefs.multi.basis='month';saveWhatIfPrefs_();drawWhatIf_()">月總額</button></div>`;
+  const totalShare = m.levers.filter(l => l.fixed === '' || l.fixed === undefined).reduce((s, l) => s + num(l.share), 0);
+  return `<div class="card" id="wi-multi">
+    <div class="card-head"><h3>多項目標反推（組合拳）</h3><span class="muted">缺口由好幾個項目一起分擔：每一項要調多少？</span></div>
+    <div class="goal-sentence">
+      <span>要讓</span>
+      <select onchange="whatIfPrefs.multi.metric=this.value;saveWhatIfPrefs_()">${metricOptionsHtml_(m.metric)}</select>
+      ${basisSeg}
+      <span>等於</span>
+      <input id="wi-multi-target" type="number" step="any" value="${esc(m.target)}" style="width:140px;" oninput="whatIfPrefs.multi.target=this.value;saveWhatIfPrefs_()">
+      <span>元，由下面幾項</span>
+      <div class="seg">
+        <button type="button" class="seg-btn${shareMode ? ' active' : ''}" onclick="whatIfPrefs.multi.mode='share';saveWhatIfPrefs_();drawWhatIf_()" data-tip="每一項負責一定比例的缺口（例：售價 40%、材料 40%、開發 20%）">依比例分攤</button>
+        <button type="button" class="seg-btn${!shareMode ? ' active' : ''}" onclick="whatIfPrefs.multi.mode='equal';saveWhatIfPrefs_();drawWhatIf_()" data-tip="所有項目都往有利方向調同樣的 %，算出要調幾 %">同幅度調整</button>
+      </div>
+    </div>
+    <div class="grid-scroll"><table class="grid-table lever-table">
+      <thead><tr><th style="width:28px;"></th><th>調整項目（目前值）</th>${shareMode ? '<th>分攤比例 %</th>' : ''}<th data-tip="例：售價最多只能漲 3%；碰到上限後剩下的缺口由其他項目吸收">最多調 ±%</th><th data-tip="已經確定的數字直接填，不參與反推">固定為</th><th style="width:40px;"></th></tr></thead>
+      <tbody id="wi-lever-body">${m.levers.map((l, i) => `<tr data-key="${i}">
+        <td>${dragHandleHtml('拖曳調整順序（貢獻依這個順序逐項計算）')}</td>
+        <td><select onchange="whatIfPrefs.multi.levers[${i}].driver=this.value;saveWhatIfPrefs_();drawWhatIf_()">${driverOptionsHtml_(l.driver)}</select></td>
+        ${shareMode ? `<td><input type="number" min="0" step="any" value="${esc(l.share)}" placeholder="平均" ${l.fixed !== '' && l.fixed !== undefined ? 'disabled' : ''} oninput="whatIfPrefs.multi.levers[${i}].share=this.value;saveWhatIfPrefs_()"></td>` : ''}
+        <td><input type="number" min="0" step="any" value="${esc(l.capPct)}" placeholder="不限" ${l.fixed !== '' && l.fixed !== undefined ? 'disabled' : ''} oninput="whatIfPrefs.multi.levers[${i}].capPct=this.value;saveWhatIfPrefs_()"></td>
+        <td><input type="number" step="any" value="${esc(l.fixed)}" placeholder="反推" onchange="whatIfPrefs.multi.levers[${i}].fixed=this.value;saveWhatIfPrefs_();drawWhatIf_()"></td>
+        <td><button type="button" class="btn ghost icon sm" onclick="whatIfPrefs.multi.levers.splice(${i},1);saveWhatIfPrefs_();drawWhatIf_()" aria-label="刪除">✕</button></td>
+      </tr>`).join('')}</tbody></table></div>
+    <div class="field-row" style="margin-top:8px;">
+      <button type="button" class="btn secondary sm" onclick="addLever_()">＋ 加一個項目</button>
+      ${shareMode ? `<span class="help">分攤比例合計 ${fmt(totalShare)}%${totalShare && Math.abs(totalShare - 100) > 0.01 ? '（會自動換算成 100%）' : totalShare ? '' : '（都沒填 = 平均分攤）'}</span>` : ''}
+      <span class="spacer"></span>
+      <button type="button" class="btn" onclick="runMultiGoal_()">計算</button>
+    </div>
+    <div id="wi-multi-result"></div>
+  </div>`;
+}
+function addLever_() {
+  const used = whatIfPrefs.multi.levers.map(l => l.driver);
+  const next = whatIfOptions.drivers.find(d => used.indexOf(driverKey_(d.driver)) === -1);
+  if (!next) return;
+  whatIfPrefs.multi.levers.push({ driver: driverKey_(next.driver), share: '', capPct: '', fixed: '' });
+  saveWhatIfPrefs_();
+  drawWhatIf_();
+}
+function installLeverSort_() {
+  const body = document.getElementById('wi-lever-body');
+  if (!body) return;
+  makeSortable(body, { items: 'tr', onEnd: keys => {
+    whatIfPrefs.multi.levers = keys.map(k => whatIfPrefs.multi.levers[Number(k)]);
+    saveWhatIfPrefs_();
+    drawWhatIf_();
+  } });
+}
+let lastMultiResult_ = null;
+function runMultiGoal_() {
+  const m = whatIfPrefs.multi;
+  const box = document.getElementById('wi-multi-result');
+  box.innerHTML = '<p class="muted">計算中...（每一項都要反覆試算，項目多時會花幾秒）</p>';
+  const levers = m.levers.map(l => ({ driver: driverFromKey_(l.driver), share: l.share, capPct: l.capPct, fixed: l.fixed }));
+  google.script.run
+    .withSuccessHandler(safeHandler(r => { lastMultiResult_ = r; box.innerHTML = multiGoalResultHtml_(r); }))
+    .withFailureHandler(err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; })
+    .solveGoalMulti(currentScenarioId, { code: m.metric, basis: m.basis }, num(m.target), levers, m.mode);
+}
+function multiGoalSteps_(r) {
+  const metric = whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis);
+  return [{ label: '目前 ' + metric, value: r.metricBase, kind: 'total' }]
+    .concat(r.levers.map(l => ({ label: l.label, value: l.contribution, kind: 'delta',
+      tip: `${l.label}\n${fmt(l.base, Math.abs(l.base) < 100 ? 2 : 0)} → ${fmt(l.value, Math.abs(l.base) < 100 ? 2 : 0)} ${l.unit || ''}\n貢獻 ${l.contribution >= 0 ? '+' : ''}${fmt(l.contribution)}` })))
+    .concat([{ label: (r.feasible ? '達成 ' : '最多做到 ') + metric, value: r.achieved, kind: 'total' }]);
+}
+function multiGoalResultHtml_(r) {
+  const total = r.achieved - r.metricBase;
+  const dg = v => Math.abs(v) < 100 ? 2 : 0;
+  const head = r.feasible
+    ? `<div class="callout ok">可以達成：${esc(whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))} ${fmt(r.metricBase)} → <b>${fmt(r.achieved)}</b>（目標 ${fmt(r.target)}）${r.mode === 'equal' ? `，每一項都調 <b>${fmt(r.equalPct, 2)}%</b>` : ''}。</div>`
+    : `<div class="callout warn">${esc(r.message)}</div>`;
+  return `${head}${(r.warnings || []).map(w => `<div class="callout warn">${esc(w)}</div>`).join('')}
+    <div class="grid-scroll"><table class="grid-table lever-table">
+      <thead><tr><th>項目</th><th>目前</th><th>調整後</th><th>變動</th><th>對結果的貢獻</th><th>占總改善</th></tr></thead>
+      <tbody>${r.levers.map(l => `<tr>
+        <td>${esc(l.label)}${l.fixed ? '<span class="lever-cap" style="background:#e2e8f0;color:#2d3748;">固定</span>' : ''}${l.capped ? '<span class="lever-cap">碰到上限</span>' : ''}</td>
+        <td class="amt">${fmt(l.base, dg(l.base))} ${esc(l.unit || '')}</td>
+        <td class="amt"><b>${fmt(l.value, dg(l.base))}</b> ${esc(l.unit || '')}</td>
+        <td class="amt">${l.pct === null ? '' : signed_(l.pct, 2) + '%'}</td>
+        <td class="amt${l.contribution < 0 ? ' negative' : ''}">${l.contribution >= 0 ? '+' : ''}${fmt(l.contribution)}</td>
+        <td class="amt">${total ? (l.contribution / total * 100).toFixed(1) + '%' : ''}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <p class="help">貢獻依列表順序逐項加入計算（各項之間有交互作用，例如售價變動也會影響佣金與貨物稅），加總 = 總改善 ${total >= 0 ? '+' : ''}${fmt(total)}。拖曳 ⠿ 可以換順序。只在畫面上試算，不會改到存檔的數字。</p>
+    <div class="waterfall-card">${wfSvg_(multiGoalSteps_(r), { width: 900, height: 320, labels: true, fmtV: wfShortFmt_(multiGoalSteps_(r)) })}</div>
+    <div class="field-row" style="margin-top:8px;"><button type="button" class="btn secondary sm" onclick="openInWaterfallTool_(multiGoalSteps_(lastMultiResult_), '組合拳：' + whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))">在瀑布圖工具開啟（可編輯、下載 PNG）</button></div>`;
+}
+
+/* ===== src/ui/47-waterfall.js ===== */
+/* ================= 瀑布圖工具 =================
+ * 儀表板的「損益瀑布」只能看單一欄位從收入扣到營業淨利；簡報常常要的是「差異拆解」：
+ *   兩個情境的差異  現況 → 目標(或任兩個 車型×情境×車系)的營業淨利，差在哪些科目
+ *   單一情境損益    一個欄位從收入一路扣到指定的小計，可以看到明細
+ *   作法拆解        現況 → 每一項改善作法的效果 → 目標，沒寫作法的差異單獨一根
+ *   自訂            自己輸入每一根(也可以把上面任何一張圖「轉成自訂」再改名稱、合併)
+ * 圖是純 SVG(跟儀表板同一套)，可以下載 PNG / SVG、複製表格貼到 Excel / PPT。
+ */
+const WF_PREFS_KEY_ = 'plWaterfall.prefs.v1';
+let wfPrefs = {
+  mode: 'bridge',
+  from: { scenarioId: '', vehicleId: '' }, to: { scenarioId: '', vehicleId: '' },
+  end: 'K', level: 'major', basis: 'unit', volumeEffect: true, unit: 1,
+  sort: 'pl', topN: 0, minAbs: 0, subtotals: true, labels: true, titles: {},
+  manual: [
+    { label: '現況營業淨利', value: -100000, kind: 'total' },
+    { label: '售價調整', value: 30000, kind: 'delta' },
+    { label: '材料成本低減', value: 45000, kind: 'delta' },
+    { label: '開發總投低減', value: 12000, kind: 'delta' },
+    { label: '目標營業淨利', value: '', kind: 'total' }
+  ]
+};
+let wfLists = null;      // { scenarios, vehicles }
+let wfLast = null;       // 目前這張圖的 steps(轉成自訂、匯出用)
+
+function loadWfPrefs_() {
+  try {
+    const p = JSON.parse(localStorage.getItem(WF_PREFS_KEY_) || 'null');
+    if (p) Object.keys(wfPrefs).forEach(k => { if (p[k] !== undefined) wfPrefs[k] = p[k]; });
+  } catch (e) { /* 用預設 */ }
+}
+/** 圖表標題每個模式各記一份(從反推帶過來的標題不會跑到差異拆解) */
+function wfTitle_() { return (wfPrefs.titles && wfPrefs.titles[wfPrefs.mode]) || ''; }
+function wfSetTitle_(t) { if (!wfPrefs.titles || typeof wfPrefs.titles !== 'object') wfPrefs.titles = {}; wfPrefs.titles[wfPrefs.mode] = t; }
+function saveWfPrefs_() {
+  try { localStorage.setItem(WF_PREFS_KEY_, JSON.stringify(wfPrefs)); } catch (e) { /* 存不了就算了 */ }
+}
+
+/* ---------------- 圖：瀑布 SVG ---------------- */
+/**
+ * steps = [{ label, value, kind: 'total' | 'delta', tip }]
+ *   total = 從 0 畫到 value 的整根(起點、小計、終點)；delta = 從目前累計往上/往下的一段
+ * opts = { width, height, fmtV, labels, title }
+ * 增加綠色、減少紅色、整根深色(負數紅底深框)；每根之間有虛線連接，看得出累計的走向。
+ */
+function wfSvg_(steps, opts) {
+  opts = opts || {};
+  const W = opts.width || 1100, H = opts.height || 420;
+  const fmtV = opts.fmtV || shortAmount_;
+  const showLabels = opts.labels !== false;
+  const titleH = opts.title ? 26 : 0;
+  if (!steps.length) {
+    return `<svg class="chart-svg wf-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%"><text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="#a0aec0" font-size="13">沒有可以畫的資料</text></svg>`;
+  }
+  // 先算每一根的上下緣
+  let run = 0;
+  const bars = steps.map(st => {
+    const v = Number(st.value) || 0;
+    if (st.kind === 'total') { run = v; return { st, y0: 0, y1: v }; }
+    const b = { st, y0: run, y1: run + v };
+    run += v;
+    return b;
+  });
+  const vals = [0];
+  bars.forEach(b => { vals.push(b.y0, b.y1); });
+  let vMin = Math.min.apply(null, vals), vMax = Math.max.apply(null, vals);
+  const span = (vMax - vMin) || Math.abs(vMax) || 1;
+  if (showLabels) { vMax += span * 0.08; if (vMin < 0) vMin -= span * 0.08; }
+  const axis = niceTicks_(vMin, vMax, 6);
+  const tickFont = 11;
+  const leftPad = Math.max.apply(null, axis.ticks.map(t => textWidth_(fmtV(t), tickFont))) + 14;
+  const n = bars.length;
+  const gw0 = (W - Math.max(52, leftPad) - 12) / n;
+  const labelLines = gw0 < 70 ? 4 : 3;
+  const m = { l: Math.max(52, leftPad), r: 12, t: 12 + titleH, b: 16 + labelLines * 13 };
+  const plotW = W - m.l - m.r, plotH = H - m.t - m.b;
+  const y = v => m.t + plotH - (v - axis.lo) / (axis.hi - axis.lo) * plotH;
+  const gw = plotW / n, bw = Math.min(gw * 0.66, 64);
+  const xOf = i => m.l + i * gw + (gw - bw) / 2;
+  const font = 'font-family="-apple-system,BlinkMacSystemFont,\'Segoe UI\',\'Noto Sans TC\',\'Microsoft JhengHei\',sans-serif"';
+  let out = `<svg class="chart-svg wf-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" ${font}>`;
+  out += `<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
+  if (opts.title) out += `<text x="${W / 2}" y="20" text-anchor="middle" font-size="15" font-weight="600" fill="#1a202c">${esc(opts.title)}</text>`;
+  axis.ticks.forEach(t => {
+    const yy = y(t);
+    out += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="${t === 0 ? '#718096' : '#e2e8f0'}" stroke-width="${t === 0 ? 1.2 : 1}"/>`;
+    out += `<text x="${m.l - 6}" y="${(yy + 4).toFixed(1)}" text-anchor="end" font-size="${tickFont}" fill="#718096">${esc(fmtV(t))}</text>`;
+  });
+  bars.forEach((b, i) => {
+    const top = Math.min(y(b.y0), y(b.y1)), bottom = Math.max(y(b.y0), y(b.y1));
+    const h = Math.max(bottom - top, 1.5);
+    const x = xOf(i);
+    const v = b.y1 - b.y0;
+    const isTotal = b.st.kind === 'total';
+    const color = isTotal ? (b.y1 < 0 ? '#c53030' : '#2d3748') : (v >= 0 ? '#38a169' : '#e53e3e');
+    out += `<rect class="bar wf-bar" x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${color}" data-tip="${esc(b.st.tip || (b.st.label + '\n' + (isTotal ? '' : (v >= 0 ? '+' : '')) + fmt(isTotal ? b.y1 : v)))}"/>`;
+    // 連接線：這一根的終點 → 下一根的起點
+    if (i < n - 1) {
+      const yy = y(b.y1);
+      out += `<line x1="${(x + bw).toFixed(1)}" x2="${(xOf(i + 1)).toFixed(1)}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="#a0aec0" stroke-width="1" stroke-dasharray="3 3"/>`;
+    }
+    if (showLabels) {
+      const text = isTotal ? fmtV(b.y1) : (v >= 0 ? '+' : '−') + fmtV(Math.abs(v));
+      if (textWidth_(text, 10.5) <= gw - 2) {
+        const up = isTotal ? b.y1 >= 0 : v >= 0;
+        const ly = up ? top - 4 : bottom + 12;
+        out += `<text class="bar-label" x="${(x + bw / 2).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="${isTotal ? 600 : 400}" fill="#2d3748">${esc(text)}</text>`;
+      }
+    }
+    const lines = wrapLabel_(String(b.st.label || '').replace(/\//g, '／'), gw - 4, 11, labelLines);
+    const cx = m.l + i * gw + gw / 2;
+    out += `<text class="x-label" x="${cx.toFixed(1)}" y="${(m.t + plotH + 15).toFixed(1)}" text-anchor="middle" font-size="11" fill="#4a5568" font-weight="${isTotal ? 600 : 400}" data-tip="${esc(b.st.label || '')}">`;
+    lines.forEach((ln, k) => { out += `<tspan x="${cx.toFixed(1)}" dy="${k === 0 ? 0 : 13}">${esc(ln)}</tspan>`; });
+    out += '</text>';
+  });
+  out += '</svg>';
+  return out;
+}
+
+/** 自訂模式的列 → steps：小計列沒填數字 = 前面的累計 */
+function wfManualSteps_(rows) {
+  let run = 0;
+  return (rows || []).filter(r => String(r.label || '').trim() || String(r.value) !== '').map(r => {
+    const blank = r.value === '' || r.value === null || r.value === undefined || isNaN(Number(r.value));
+    if (r.kind === 'total') {
+      const v = blank ? run : Number(r.value);
+      run = v;
+      return { label: r.label, value: v, kind: 'total' };
+    }
+    const v = blank ? 0 : Number(r.value);
+    run += v;
+    return { label: r.label, value: v, kind: 'delta' };
+  });
+}
+
+/* ---------------- 從損益結果組出 steps ---------------- */
+/**
+ * 看損益表的結構(不寫死科目代碼，自訂科目也適用)：
+ *   最上層的科目依呈現順序走；公式引用其他上層科目的是「結果列」(生產毛利 = 收入 − 銷貨成本、營業淨利 = …)，
+ *   其他是「增減項」(收入、銷貨成本、前瞻費用…)；結果列底下若有明細(銷貨毛利 = 生產毛利 − Σ明細)，那些明細也是增減項。
+ *   對結果的方向：收入 +，其餘成本費用 −；「X + CHILDREN()」型的明細為 +。
+ */
+function wfStructure_(lines) {
+  const pl = lines.filter(l => !l.isPriceStructure);
+  const codes = new Set(pl.map(l => l.LineCode));
+  const roots = pl.filter(l => !l.ParentLine || !codes.has(l.ParentLine));
+  const rootCodes = new Set(roots.map(r => r.LineCode));
+  const kids = code => pl.filter(l => l.ParentLine === code);
+  const leaves = l => { const k = kids(l.LineCode); return k.length ? [].concat.apply([], k.map(leaves)) : [l]; };
+  const isResult = l => (String(l.Formula || '').match(/[A-Za-z_][A-Za-z0-9_]*/g) || []).some(t => t !== l.LineCode && rootCodes.has(t));
+  return { pl, roots, kids, leaves, isResult };
+}
+/** 可以選的「畫到哪一列」：結果列(生產毛利、銷貨毛利…營業淨利) */
+function wfEndOptions_(lines) {
+  const S = wfStructure_(lines);
+  return S.roots.filter(S.isResult);
+}
+/**
+ * 依設定把損益科目分成一根一根的項目，到 endCode 為止。
+ * 回傳 [{ key, label, sign, codes, isResult }]，isResult 的項目是中間小計(只在單一情境模式畫)。
+ */
+function wfItems_(lines, endCode, level) {
+  const S = wfStructure_(lines);
+  const items = [];
+  for (const r of S.roots) {
+    const result = S.isResult(r);
+    const children = S.kids(r.LineCode);
+    if (result) {
+      if (children.length) {
+        const sign = /-\s*CHILDREN\s*\(/i.test(r.Formula || '') ? -1 : 1;
+        if (level === 'detail') [].concat.apply([], children.map(S.leaves)).forEach(l => items.push({ key: l.LineCode, label: shortLineName(l.LineName), sign, codes: [l.LineCode] }));
+        else items.push({ key: 'Σ' + r.LineCode, label: SUM_GROUP_NAMES_[r.LineCode] || (shortLineName(r.LineName) + ' 扣除項'), sign, codes: children.map(c => c.LineCode) });
+      }
+      items.push({ key: r.LineCode, label: shortLineName(r.LineName), isResult: true, codes: [r.LineCode] });
+      if (r.LineCode === endCode) break;
+      continue;
+    }
+    const sign = r.LineCode === 'A' || r.Category === '收入' ? 1 : -1;
+    if (level === 'detail' && children.length) S.leaves(r).forEach(l => items.push({ key: l.LineCode, label: shortLineName(l.LineName), sign, codes: [l.LineCode] }));
+    else items.push({ key: r.LineCode, label: shortLineName(r.LineName), sign, codes: [r.LineCode] });
+  }
+  return items;
+}
+function wfFactor_(col, basis) {
+  const v = (col && col.volume) || {};
+  if (basis === 'year') return (Number(v.monthlyVolume) || 0) * 12;
+  if (basis === 'lc') return Number(v.units) || 0;
+  return 1;
+}
+/** 欄位名稱：同車型比較時省略車型，加權平均不寫 */
+function wfColName_(c, other) {
+  const type = other && other.vehicleTypeLabel === c.vehicleTypeLabel ? '' : c.vehicleTypeLabel;
+  return [type, c.scenarioLabel, c.isWeighted ? '' : c.vehicleLabel].filter(x => x).join(' ');
+}
+function wfBasisLabel_(basis) { return basis === 'year' ? '年度總額' : basis === 'lc' ? 'LC 總額' : '單台'; }
+function wfValueOf_(col, codes) { return codes.reduce((s, c) => s + (Number(col.amounts[c]) || 0), 0); }
+
+/** 排序、只留前 N 項、太小的併成「其他」 */
+function wfTrim_(deltas) {
+  let list = deltas.slice();
+  if (wfPrefs.sort === 'abs') list.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  const minAbs = Math.abs(num(wfPrefs.minAbs)) * (num(wfPrefs.unit) || 1);
+  const topN = Math.max(0, Math.floor(num(wfPrefs.topN)));
+  let keep = list.filter(d => d.pinned || Math.abs(d.value) >= Math.max(minAbs, 0.5));
+  let rest = list.filter(d => keep.indexOf(d) === -1);
+  if (topN && keep.filter(d => !d.pinned).length > topN) {
+    const ranked = keep.filter(d => !d.pinned).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    const drop = ranked.slice(topN);
+    keep = keep.filter(d => drop.indexOf(d) === -1);
+    rest = rest.concat(drop);
+  }
+  const restSum = rest.reduce((s, d) => s + d.value, 0);
+  if (rest.length && Math.abs(restSum) >= 0.5) keep.push({ label: `其他（${rest.length} 項）`, value: restSum, kind: 'delta', tip: '其他：\n' + rest.map(d => `${d.label} ${fmt(d.value)}`).join('\n') });
+  return keep;
+}
+
+function wfBridgeSteps_(cmp) {
+  const [cf, ct] = cmp.columns;
+  const lines = cmp.lines;
+  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : 'K';
+  const endLine = lines.find(l => l.LineCode === end) || { LineName: end };
+  const items = wfItems_(lines, end, wfPrefs.level).filter(it => !it.isResult);
+  const ff = wfFactor_(cf, wfPrefs.basis), ft = wfFactor_(ct, wfPrefs.basis);
+  const splitVolume = wfPrefs.basis !== 'unit' && wfPrefs.volumeEffect;
+  const mFrom = (Number(cf.amounts[end]) || 0), mTo = (Number(ct.amounts[end]) || 0);
+  const start = mFrom * ff, finish = mTo * ft;
+  const deltas = [];
+  if (splitVolume && Math.abs(ft - ff) > 1e-9) {
+    deltas.push({ label: '銷量影響', value: mFrom * (ft - ff), kind: 'delta', pinned: true,
+      tip: `銷量影響\n${shortLineName(endLine.LineName)}(單台) ${fmt(mFrom)} × 台數差 ${fmt(ft - ff)}` });
+  }
+  items.forEach(it => {
+    const a = wfValueOf_(cf, it.codes), b = wfValueOf_(ct, it.codes);
+    const v = splitVolume ? it.sign * (b - a) * ft : it.sign * (b * ft - a * ff);
+    deltas.push({ label: it.label, value: v, kind: 'delta',
+      tip: `${it.label}\n${wfColName_(cf, ct)}：${fmt(a)}\n${wfColName_(ct, cf)}：${fmt(b)}（單台）\n對${shortLineName(endLine.LineName)}的影響 ${v >= 0 ? '+' : ''}${fmt(v)}` });
+  });
+  const residual = (finish - start) - deltas.reduce((s, d) => s + d.value, 0);
+  if (Math.abs(residual) >= 0.5) deltas.push({ label: '其他（公式交互/尾差）', value: residual, kind: 'delta', pinned: true, tip: '不能直接歸到單一科目的差異（例如自訂公式的交互作用、四捨五入）' });
+  const name = shortLineName(endLine.LineName);
+  return [{ label: `${wfColName_(cf, ct)} ${name}`, value: start, kind: 'total' }]
+    .concat(wfTrim_(deltas))
+    .concat([{ label: `${wfColName_(ct, cf)} ${name}`, value: finish, kind: 'total' }]);
+}
+
+function wfStructureSteps_(cmp) {
+  const col = cmp.columns[0];
+  const lines = cmp.lines;
+  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : 'K';
+  const f = wfFactor_(col, wfPrefs.basis);
+  const items = wfItems_(lines, end, wfPrefs.level);
+  const steps = [];
+  let pending = [];
+  const flush = () => { if (pending.length) { wfTrim_(pending).forEach(s => steps.push(s)); pending = []; } };
+  items.forEach((it, idx) => {
+    if (it.isResult) {
+      flush();
+      if (wfPrefs.subtotals || it.key === end) steps.push({ label: it.label, value: wfValueOf_(col, it.codes) * f, kind: 'total' });
+      return;
+    }
+    const v = it.sign * wfValueOf_(col, it.codes) * f;
+    // 第一根是收入(而且收入只有一根)：畫成從 0 起的整根
+    if (idx === 0 && it.sign > 0 && !(items[1] && !items[1].isResult && items[1].sign > 0)) {
+      steps.push({ label: it.label, value: v, kind: 'total' });
+      return;
+    }
+    pending.push({ label: it.label, value: v, kind: 'delta', tip: `${it.label}\n${fmt(v)}` });
+  });
+  flush();
+  return steps;
+}
+
+function wfActionSteps_(cmp, actions) {
+  const [cf, ct] = cmp.columns;
+  const mFrom = Number(cf.amounts.K) || 0, mTo = Number(ct.amounts.K) || 0;
+  const nameOf = code => { const l = cmp.lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : ''; };
+  const deltas = actions.filter(a => String(a.Title || '').trim() && num(a.Effect)).map(a => ({
+    label: a.Title, value: num(a.Effect), kind: 'delta',
+    tip: `${a.Title}\n${[nameOf(a.LineCode), a.Owner, a.Status].filter(x => x).join('｜')}\n效果 ${fmt(num(a.Effect))} 元/台`
+  }));
+  const residual = (mTo - mFrom) - deltas.reduce((s, d) => s + d.value, 0);
+  if (Math.abs(residual) >= 0.5) deltas.push({ label: '其他差異（沒有對應作法）', value: residual, kind: 'delta', pinned: true, tip: '目標與現況的營業淨利差異中，沒有寫成作法的部分' });
+  return [{ label: `${wfColName_(cf, ct)} 營業淨利`, value: mFrom, kind: 'total' }]
+    .concat(wfTrim_(deltas))
+    .concat([{ label: `${wfColName_(ct, cf)} 營業淨利`, value: mTo, kind: 'total' }]);
+}
+
+/* ---------------- 頁面 ---------------- */
+function renderWaterfallPanel() {
+  const panel = document.getElementById('panel-waterfall');
+  if (!panel) return;
+  loadWfPrefs_();
+  panel.innerHTML = `<p class="page-intro">把任兩個欄位的差異、單一欄位的損益、改善作法，或自己輸入的數字畫成瀑布圖；可以下載 PNG / SVG 或複製表格貼到簡報。</p>
+    <div id="wf-body"><p class="muted">載入中...</p></div>`;
+  google.script.run
+    .withSuccessHandler(safeHandler(res => {
+      wfLists = res;
+      wfDefaultsFromContext_();
+      drawWaterfallTool_();
+    }))
+    .withFailureHandler(err => { document.getElementById('wf-body').innerHTML = `<div class="callout err">${esc(err.message)}</div>`; })
+    .getWaterfallSources();
+}
+/** 沒選過起點/終點：終點 = 目前情境，起點 = 同車型的「現況」情境(沒有就第一個) */
+function wfDefaultsFromContext_() {
+  const ids = wfLists.scenarios.map(s => s.ScenarioID);
+  if (ids.indexOf(wfPrefs.to.scenarioId) !== -1 && ids.indexOf(wfPrefs.from.scenarioId) !== -1) return;
+  // 起點 = 現況、終點 = 目標：目前情境是現況就當起點，否則當終點
+  const cur = wfLists.scenarios.find(s => s.ScenarioID === currentScenarioId) || wfLists.scenarios[0] || {};
+  const same = wfLists.scenarios.filter(s => s.VehicleTypeID === cur.VehicleTypeID && s.ScenarioID !== cur.ScenarioID);
+  const other = type => same.find(s => s.ScenarioType === type) || same[0] || cur;
+  const pair = cur.ScenarioType === '現況' ? [cur, other('目標')] : [other('現況'), cur];
+  wfPrefs.from = { scenarioId: pair[0].ScenarioID || '', vehicleId: '' };
+  wfPrefs.to = { scenarioId: pair[1].ScenarioID || '', vehicleId: '' };
+}
+function wfScenarioSelectHtml_(side, onlyWeighted) {
+  const sel = wfPrefs[side];
+  const sc = wfLists.scenarios.find(s => s.ScenarioID === sel.scenarioId) || {};
+  const byType = {};
+  wfLists.scenarios.forEach(s => { (byType[s.VehicleTypeID] = byType[s.VehicleTypeID] || []).push(s); });
+  const vehicles = wfLists.vehicles.filter(v => v.VehicleTypeID === sc.VehicleTypeID);
+  return `<select id="wf-${side}-sc" onchange="wfPrefs.${side}={scenarioId:this.value,vehicleId:''};saveWfPrefs_();drawWaterfallTool_()">
+      ${Object.keys(byType).map(t => `<optgroup label="${esc(t)}">${byType[t].map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === sel.scenarioId ? ' selected' : ''}>${esc(t + ' ' + scenarioLabel(s))}</option>`).join('')}</optgroup>`).join('')}
+    </select>
+    ${onlyWeighted ? '' : `<select id="wf-${side}-v" onchange="wfPrefs.${side}.vehicleId=this.value;saveWfPrefs_();runWaterfall_()">
+      <option value="">加權平均</option>
+      ${vehicles.map(v => `<option value="${esc(v.VehicleID)}"${v.VehicleID === sel.vehicleId ? ' selected' : ''}>${esc(v.VehicleCode || v.VehicleID)}</option>`).join('')}
+    </select>`}`;
+}
+
+function drawWaterfallTool_() {
+  const body = document.getElementById('wf-body');
+  if (!body || !wfLists) return;
+  const p = wfPrefs;
+  const modes = [['bridge', '兩個欄位的差異'], ['structure', '單一欄位損益'], ['actions', '作法拆解'], ['manual', '自訂']];
+  const seg = (key, opts, cur) => `<div class="seg">${opts.map(([v, t]) => `<button type="button" class="seg-btn${String(cur) === String(v) ? ' active' : ''}" onclick="wfPrefs.${key}=${typeof v === 'number' ? v : `'${v}'`};saveWfPrefs_();drawWaterfallTool_()">${t}</button>`).join('')}</div>`;
+  const chk = (key, label) => `<label class="chk"><input type="checkbox" ${p[key] ? 'checked' : ''} onchange="wfPrefs.${key}=this.checked;saveWfPrefs_();runWaterfall_()"> ${label}</label>`;
+  let source = '';
+  if (p.mode === 'bridge') {
+    source = `<div class="field-row">
+      <label class="field"><span>起點</span><div class="inline">${wfScenarioSelectHtml_('from')}</div></label>
+      <label class="field"><span>終點</span><div class="inline">${wfScenarioSelectHtml_('to')}</div></label>
+      <button type="button" class="btn secondary sm" style="align-self:flex-end;" onclick="wfSwap_()" data-tip="起點、終點對調">⇄</button></div>`;
+  } else if (p.mode === 'structure') {
+    source = `<div class="field-row"><label class="field"><span>欄位</span><div class="inline">${wfScenarioSelectHtml_('to')}</div></label></div>`;
+  } else if (p.mode === 'actions') {
+    source = `<div class="field-row">
+      <label class="field"><span>現況情境</span><div class="inline">${wfScenarioSelectHtml_('from', true)}</div></label>
+      <label class="field"><span>目標情境（作法掛在這個情境）</span><div class="inline">${wfScenarioSelectHtml_('to', true)}</div></label></div>
+      <p class="help">加權平均營業淨利（元/台）：現況 → 目標情境每一項作法的效果 → 目標；作法加總跟實際差異對不起來的部分單獨一根。</p>`;
+  }
+  const lineOpts = p.mode === 'bridge' || p.mode === 'structure';
+  body.innerHTML = `
+    <div class="card">
+      <div class="field-row">${seg('mode', modes, p.mode)}</div>
+      ${source}
+      ${p.mode === 'manual' ? wfManualEditorHtml_() : ''}
+      <div class="field-row wf-opts">
+        ${lineOpts ? `<label class="field"><span>畫到</span><select id="wf-end" onchange="wfPrefs.end=this.value;saveWfPrefs_();runWaterfall_()"></select></label>
+          <label class="field"><span>明細程度</span>${seg('level', [['major', '大項'], ['detail', '明細科目']], p.level)}</label>
+          <label class="field"><span>數值</span>${seg('basis', [['unit', '單台'], ['year', '年度'], ['lc', 'LC 總額']], p.basis)}</label>` : ''}
+        <label class="field"><span>金額單位</span>${seg('unit', [[1, '元'], [1000, '千元'], [10000, '萬元']], p.unit)}</label>
+        ${p.mode !== 'manual' ? `<label class="field"><span>排序</span>${seg('sort', [['pl', '損益表順序'], ['abs', '影響大到小']], p.sort)}</label>
+          <label class="field"><span>最多顯示幾項（0 = 全部）</span><input type="number" min="0" style="width:90px;" value="${esc(p.topN)}" onchange="wfPrefs.topN=this.value;saveWfPrefs_();runWaterfall_()"></label>
+          <label class="field"><span>小於多少併入「其他」</span><input type="number" min="0" style="width:110px;" value="${esc(p.minAbs)}" onchange="wfPrefs.minAbs=this.value;saveWfPrefs_();runWaterfall_()"></label>` : ''}
+      </div>
+      <div class="field-row">
+        ${p.mode === 'bridge' && p.basis !== 'unit' ? chk('volumeEffect', '拆出「銷量影響」') : ''}
+        ${p.mode === 'structure' ? chk('subtotals', '顯示中間小計（生產毛利、銷貨毛利…）') : ''}
+        ${chk('labels', '顯示數字')}
+        <label class="field grow"><span>圖表標題（留空 = 自動）</span><input type="text" id="wf-title" value="${esc(wfTitle_())}" placeholder="自動" oninput="wfSetTitle_(this.value);saveWfPrefs_();wfRedraw_()"></label>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3 id="wf-heading">瀑布圖</h3><span class="spacer"></span>
+        ${p.mode !== 'manual' ? '<button type="button" class="btn secondary sm" onclick="wfToManual_()" data-tip="把這張圖的每一根複製到「自訂」，可以再改名稱、合併、調整順序">轉成自訂（可再編輯）</button>' : ''}
+        <button type="button" class="btn secondary sm" onclick="wfCopyTable_()">複製表格</button>
+        <button type="button" class="btn secondary sm" onclick="wfDownload_('svg')">下載 SVG</button>
+        <button type="button" class="btn sm" onclick="wfDownload_('png')">下載 PNG</button></div>
+      <div id="wf-chart"><p class="muted">計算中...</p></div>
+      <div id="wf-table"></div>
+    </div>`;
+  if (p.mode === 'manual') installWfManual_();
+  runWaterfall_();
+}
+function wfSwap_() {
+  const t = wfPrefs.from; wfPrefs.from = wfPrefs.to; wfPrefs.to = t;
+  saveWfPrefs_(); drawWaterfallTool_();
+}
+
+function runWaterfall_() {
+  const p = wfPrefs;
+  const box = document.getElementById('wf-chart');
+  if (!box) return;
+  if (p.mode === 'manual') { wfLast = { steps: wfManualSteps_(p.manual), title: '' }; wfRedraw_(); return; }
+  const sels = p.mode === 'structure' ? [p.to] : [p.from, p.to];
+  if (sels.some(s => !s.scenarioId)) { box.innerHTML = '<p class="muted">請先選擇情境。</p>'; return; }
+  const selections = sels.map(s => ({ ScenarioID: s.scenarioId, VehicleID: p.mode === 'actions' ? '' : (s.vehicleId || '') }));
+  box.innerHTML = '<p class="muted">計算中...</p>';
+  const fail = err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; };
+  google.script.run.withFailureHandler(fail).withSuccessHandler(safeHandler(cmp => {
+    if (p.mode !== 'manual') wfFillEndOptions_(cmp.lines);
+    const colName = c => wfColName_(c, cmp.columns.find(x => x !== c));
+    if (p.mode === 'actions') {
+      google.script.run.withFailureHandler(fail).withSuccessHandler(safeHandler(actions => {
+        if (!actions.some(a => num(a.Effect))) toast('目標情境還沒有填效果的改善作法（GATE 報告「目標成本作法」可以填）', 'warn', 3000);
+        wfLast = { steps: wfActionSteps_(cmp, actions), title: `營業淨利：${colName(cmp.columns[0])} → ${colName(cmp.columns[1])}（作法拆解，元/台）` };
+        wfRedraw_();
+      })).getActions(p.to.scenarioId);
+      return;
+    }
+    const endLine = cmp.lines.find(l => l.LineCode === p.end) || cmp.lines.find(l => l.LineCode === 'K') || {};
+    const basis = wfBasisLabel_(p.basis);
+    if (p.mode === 'bridge') {
+      wfLast = { steps: wfBridgeSteps_(cmp), title: `${shortLineName(endLine.LineName || '')}差異：${colName(cmp.columns[0])} → ${colName(cmp.columns[1])}（${basis}）` };
+    } else {
+      wfLast = { steps: wfStructureSteps_(cmp), title: `${colName(cmp.columns[0])}：收入到${shortLineName(endLine.LineName || '')}（${basis}）` };
+    }
+    wfRedraw_();
+  })).calculateComparison(selections);
+}
+function wfFillEndOptions_(lines) {
+  const sel = document.getElementById('wf-end');
+  if (!sel) return;
+  const opts = wfEndOptions_(lines);
+  if (!opts.some(o => o.LineCode === wfPrefs.end)) wfPrefs.end = opts.length ? opts[opts.length - 1].LineCode : 'K';
+  sel.innerHTML = opts.map(o => `<option value="${esc(o.LineCode)}"${o.LineCode === wfPrefs.end ? ' selected' : ''}>${esc(shortLineName(o.LineName))}</option>`).join('');
+}
+function wfUnitText_() { const u = num(wfPrefs.unit) || 1; return u === 1000 ? '千元' : u === 10000 ? '萬元' : '元'; }
+/** 圖上的數字要短，而且整張圖用同一個單位(刻度與標籤一致)：元 → 萬 / 億；千元、萬元照單位 */
+function wfShortFmt_(steps) {
+  const u = num(wfPrefs.unit) || 1;
+  let run = 0, maxAbs = 0;
+  (steps || []).forEach(st => { run = st.kind === 'total' ? Number(st.value) || 0 : run + (Number(st.value) || 0); maxAbs = Math.max(maxAbs, Math.abs(run), Math.abs(Number(st.value) || 0)); });
+  if (u === 1 && maxAbs >= 1e8) return v => fmt((Number(v) || 0) / 1e8, 2) + '億';
+  if (u === 1 && maxAbs >= 1e5) return v => fmt((Number(v) || 0) / 1e4, 1) + '萬';
+  return v => fmt((Number(v) || 0) / u, u === 1 ? 0 : 1);
+}
+function wfFmt_(v) { const u = num(wfPrefs.unit) || 1; return fmt(v / u, u === 1 ? 0 : 1); }
+
+function wfRedraw_() {
+  const box = document.getElementById('wf-chart');
+  if (!box || !wfLast) return;
+  const title = String(wfTitle_()).trim() || wfLast.title || '';
+  const heading = document.getElementById('wf-heading');
+  if (heading) heading.textContent = title || '瀑布圖';
+  const u = num(wfPrefs.unit) || 1;
+  box.innerHTML = wfSvg_(wfLast.steps, { title, labels: wfPrefs.labels, fmtV: wfShortFmt_(wfLast.steps) });
+  const tbl = document.getElementById('wf-table');
+  if (!tbl) return;
+  let run = 0;
+  const start = wfLast.steps.length && wfLast.steps[0].kind === 'total' ? wfLast.steps[0].value : 0;
+  const end = wfLast.steps.length ? wfLast.steps[wfLast.steps.length - 1] : null;
+  const total = end && end.kind === 'total' && wfLast.steps.length > 1 ? end.value - start : null;
+  tbl.innerHTML = `<div class="grid-scroll"><table class="grid-table wf-table"><thead><tr><th>項目</th><th>數值（${wfUnitText_()}）</th><th>累計</th>${total ? '<th>占總差異</th>' : ''}</tr></thead>
+    <tbody>${wfLast.steps.map(s => {
+      if (s.kind === 'total') run = s.value; else run += s.value;
+      return `<tr class="${s.kind === 'total' ? 'subtotal' : ''}"><td>${esc(s.label)}</td>
+        <td class="amt${s.value < 0 ? ' negative' : ''}">${s.kind === 'delta' && s.value > 0 ? '+' : ''}${wfFmt_(s.value)}</td>
+        <td class="amt${run < 0 ? ' negative' : ''}">${wfFmt_(run)}</td>
+        ${total ? `<td class="amt">${s.kind === 'delta' ? (s.value / total * 100).toFixed(1) + '%' : ''}</td>` : ''}</tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+/* ---------------- 自訂模式 ---------------- */
+function wfManualEditorHtml_() {
+  return `<div class="wf-manual">
+    <table class="grid-table" id="wf-manual-table"><thead><tr><th style="width:28px;"></th><th>名稱</th><th style="width:150px;">數值（元）</th><th style="width:170px;">類型</th><th style="width:40px;"></th></tr></thead>
+    <tbody id="wf-manual-body">${wfPrefs.manual.map((r, i) => `<tr data-key="${i}">
+      <td>${dragHandleHtml('拖曳調整順序')}</td>
+      <td><input type="text" value="${esc(r.label)}" oninput="wfPrefs.manual[${i}].label=this.value;wfManualChanged_()"></td>
+      <td><input type="number" step="any" value="${esc(r.value)}" placeholder="${r.kind === 'total' ? '留空 = 累計' : ''}" oninput="wfPrefs.manual[${i}].value=this.value;wfManualChanged_()"></td>
+      <td><select onchange="wfPrefs.manual[${i}].kind=this.value;wfManualChanged_(true)">
+        <option value="delta"${r.kind !== 'total' ? ' selected' : ''}>增減（正 = 增加）</option>
+        <option value="total"${r.kind === 'total' ? ' selected' : ''}>整根（起點/小計/終點）</option></select></td>
+      <td><button type="button" class="btn ghost icon sm" onclick="wfPrefs.manual.splice(${i},1);wfManualChanged_(true)" aria-label="刪除">✕</button></td>
+    </tr>`).join('')}</tbody></table>
+    <div class="field-row">
+      <button type="button" class="btn secondary sm" onclick="wfPrefs.manual.push({label:'',value:'',kind:'delta'});wfManualChanged_(true)">＋ 加一根</button>
+      <button type="button" class="btn secondary sm" onclick="wfPasteDialog_()">從 Excel 貼上…</button>
+      <button type="button" class="btn ghost sm" onclick="wfPrefs.manual=[];wfManualChanged_(true)">清空</button>
+      <span class="help">「整根」沒填數字 = 自動帶前面的累計（用在小計、終點）。</span>
+    </div></div>`;
+}
+function installWfManual_() {
+  makeSortable(document.getElementById('wf-manual-body'), { items: 'tr', onEnd: keys => {
+    wfPrefs.manual = keys.map(k => wfPrefs.manual[Number(k)]);
+    wfManualChanged_(true);
+  } });
+}
+function wfManualChanged_(redrawEditor) {
+  saveWfPrefs_();
+  if (redrawEditor) { drawWaterfallTool_(); return; }
+  runWaterfall_();
+}
+/** 貼上兩欄(名稱、數值)，可以有第三欄寫「小計/合計/整根」 */
+function wfPasteDialog_() {
+  openModal({
+    title: '從 Excel 貼上瀑布圖資料', wide: true, okText: '套用',
+    body: '<p class="help">每列：名稱 ⇥ 數值（⇥ 類型，可省略）。第一列與最後一列自動當成整根；第三欄寫「小計」「合計」「整根」的也是整根。最後一列數值留空 = 自動累計。</p>',
+    fields: [{ name: 'text', type: 'textarea', label: '貼上（Ctrl+V）', placeholder: '現況營業淨利\t-120000\n售價調整\t25000\n材料低減\t60000\n目標營業淨利' }]
+  }).then(out => {
+    if (!out) return;
+    const rows = String(out.text || '').split(/\r?\n/).map(l => l.split('\t')).filter(c => c.join('').trim());
+    if (!rows.length) return;
+    wfPrefs.manual = rows.map((c, i) => {
+      const v = parsePastedNumber_(c[1]);
+      const isTotal = /小計|合計|整根|total/i.test(c[2] || '') || i === 0 || i === rows.length - 1;
+      return { label: String(c[0] || '').trim(), value: v === null || v === '' ? '' : v, kind: isTotal ? 'total' : 'delta' };
+    });
+    wfManualChanged_(true);
+  });
+}
+function wfToManual_() {
+  if (!wfLast || !wfLast.steps.length) return;
+  wfPrefs.manual = wfLast.steps.map((s, i) => ({ label: s.label, value: s.kind === 'total' && i > 0 && i === wfLast.steps.length - 1 ? '' : Math.round(s.value), kind: s.kind }));
+  const t = String(wfTitle_()).trim() || wfLast.title || '';
+  wfPrefs.mode = 'manual';
+  wfSetTitle_(t);
+  saveWfPrefs_();
+  drawWaterfallTool_();
+  toast('已複製到「自訂」，可以直接改名稱、數字或拖曳順序', 'ok');
+}
+/** 從其他頁面(例如多項目標反推)把一組 steps 帶到瀑布圖工具 */
+function openInWaterfallTool_(steps, title) {
+  loadWfPrefs_();
+  wfPrefs.manual = steps.map((s, i) => ({ label: s.label, value: s.kind === 'total' && i === steps.length - 1 && i > 0 ? '' : Math.round(s.value), kind: s.kind }));
+  wfPrefs.mode = 'manual';
+  wfSetTitle_(title || '');
+  saveWfPrefs_();
+  switchTab('waterfall');
+}
+
+/* ---------------- 匯出 ---------------- */
+function wfFileName_(ext) {
+  const t = String(wfTitle_() || (wfLast && wfLast.title) || '瀑布圖').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 60);
+  return t + '.' + ext;
+}
+function wfSaveBlob_(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function wfDownload_(kind) {
+  const svg = document.querySelector('#wf-chart svg');
+  if (!svg) return;
+  const clone = svg.cloneNode(true);
+  clone.removeAttribute('width');
+  const vb = (svg.getAttribute('viewBox') || '0 0 1100 420').split(/\s+/).map(Number);
+  clone.setAttribute('width', vb[2]); clone.setAttribute('height', vb[3]);
+  const text = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone);
+  if (kind === 'svg') { wfSaveBlob_(new Blob([text], { type: 'image/svg+xml' }), wfFileName_('svg')); return; }
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = vb[2] * scale; canvas.height = vb[3] * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(b => { if (b) wfSaveBlob_(b, wfFileName_('png')); else toast('瀏覽器不允許輸出圖片，請改用下載 SVG', 'err'); }, 'image/png');
+  };
+  img.onerror = () => toast('無法轉成 PNG，請改用下載 SVG', 'err');
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text);
+}
+function wfCopyTable_() {
+  if (!wfLast) return;
+  let run = 0;
+  const rows = [['項目', '數值(' + wfUnitText_() + ')', '累計']].concat(wfLast.steps.map(s => {
+    if (s.kind === 'total') run = s.value; else run += s.value;
+    const u = num(wfPrefs.unit) || 1;
+    return [s.label, String(Math.round(s.value / u * 10) / 10), String(Math.round(run / u * 10) / 10)];
+  }));
+  const tsv = rows.map(r => r.join('\t')).join('\n');
+  const done = () => toast('已複製，可以直接貼到 Excel', 'ok', 1600);
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = tsv; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) { toast('複製失敗', 'err'); }
+    ta.remove();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(tsv).then(done, fallback);
+  else fallback();
 }
 
 /* ===== src/ui/50-dashboard.js ===== */

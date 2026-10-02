@@ -192,15 +192,7 @@ function sensitivityTable(scenarioId, metric, rowDriver, rowValues, colDriver, c
   var cells = (rowValues || []).map(function (rv) {
     return (colDriver ? colValues : [null]).map(function (cv) {
       var o = driverOverrides_(scenarioId, rowDriver, rv, rb.value);
-      if (colDriver) {
-        var oc = driverOverrides_(scenarioId, colDriver, cv, cb.value);
-        Object.keys(oc).forEach(function (k) {
-          if (k === 'scenarioId') return;
-          if (o[k] && typeof o[k] === 'object') Object.keys(oc[k]).forEach(function (kk) { o[k][kk] = oc[k][kk]; });
-          else if (o[k] && typeof o[k] === 'number') o[k] = o[k] * oc[k];   // 同一個因子調兩次：倍數相乘
-          else o[k] = oc[k];
-        });
-      }
+      if (colDriver) o = mergeOverrides_(o, driverOverrides_(scenarioId, colDriver, cv, cb.value));
       return withOverrides_(o, function () { return whatIfMetric_(scenarioId, metric); });
     });
   });
@@ -217,4 +209,214 @@ function breakEvenVolume_(scenarioId) {
     var r = solveGoal(scenarioId, { code: 'K', basis: 'unit' }, 0, { type: 'volume' });
     return r.feasible ? r.value : null;
   } catch (e) { return null; }
+}
+
+/** 兩組覆寫合併(多個假設同時成立)；同一個倍數因子調兩次 = 倍數相乘 */
+function mergeOverrides_(a, b) {
+  var o = { scenarioId: a.scenarioId || b.scenarioId };
+  [a, b].forEach(function (src) {
+    Object.keys(src).forEach(function (k) {
+      if (k === 'scenarioId') return;
+      var v = src[k];
+      if (v && typeof v === 'object') {
+        o[k] = o[k] || {};
+        Object.keys(v).forEach(function (kk) {
+          o[k][kk] = typeof o[k][kk] === 'number' && k === 'lineScale' ? o[k][kk] * v[kk] : v[kk];
+        });
+      } else if (typeof v === 'number' && typeof o[k] === 'number') o[k] = o[k] * v;
+      else o[k] = v;
+    });
+  });
+  return o;
+}
+
+/**
+ * 找 x 使 g(x) = 0：從 x0 往兩邊擴大找到變號區間，再二分法。找不到回傳 null。
+ * (公式裡有取整、IF，不假設平滑)
+ */
+function solveScalar_(g, x0, step, lowerBound) {
+  var g0 = g(x0);
+  if (Math.abs(g0) < 0.5) return x0;
+  var lo = null, hi = null, gLo;
+  [1, -1].some(function (dir) {
+    var prevX = x0, prevG = g0, st = step;
+    for (var k = 0; k < 22; k++) {
+      var x = x0 + dir * st;
+      if (lowerBound !== null && lowerBound !== undefined && x < lowerBound) x = lowerBound;
+      var gx = g(x);
+      if ((gx > 0) !== (prevG > 0) || gx === 0) { lo = prevX; gLo = prevG; hi = x; return true; }
+      if (lowerBound !== null && lowerBound !== undefined && x === lowerBound) break;
+      prevX = x; prevG = gx; st *= 2;
+    }
+    return false;
+  });
+  if (lo === null) return null;
+  for (var i = 0; i < 60; i++) {
+    var mid = (lo + hi) / 2;
+    var gm = g(mid);
+    if (Math.abs(gm) < 0.5 || Math.abs(hi - lo) < Math.max(1e-6, Math.abs(mid) * 1e-9)) return mid;
+    if ((gm > 0) === (gLo > 0)) { lo = mid; gLo = gm; } else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * 多項目標反推(組合拳)：營業淨利的缺口通常不會只靠一個項目補，而是售價、材料、銷量…一起分擔。
+ *
+ * levers = [{ driver, share, capPct, fixed }]
+ *   fixed   有填 = 這一項已經確定(例：銷量確定是 120 台/月)，直接套用，不參與反推
+ *   share   分攤比例(只在 mode = 'share' 用；全部沒填就平均分攤)
+ *   capPct  最多只能調 ±幾 %(例：售價最多漲 3%)；碰到上限後剩下的缺口由其他項目吸收
+ * mode
+ *   'share' 依比例分攤缺口：每一項先各自算出「負責的那一份缺口」要調多少，再整組一起套用、等比例微調到剛好達標
+ *           (各項目之間有交互作用，例如售價變動也會影響佣金與貨物稅，所以不能單純相加)
+ *   'equal' 同幅度：所有項目往有利的方向調同樣的 %，算出要調幾 %
+ *
+ * 回傳每一項的 目前值 → 調整後、變動 %、是否碰到上限，以及「依列表順序逐項加入」的貢獻(加總剛好等於總改善，可以直接畫瀑布圖)。
+ */
+function solveGoalMulti(scenarioId, metric, target, levers, mode) {
+  if (!scenarioId) throw new Error('請先選擇情境');
+  metric = metric || { code: 'K', basis: 'unit' };
+  target = toNumber_(target);
+  mode = mode === 'equal' ? 'equal' : 'share';
+  levers = (levers || []).filter(function (l) { return l && l.driver && l.driver.type; });
+  if (!levers.length) throw new Error('請至少選一個調整項目');
+  var seen = {};
+  levers.forEach(function (l) {
+    var k = JSON.stringify(l.driver);
+    if (seen[k]) throw new Error('「' + driverLabel_(l.driver) + '」重複選了兩次');
+    seen[k] = true;
+  });
+  var positiveTypes = ['volume', 'price', 'fx', 'line', 'dev'];
+  var items = levers.map(function (l) {
+    var b = driverBase_(scenarioId, l.driver);
+    var fixed = l.fixed !== '' && l.fixed !== null && l.fixed !== undefined && !isNaN(Number(l.fixed));
+    var cap = l.capPct === '' || l.capPct === null || l.capPct === undefined || isNaN(Number(l.capPct)) ? null : Math.abs(Number(l.capPct));
+    return {
+      driver: l.driver, label: b.label, unit: b.unit, base: b.value,
+      fixed: fixed, value: fixed ? Number(l.fixed) : b.value,
+      share: Math.max(0, toNumber_(l.share)), cap: cap,
+      lower: positiveTypes.indexOf(l.driver.type) !== -1 ? 0 : null
+    };
+  });
+  var overridesFor = function (values) {
+    var o = { scenarioId: scenarioId };
+    items.forEach(function (it, i) {
+      if (values[i] === it.base) return;
+      o = mergeOverrides_(o, driverOverrides_(scenarioId, it.driver, values[i], it.base));
+    });
+    return o;
+  };
+  var metricAt = function (values) {
+    return withOverrides_(overridesFor(values), function () { return whatIfMetric_(scenarioId, metric); });
+  };
+  var baseValues = items.map(function (it) { return it.base; });
+  var metricBase = whatIfMetric_(scenarioId, metric);
+  var startValues = items.map(function (it) { return it.value; });   // 固定項目先套用
+  var metricStart = metricAt(startValues);
+  var gap = target - metricStart;
+  var free = items.map(function (it, i) { return it.fixed ? -1 : i; }).filter(function (i) { return i >= 0; });
+  var warnings = [];
+
+  var clampOf = function (it, x) {
+    if (it.cap !== null) {
+      var room = Math.abs(it.base) * it.cap / 100;
+      x = Math.max(it.base - room, Math.min(it.base + room, x));
+    }
+    if (it.lower !== null && x < it.lower) x = it.lower;
+    return x;
+  };
+
+  var finalValues = startValues.slice();
+  var feasible = true, scale = 0, message = '';
+  if (free.length && Math.abs(gap) >= 0.5) {
+    // 每一項的「方向 × 幅度」(s = 1 時的變動量)
+    var delta = items.map(function () { return 0; });
+    if (mode === 'equal') {
+      free.forEach(function (i) {
+        var it = items[i];
+        if (!it.base) throw new Error('「' + it.label + '」目前是 0，不能用同幅度(%)調整，請改用「依比例分攤」');
+        var probe = startValues.slice(); probe[i] = it.base * 1.01;
+        var effect = metricAt(probe) - metricStart;
+        if (Math.abs(effect) < 1e-9) { warnings.push('「' + it.label + '」調整後結果不會變，不參與分攤'); return; }
+        delta[i] = (effect > 0) === (gap > 0) ? it.base * 0.01 : -it.base * 0.01;   // s 的單位 = 1%
+      });
+    } else {
+      var totalShare = free.reduce(function (sum, i) { return sum + items[i].share; }, 0);
+      free.forEach(function (i) {
+        var it = items[i];
+        var share = totalShare > 0 ? it.share / totalShare : 1 / free.length;
+        if (!share) return;
+        var part = metricStart + gap * share;
+        var x = solveScalar_(function (xx) { var v = startValues.slice(); v[i] = xx; return metricAt(v) - part; },
+          it.base, Math.abs(it.base) > 1e-9 ? Math.abs(it.base) * 0.05 : 1, it.lower);
+        if (x === null) { warnings.push('「' + it.label + '」單獨調整達不到它負責的那一份缺口，已由其他項目吸收'); return; }
+        delta[i] = x - it.base;
+      });
+    }
+    var active = free.filter(function (i) { return delta[i] !== 0; });
+    if (!active.length) {
+      feasible = false;
+      message = '選的項目都無法改善這個結果。';
+    } else {
+      var valuesAt = function (sv) {
+        var v = startValues.slice();
+        active.forEach(function (i) { v[i] = clampOf(items[i], items[i].base + sv * delta[i]); });
+        return v;
+      };
+      var h = function (sv) { return metricAt(valuesAt(sv)) - target; };
+      var h0 = metricStart - target;
+      var lo = 0, hi = mode === 'equal' ? 1 : 1, hHi = h(hi), k = 0, prevV = null;
+      while ((hHi > 0) === (h0 > 0) && Math.abs(hHi) >= 0.5 && k++ < 24) {
+        var vNow = JSON.stringify(valuesAt(hi));
+        if (vNow === prevV) break;                  // 全部碰到上限(或 0)了，再放大也沒用
+        prevV = vNow;
+        lo = hi; hi *= 2; hHi = h(hi);
+      }
+      if ((hHi > 0) === (h0 > 0) && Math.abs(hHi) >= 0.5) {
+        feasible = false;
+        finalValues = valuesAt(hi);
+        message = '在設定的上限內達不到目標，最多只能做到 ' + Math.round(metricAt(finalValues)) + '。可以放寬上限或再加一個調整項目。';
+      } else {
+        var hLo = h(lo);
+        for (var it2 = 0; it2 < 60; it2++) {
+          var mid = (lo + hi) / 2, hm = h(mid);
+          if (Math.abs(hm) < 0.5) { lo = hi = mid; break; }
+          if ((hm > 0) === (hLo > 0)) { lo = mid; hLo = hm; } else hi = mid;
+        }
+        scale = (lo + hi) / 2;
+        finalValues = valuesAt(scale);
+      }
+    }
+  }
+
+  // 依列表順序逐項加入，算每一項的貢獻(加總 = 總改善)
+  var running = baseValues.slice(), prevMetric = metricBase;
+  var out = items.map(function (it, i) {
+    running[i] = finalValues[i];
+    var m = metricAt(running);
+    var contribution = m - prevMetric;
+    prevMetric = m;
+    var room = it.cap !== null ? Math.abs(it.base) * it.cap / 100 : null;
+    return {
+      driver: it.driver, label: it.label, unit: it.unit, base: it.base, value: finalValues[i],
+      pct: it.base ? (finalValues[i] / it.base - 1) * 100 : null,
+      fixed: it.fixed, capped: room !== null && !it.fixed && Math.abs(Math.abs(finalValues[i] - it.base) - room) < Math.max(1e-6, room * 1e-6) && room > 0,
+      contribution: contribution
+    };
+  });
+  return {
+    feasible: feasible, mode: mode, metricBase: metricBase, achieved: prevMetric, target: target,
+    equalPct: mode === 'equal' ? scale : null, levers: out, warnings: warnings, message: message
+  };
+}
+
+/** 瀑布圖工具的選單：所有車型的情境與車系(跨車型比較用) */
+function getWaterfallSources() {
+  return {
+    scenarios: getScenarios().map(function (s) {
+      return { ScenarioID: s.ScenarioID, VehicleTypeID: s.VehicleTypeID, Gate: s.Gate || '', ScenarioName: s.ScenarioName || '', ScenarioType: s.ScenarioType || '' };
+    }),
+    vehicles: getVehicles().map(function (v) { return { VehicleID: v.VehicleID, VehicleTypeID: v.VehicleTypeID, VehicleCode: v.VehicleCode || '' }; })
+  };
 }

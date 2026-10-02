@@ -443,7 +443,7 @@ function dragHandleHtml(label) {
 }
 
 const PAGE_META = {
-  dashboard: ['結果呈現', '損益儀表板'], report: ['結果呈現', 'GATE 審議報告'], whatif: ['結果呈現', '目標反推與敏感度分析'],
+  dashboard: ['結果呈現', '損益儀表板'], report: ['結果呈現', 'GATE 審議報告'], whatif: ['結果呈現', '目標反推與敏感度分析'], waterfall: ['結果呈現', '瀑布圖工具'],
   salesmix: ['輸入資料', '銷售構成與售價'], costofsales: ['輸入資料', '銷貨成本'],
   devinvestment: ['輸入資料', '開發總投'], operatingexpense: ['輸入資料', '營業費用'],
   lineitems: ['計算設定', '科目與公式'], paramrates: ['計算設定', '參數與比率'], paramfx: ['計算設定', '匯率設定'],
@@ -496,6 +496,7 @@ function renderTab(key) {
   if (key === 'dashboard') loadComparisonPicker();
   else if (key === 'report') renderReportPanel();
   else if (key === 'whatif') renderWhatIfPanel();
+  else if (key === 'waterfall') renderWaterfallPanel();
   else if (key === 'lineitems') renderChartPanel();
   else if (GRID_PANELS[key]) window[GRID_PANELS[key]]();
   else if (ENTITIES[key]) renderEntityPanel(key);

@@ -476,6 +476,22 @@
   .auto-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); vertical-align: middle; margin-left: 6px; cursor: help; box-shadow: 0 0 0 3px var(--primary-weak); }
   .auto-dot.dev { background: #7c4bd6; box-shadow: 0 0 0 3px #f1e9ff; }
   .err-dot { display: inline-block; color: var(--danger); font-weight: 800; margin-left: 5px; cursor: help; }
+  /* 瀑布圖工具 */
+  .field .inline { display: flex; gap: 6px; }
+  .field.grow { flex: 1; min-width: 220px; }
+  .field.grow input { width: 100%; }
+  .wf-opts { margin-top: 12px; }
+  .wf-manual { margin: 10px 0; }
+  .wf-manual input[type=text] { width: 100%; }
+  .wf-manual input[type=number] { width: 140px; }
+  .wf-table { margin-top: 12px; max-width: 760px; }
+  table.grid-table.wf-table td:first-child, table.grid-table.lever-table td:not(.amt) { text-align: left; }
+  .wf-table td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  .wf-table tr.subtotal td { font-weight: 600; background: var(--surface-2); }
+  .lever-table td input[type=number] { width: 90px; }
+  .lever-table select { max-width: 320px; }
+  .lever-table td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  .lever-cap { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #fefcbf; color: #744210; margin-left: 4px; }
   .row-toggle { appearance: none; border: none; background: transparent; padding: 0; margin-right: 4px; cursor: pointer; color: inherit; display: inline-flex; align-items: center;
     justify-content: center; width: 16px; height: 16px; vertical-align: middle; border-radius: 4px; }
   .row-toggle:hover { background: var(--surface-3); }

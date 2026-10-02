@@ -133,6 +133,32 @@ async function main() {
   await page.waitForFunction(() => /作法對帳/.test(document.getElementById('panel-report').textContent) &&
     document.querySelector('#rpt-sens .sens-table'), null, { timeout: 15000 });
 
+  // 多項目標反推：營業淨利缺口由售價、材料、開發總投一起分擔，結果表 + 瀑布圖，可以帶到瀑布圖工具
+  await page.click('nav button[data-tab="whatif"]');
+  await page.waitForSelector('#wi-multi');
+  await page.fill('#wi-multi-target', '-150000');
+  await page.click('#wi-multi button:has-text("計算")');
+  await page.waitForSelector('#wi-multi-result .lever-table', { timeout: 30000 });
+  assert(/可以達成/.test(await page.textContent('#wi-multi-result')), '多項目標反推：-15 萬應該達得到：' + (await page.textContent('#wi-multi-result')).slice(0, 200));
+  assert((await page.$$('#wi-multi-result .wf-bar')).length === 5, '多項目標反推的瀑布圖應該有 目前 + 3 項 + 達成 共 5 根');
+  await page.click('button:has-text("在瀑布圖工具開啟")');
+  await page.waitForSelector('#wf-manual-body tr');
+  assert((await page.$$('#wf-chart .wf-bar')).length === 5, '帶到瀑布圖工具(自訂)後應該一樣是 5 根');
+
+  // 瀑布圖工具：兩個欄位的差異，每一根加總要剛好接到終點；可以下載 PNG
+  await page.click('#wf-body .seg-btn:has-text("兩個欄位的差異")');
+  await page.waitForFunction(() => document.querySelectorAll('#wf-chart .wf-bar').length >= 3 && document.querySelector('#wf-table tbody tr'), null, { timeout: 15000 });
+  const wfRows = await page.$$eval('#wf-table tbody tr', rs => rs.map(r => Array.from(r.querySelectorAll('td')).map(td => td.textContent.trim())));
+  const numOf = t => Number(String(t).replace(/[,+]/g, ''));
+  const last = wfRows[wfRows.length - 1];
+  assert(Math.abs(numOf(last[1]) - numOf(wfRows[wfRows.length - 2][2])) <= 1, '差異拆解的累計要剛好接到終點：' + JSON.stringify(wfRows.slice(-2)));
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }), page.click('#wf-body button:has-text("下載 PNG")')]);
+  assert(/\.png$/.test(dl.suggestedFilename()), '下載 PNG 的檔名：' + dl.suggestedFilename());
+  for (const mode of ['單一欄位損益', '作法拆解']) {
+    await page.click(`#wf-body .seg-btn:has-text("${mode}")`);
+    await page.waitForFunction(() => document.querySelectorAll('#wf-chart .wf-bar').length >= 3, null, { timeout: 15000 });
+  }
+
   // v2：拖曳把手可以用鍵盤 Alt+↓ 調整車系順序，放開(按下)就存檔
   await page.click('nav button[data-tab="vehicles"]');
   await page.waitForSelector('#entity-body-vehicles .drag-handle');
@@ -237,7 +263,7 @@ async function main() {
     failures.forEach(f => console.log('  ✗ ' + f));
     process.exit(1);
   }
-  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
+  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、多項反推、瀑布圖工具、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
 }
 
 main().catch(e => { console.error(e); if (ERRS.length) console.error('頁面錯誤：', ERRS.join(' | ')); process.exit(1); });
