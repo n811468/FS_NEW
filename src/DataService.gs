@@ -30,7 +30,8 @@ function getBootstrap(preferredVehicleTypeId) {
   // 開頁時順手把「由程式定義的科目名稱」對回來。做成自動修復而不是維護選單，
   // 是因為名稱對不上數字的畫面看起來就是「系統算錯了」，不該要使用者先知道有這支維護功能。
   // 只有真的對不上時才寫入，之後每次開頁都只是一次讀取。
-  withLock_(function () { return syncCodeOwnedLineItems_(); });
+  // 開頁時順手做資料模型升級(舊版全域科目表 → 每個車型各一份、補公式欄位)。已升級過的資料只會讀、不會寫。
+  withLock_(function () { return migrateDataModel_(true); });
 
   var types = getVehicleTypes();
   var ids = types.map(function (t) { return t.VehicleTypeID; });
@@ -51,7 +52,13 @@ function saveVehicleType(rowObj) {
   return withLock_(function () { return upsertRowMerge_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', rowObj); });
 }
 function deleteVehicleType(vehicleTypeId) {
-  return withLock_(function () { return deleteRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', vehicleTypeId); });
+  return withLock_(function () {
+    // 車型自己的那份科目表一起刪掉(科目表是跟著車型走的)
+    var chart = (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) { return r.VehicleTypeID === vehicleTypeId; })
+      .map(function (r) { return r.LineID; });
+    if (chart.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', [], chart);
+    return deleteRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', vehicleTypeId);
+  });
 }
 /** 車型主檔整批儲存：整張表直接編輯、按一次儲存（沒填代號的空白新增列會被略過） */
 function saveVehicleTypeGrid(rows) {
@@ -85,14 +92,25 @@ function renameVehicleType(oldId, newId) {
     upsertRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', row);
     deleteRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', oldId);
 
-    [[SHEETS.VEHICLES, 'VehicleID'], [SHEETS.SCENARIOS, 'ScenarioID']].forEach(function (pair) {
+    [[SHEETS.VEHICLES, 'VehicleID'], [SHEETS.SCENARIOS, 'ScenarioID'], [SHEETS.ACTIONS, 'ActionID']].forEach(function (pair) {
       var sheetName = pair[0], pk = pair[1];
-      (sheetToObjects_(sheetName) || []).forEach(function (r) {
-        if (r.VehicleTypeID !== oldId) return;
-        r.VehicleTypeID = newId;
-        upsertRow_(sheetName, pk, r);
-      });
+      var rows = (sheetToObjects_(sheetName) || []).filter(function (r) { return r.VehicleTypeID === oldId; });
+      rows.forEach(function (r) { r.VehicleTypeID = newId; });
+      if (rows.length) batchWriteRows_(sheetName, pk, rows, []);
     });
+    // 科目表的主鍵含車型代號，要整份換成新代號
+    var chart = (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) { return r.VehicleTypeID === oldId; });
+    if (chart.length) {
+      var oldPks = chart.map(function (r) { return r.LineID; });
+      var moved = chart.map(function (r) {
+        var copy = {};
+        SCHEMA.PLLineItems.forEach(function (h) { copy[h] = r[h] === undefined ? '' : r[h]; });
+        copy.VehicleTypeID = newId;
+        copy.LineID = lineIdOf_(newId, r.LineCode);
+        return copy;
+      });
+      batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', moved, oldPks);
+    }
     return getVehicleTypes();
   });
 }
@@ -174,14 +192,30 @@ function renameVehicle(vehicleTypeId, oldId, newId) {
 
     [[SHEETS.SALES_MIX, 'RowID'], [SHEETS.COST_OF_SALES, 'RowID'],
       [SHEETS.OPERATING_EXPENSE, 'RowID'], [SHEETS.PARAMETERS, 'ParamID'],
-      [SHEETS.PL_RESULT, 'ResultID']].forEach(function (pair) {
+      [SHEETS.PL_RESULT, 'ResultID'], [SHEETS.LINE_NOTES, 'RowID']].forEach(function (pair) {
       var sheetName = pair[0], pk = pair[1];
-      (sheetToObjects_(sheetName) || []).forEach(function (r) {
-        if (r.VehicleID !== oldId) return;
-        r.VehicleID = newId;
-        upsertRow_(sheetName, pk, r);
-      });
+      var rows = (sheetToObjects_(sheetName) || []).filter(function (r) { return r.VehicleID === oldId; });
+      rows.forEach(function (r) { r.VehicleID = newId; });
+      if (rows.length) batchWriteRows_(sheetName, pk, rows, []);
     });
+    // 開發總投的「分攤車系」與科目的車系個別公式也記著車系代號
+    var devRows = (sheetToObjects_(SHEETS.DEV_INVESTMENT) || []).filter(function (r) {
+      return parseVehicleScope_(r.VehicleScope).indexOf(oldId) !== -1;
+    });
+    devRows.forEach(function (r) {
+      r.VehicleScope = parseVehicleScope_(r.VehicleScope).map(function (id) { return id === oldId ? newId : id; }).join(',');
+    });
+    if (devRows.length) batchWriteRows_(SHEETS.DEV_INVESTMENT, 'RowID', devRows, []);
+    var lines = (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) {
+      return parseVehicleFormulas_(r.VehicleFormulas)[oldId] !== undefined;
+    });
+    lines.forEach(function (r) {
+      var vf = parseVehicleFormulas_(r.VehicleFormulas);
+      vf[newId] = vf[oldId];
+      delete vf[oldId];
+      r.VehicleFormulas = JSON.stringify(vf);
+    });
+    if (lines.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', lines, []);
     return getVehicles(vehicleTypeId);
   });
 }
@@ -189,7 +223,9 @@ function renameVehicle(vehicleTypeId, oldId, newId) {
 // ---- Scenarios（隸屬某個 VehicleType，同一車型可有多個情境版本並排比較） ----
 function getScenarios(vehicleTypeId) {
   var rows = sheetToObjects_(SHEETS.SCENARIOS) || [];
-  return vehicleTypeId ? rows.filter(function (r) { return r.VehicleTypeID === vehicleTypeId; }) : rows;
+  rows = vehicleTypeId ? rows.filter(function (r) { return r.VehicleTypeID === vehicleTypeId; }) : rows;
+  // 情境順序可以在情境設定頁拖曳調整；沒排過的照建立順序
+  return sortByOrder_(rows, 'SortOrder');
 }
 // 情境代號改用 GATE 別，情境名稱自訂；同一個 GATE 下可以有多個情境(GATE F 現況 / GATE F 目標)，
 // 所以 ScenarioID 只是系統內部鍵值，由 upsertRow_ 自動產生，不需使用者自行編碼。
@@ -359,7 +395,7 @@ function buildAmountMatrix_(sheetName, scenarioId, vehicleTypeId, lineOptions) {
     };
   });
 
-  return { lines: lineOptions, vehicles: vehicles, values: values };
+  return { lines: lineOptions, vehicles: vehicles, values: values, lineNotes: getLineNotes(scenarioId) };
 }
 
 /**
@@ -368,8 +404,10 @@ function buildAmountMatrix_(sheetName, scenarioId, vehicleTypeId, lineOptions) {
  * 是存檔感覺卡的主因。改成先分類成「這一批要新增/更新的列」跟「要刪除的 RowID」，
  * 一次交給 batchWriteRows_ 整段讀一次、整段寫一次（見該函式的說明）。
  */
-function saveAmountMatrix_(sheetName, scenarioId, cells) {
+function saveAmountMatrix_(sheetName, scenarioId, cells, lineNotes) {
   return withLock_(function () {
+    // 科目說明(備註)統一存在 LineNotes：報告/簡報的「說明」欄跟這裡是同一份
+    if (lineNotes) saveLineNotes(scenarioId, lineNotes);
     var upserts = [], deletePks = [];
     (cells || []).forEach(function (c) {
       var isEmpty = c.Amount === '' || c.Amount === null || c.Amount === undefined;
@@ -392,91 +430,31 @@ function saveAmountMatrix_(sheetName, scenarioId, cells) {
  * 不必再跑去儀表板才看得到模具/設備攤提與貨物稅算出多少。
  */
 function getCostOfSalesMatrix(scenarioId, vehicleTypeId) {
-  var matrix = buildAmountMatrix_(SHEETS.COST_OF_SALES, scenarioId, vehicleTypeId, getCostOfSalesLineOptions());
+  var matrix = buildAmountMatrix_(SHEETS.COST_OF_SALES, scenarioId, vehicleTypeId, getCostOfSalesLineOptions(vehicleTypeId));
   matrix.currencies = getConfiguredCurrencies(scenarioId);
   var auto = getCostOfSalesAutoLines(scenarioId, matrix.vehicles);
   matrix.autoLines = auto.lines;
   matrix.autoValues = auto.values;
-  matrix.commodityTaxDetail = auto.commodityTaxDetail || {};
+  matrix.autoTraces = auto.traces;
+  matrix.autoErrors = auto.errors;
   return matrix;
 }
-function saveCostOfSalesMatrix(scenarioId, cells) {
-  return saveAmountMatrix_(SHEETS.COST_OF_SALES, scenarioId, cells);
+function saveCostOfSalesMatrix(scenarioId, cells, lineNotes) {
+  return saveAmountMatrix_(SHEETS.COST_OF_SALES, scenarioId, cells, lineNotes);
 }
 
 /** 營業費用矩陣：列 = 科目、欄 = 車系。autoLines 同上，含季Margin、開發總投攤提的費用類科目 */
 function getOperatingExpenseMatrix(scenarioId, vehicleTypeId) {
-  var matrix = buildAmountMatrix_(SHEETS.OPERATING_EXPENSE, scenarioId, vehicleTypeId, getOperatingExpenseLineOptions());
+  var matrix = buildAmountMatrix_(SHEETS.OPERATING_EXPENSE, scenarioId, vehicleTypeId, getOperatingExpenseLineOptions(vehicleTypeId));
   var auto = getOperatingExpenseAutoLines(scenarioId, matrix.vehicles);
   matrix.autoLines = auto.lines;
   matrix.autoValues = auto.values;
+  matrix.autoTraces = auto.traces;
+  matrix.autoErrors = auto.errors;
   return matrix;
 }
-function saveOperatingExpenseMatrix(scenarioId, cells) {
-  return saveAmountMatrix_(SHEETS.OPERATING_EXPENSE, scenarioId, cells);
-}
-
-/**
- * 在銷貨成本／營業費用頁面直接新增科目（不必跑去「科目設定」頁）。
- * parentLine 決定這個科目屬於哪一段損益：B = 銷貨成本、E/G/I = 各段費用。
- * LineCode 自動產生（父科目字首 + 流水號），使用者只需要填科目名稱。
- */
-function addLineItemInline(parentLine, lineName) {
-  return withLock_(function () {
-    if (!lineName) throw new Error('請輸入科目名稱');
-    return upsertRow_(SHEETS.PL_LINE_ITEMS, 'LineCode', newLineItemRow_(parentLine, lineName));
-  });
-}
-
-/**
- * 產生一筆新科目（代碼與排序值都由系統決定，使用者只選父科目、填名稱）。
- * 呼叫端必須已經在 withLock_ 內，否則兩個同時新增的科目有機會拿到同一個代碼。
- */
-function newLineItemRow_(parentLine, lineName) {
-  return {
-    LineCode: nextLineCode_(parentLine),
-    LineName: lineName,
-    ParentLine: parentLine,
-    Category: parentLine === 'B' ? '成本明細' : '費用明細',
-    SortOrder: nextSortOrder_(parentLine),
-    AutoSource: ''
-  };
-}
-
-/** 下一個可用的科目代碼：父科目字首 + 最小未使用號碼(b1、b2、d1...) */
-function nextLineCode_(parentLine) {
-  var prefix = LINE_CODE_PREFIX[parentLine];
-  if (!prefix) throw new Error('父科目不正確：' + (parentLine || '(未選擇)'));
-  var used = {};
-  getPLLineItems().forEach(function (d) { used[d.LineCode] = true; });
-  var n = 1;
-  while (used[prefix + n]) n++;
-  return prefix + n;
-}
-
-/** 新科目排在同一段的最後面(+0.5)，之後可在科目設定頁直接改排序值微調 */
-function nextSortOrder_(parentLine) {
-  var maxSort = 0;
-  getPLLineItems().forEach(function (d) {
-    if (d.ParentLine === parentLine) maxSort = Math.max(maxSort, toNumber_(d.SortOrder));
-  });
-  return (maxSort || 20) + 0.5;
-}
-
-/**
- * 刪除科目，並清掉該科目在「所有情境」已輸入的金額。
- * 科目表是全域的，只清當前情境會讓其他情境留下孤兒金額，
- * 那些金額不會顯示在任何頁面上，卻仍被計入銷貨成本，最難察覺。
- */
-function deleteLineItemInline(lineCode) {
-  return withLock_(function () {
-    [SHEETS.COST_OF_SALES, SHEETS.OPERATING_EXPENSE].forEach(function (sheetName) {
-      (sheetToObjects_(sheetName) || []).forEach(function (r) {
-        if (r.LineCode === lineCode) deleteRow_(sheetName, 'RowID', r.RowID);
-      });
-    });
-    return deletePLLineItem(lineCode);
-  });
+function saveOperatingExpenseMatrix(scenarioId, cells, lineNotes) {
+  return saveAmountMatrix_(SHEETS.OPERATING_EXPENSE, scenarioId, cells, lineNotes);
 }
 
 // ---- DevInvestment ----
@@ -493,40 +471,6 @@ function devAmortTargetOf_(row) {
     return row.Department === DEV_INVESTMENT_BASE_FACTORY_DEPT ? 'f4' : 'f3';
   }
   return DEV_ASSET_TYPE_TARGET[type] || '';
-}
-
-/**
- * 開發總投「攤提落點」下拉選項：所有 AutoSource 屬於 DEV_AMORT_AUTO_SOURCES 的科目，
- * 含內建 4 個(b5/b8/f3/f4)與使用者自己新增的攤提落點科目。只給名稱、不帶科目代碼
- * （代碼對使用者選擇攤提落點沒有幫助，畫面只需要看得懂科目名稱）。
- * 每個選項都帶 category(設備/模具/費用)，前端先選大類、再從選中的大類裡選實際落點，
- * 避免自己新增的攤提落點越加越多之後，整個下拉選單混在一起不好找。
- */
-function getDevAmortTargetOptions() {
-  return getPLLineItems()
-    .filter(function (d) { return DEV_AMORT_AUTO_SOURCES.indexOf(d.AutoSource) !== -1; })
-    .map(function (d) {
-      return { value: d.LineCode, label: d.LineName, parentLine: d.ParentLine, category: d.DevAmortCategory || '' };
-    });
-}
-
-/**
- * 在「開發總投」頁面直接新增一個攤提落點科目（不必跑去「科目設定」頁），流程是先選部門、
- * 再選這筆投資屬於「設備/模具/費用」哪一大類、再選（或新增）實際攤提落點。
- * 大類直接決定父科目(設備/模具 -> B 銷貨成本，費用 -> G 產品貢獻前費用，跟內建的 b5/b8/f3/f4 一致)，
- * 新科目一律標記 AutoSource=DEV_AMORT，之後不會出現在「銷貨成本」「營業費用」的手動輸入選單裡，
- * 避免跟開發總投攤提的金額重複計列。
- */
-function addDevAmortLineItem(category, lineName) {
-  return withLock_(function () {
-    if (!lineName) throw new Error('請輸入科目名稱');
-    var parentLine = DEV_AMORT_CATEGORY_PARENT[category];
-    if (!parentLine) throw new Error('大類不正確：' + (category || '(未選擇)'));
-    var row = newLineItemRow_(parentLine, lineName);
-    row.AutoSource = AUTO_SOURCE.DEV_AMORT;
-    row.DevAmortCategory = category;
-    return upsertRow_(SHEETS.PL_LINE_ITEMS, 'LineCode', row);
-  });
 }
 
 function getDevInvestment(scenarioId) {
@@ -572,7 +516,7 @@ function saveDevInvestmentGrid(scenarioId, rows) {
  * 只覆蓋所選的資料類別，帶入前會先清掉目標情境同類別的既有資料。
  * 帶入的開發總投列，其挑戰低減目標一律歸零，由使用者自己填新的目標值。
  */
-function copyScenarioData(sourceScenarioId, targetScenarioId, parts) {
+function copyScenarioData(sourceScenarioId, targetScenarioId, parts, opts) {
   return withLock_(function () {
     if (!sourceScenarioId || !targetScenarioId) throw new Error('請選擇來源情境與目標情境');
     if (sourceScenarioId === targetScenarioId) throw new Error('來源情境與目標情境不能相同');
@@ -590,16 +534,20 @@ function copyScenarioData(sourceScenarioId, targetScenarioId, parts) {
       throw new Error('只能從同一個車型底下的情境帶入（來源為 ' + (source.VehicleTypeID || '(未設定)') +
         '，目標為 ' + (target.VehicleTypeID || '(未設定)') + '）。');
     }
-    parts = parts && parts.length ? parts : ['salesmix', 'costofsales', 'devinvestment', 'operatingexpense', 'parameters'];
+    parts = parts && parts.length ? parts : ['salesmix', 'costofsales', 'devinvestment', 'operatingexpense', 'parameters', 'linenotes'];
 
     var map = {
       salesmix: SHEETS.SALES_MIX,
       costofsales: SHEETS.COST_OF_SALES,
       devinvestment: SHEETS.DEV_INVESTMENT,
       operatingexpense: SHEETS.OPERATING_EXPENSE,
-      parameters: SHEETS.PARAMETERS
+      parameters: SHEETS.PARAMETERS,
+      linenotes: SHEETS.LINE_NOTES,
+      actions: SHEETS.ACTIONS
     };
-    var pkOf = function (sheetName) { return sheetName === SHEETS.PARAMETERS ? 'ParamID' : 'RowID'; };
+    var pkOf = function (sheetName) {
+      return sheetName === SHEETS.PARAMETERS ? 'ParamID' : sheetName === SHEETS.ACTIONS ? 'ActionID' : 'RowID';
+    };
     var copied = {};
 
     parts.forEach(function (part) {
@@ -619,7 +567,8 @@ function copyScenarioData(sourceScenarioId, targetScenarioId, parts) {
         copy.ScenarioID = targetScenarioId;
         if (sheetName === SHEETS.DEV_INVESTMENT) {
           // 低減目標屬於目標情境自己的假設，帶入後歸零讓使用者重新填
-          copy.ChallengeReductionPct = '';
+          // (目標反推另存成情境時要原封不動：opts.keepChallenge)
+          if (!(opts && opts.keepChallenge)) copy.ChallengeReductionPct = '';
           // 舊資料只有 AssetType、沒有 TargetLineCode 的列，平常是靠畫面顯示時(devAmortTargetOf_)
           // 即時解析成攤提落點，使用者存檔那一刻才會真的寫回 Sheet —— 但帶入是直接複製原始列，
           // 不會經過那次存檔，複製過去的仍是「TargetLineCode 空白」的舊格式列。
@@ -694,7 +643,8 @@ function deleteParameterRow(paramId) {
 // 「參數設定」頁面拆成兩組管理：稅務/費用比率 vs 匯率設定，各自獨立的分頁籤與表格，
 // 底層仍寫入同一張 Parameters 分頁，只是依 ParamName 篩選讀取範圍。
 function getTaxRateParameters(scenarioId) {
-  return getParameters(scenarioId).filter(function (p) { return TAX_RATE_PARAM_NAMES.indexOf(p.ParamName) !== -1; });
+  var names = getParamDefs().map(function (d) { return d.ParamName; });
+  return getParameters(scenarioId).filter(function (p) { return names.indexOf(p.ParamName) !== -1; });
 }
 function getFxParameters(scenarioId) {
   return getParameters(scenarioId).filter(function (p) { return FX_PARAM_NAMES.indexOf(p.ParamName) !== -1; });
@@ -717,7 +667,8 @@ function getRateGrid(scenarioId, vehicleTypeId) {
     })[0];
   };
 
-  var rates = TAX_RATE_PARAM_NAMES.map(function (name) {
+  var rates = getParamDefs().map(function (def) {
+    var name = def.ParamName;
     var global = find(name, '');
     var overrides = {};
     vehicles.forEach(function (v) {
@@ -728,13 +679,15 @@ function getRateGrid(scenarioId, vehicleTypeId) {
       ParamName: name,
       globalParamID: global ? global.ParamID : '',
       // 沒設定過就帶系統預設值，使用者確認後按儲存即可，不必每次自己查稅率
-      globalValue: global ? toNumber_(global.Value) : (DEFAULT_PARAMS[name] !== undefined ? DEFAULT_PARAMS[name] : ''),
+      globalValue: global ? toNumber_(global.Value) : (def.DefaultValue !== '' && def.DefaultValue !== undefined ? def.DefaultValue :
+        (DEFAULT_PARAMS[name] !== undefined ? DEFAULT_PARAMS[name] : '')),
       isDefault: !global,
+      unit: def.Unit, description: def.Description, isPreset: def.isPreset, defaultValue: def.DefaultValue,
       overrides: overrides
     };
   });
 
-  return { vehicles: vehicles, rates: rates };
+  return { vehicles: vehicles, rates: rates, units: PARAM_UNITS };
 }
 
 /** 稅務/費用比率整批儲存：留白的車系覆寫值代表沿用全車系值，會刪掉舊的覆寫列 */
@@ -834,186 +787,89 @@ function lookupParam_(paramsForScenario, paramName, vehicleId) {
   return DEFAULT_PARAMS[paramName] !== undefined ? DEFAULT_PARAMS[paramName] : 0;
 }
 
-// ---- PLLineItems 科目設定（明細科目可自由新增/刪除） ----
+
+// ---- 從 Excel 貼上整張表(銷貨成本/營業費用) ----
+
+/** 科目名稱比對用：去空白、全形半形括號一致、英文不分大小寫(「材料成本 - KD」=「材料成本-KD」) */
+function normalizeLineNameKey_(s) {
+  return String(s || '').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/[－—–]/g, '-')
+    .replace(/\s+/g, '').toLowerCase();
+}
 
 /**
- * 把「由程式定義」的科目名稱與位置對回程式碼。
- *
- * 有兩類科目的名稱不屬於使用者：
- *   - 自動計算科目(AutoSource 有值)：金額是公式算出來的，名稱寫的就是那條公式
- *   - 結構科目(A/B/C/E/G/I/K)：名稱寫的是它跟哪些明細的加總關係
- * 這兩類一旦跟程式對不起來，畫面上就會出現「欄位寫廢車處理費、數字卻是強配件售價」——
- * 舊版的售價結構只有 8 列(P2 是廢車處理費)，改版重新編號成 9 列之後，
- * seedPLLineItems_() 又刻意不覆蓋既有科目(使用者可能自己改過名稱)，
- * 於是新代碼配著舊名稱一直留在 Sheet 上。名稱是描述公式的，就該由公式那一邊決定。
- *
- * 明細科目(b1/d1/f1/h1...)的名稱與排序仍然屬於使用者，這裡完全不動 ——
- * 要整個回復成內建預設值請用 restoreBuiltInLineItems()。
+ * 把從 Excel 複製的整張表匯入銷貨成本(kind='cost')或營業費用(kind='opex')。
+ * rows = [{ name: 科目名稱, values: { 車系ID: 金額 } }]，前端已經把欄位對到車系。
+ * 依科目名稱比對這個車型的科目表：
+ *   - 對到手動輸入科目 → 寫入/覆蓋金額(沒貼到的車系不動)
+ *   - 對到公式或開發總投攤提科目 → 略過(那些金額是算出來的，不能輸入)
+ *   - 對不到 → createMissing 時新增成手動輸入科目(掛在 parentForNew 底下)，否則列在 unmatched
+ * 整批一次寫入，回傳摘要給前端顯示。
  */
-function syncCodeOwnedLineItems_() {
-  var existing = {};
-  getPLLineItems().forEach(function (d) { existing[d.LineCode] = d; });
+function importMatrixRows(scenarioId, vehicleTypeId, kind, rows, createMissing, parentForNew) {
+  return withLock_(function () {
+    if (!scenarioId || !vehicleTypeId) throw new Error('請先選擇車型與情境');
+    var isCost = kind === 'cost';
+    ensureTypeChart_(vehicleTypeId);
+    var parent = parentForNew || (isCost ? 'B' : 'E');
+    var report = { updated: 0, created: [], skipped: [], unmatched: [], matched: [] };
+    var vehicleIds = {};
+    getVehicles(vehicleTypeId).forEach(function (v) { vehicleIds[v.VehicleID] = true; });
 
-  var fixed = [];
-  PL_LINE_ITEMS.forEach(function (line) {
-    var isCodeOwned = line.AutoSource || PROTECTED_LINE_CODES.indexOf(line.LineCode) !== -1;
-    if (!isCodeOwned) return;
-    var current = existing[line.LineCode];
-    if (!current) return;                       // 還沒建立的科目交給 seedPLLineItems_() 補
-    var same = function (field) {
-      var a = current[field] === undefined || current[field] === null ? '' : current[field];
-      var b = line[field] === undefined || line[field] === null ? '' : line[field];
-      return String(a) === String(b);
+    var findLine = function () {
+      var byKey = {};
+      getPLLineItems(vehicleTypeId).forEach(function (d) {
+        var k = normalizeLineNameKey_(d.LineName);
+        if (!byKey[k]) byKey[k] = d;
+      });
+      return byKey;
     };
-    if (['LineName', 'ParentLine', 'Category', 'SortOrder', 'DevAmortCategory'].every(same)) return;
-
-    var row = {};
-    SCHEMA.PLLineItems.forEach(function (h) {
-      row[h] = line[h] !== undefined ? line[h] : (current[h] !== undefined ? current[h] : '');
-    });
-    upsertRow_(SHEETS.PL_LINE_ITEMS, 'LineCode', row);
-    fixed.push(line.LineCode);
-  });
-  return fixed;
-}
-
-/**
- * 把所有內建科目(含明細科目)的名稱、父科目、分類、排序值整個回復成程式碼中的預設值。
- * 使用者自己新增的科目不受影響。排序值會一併回到實際損益試算表的列序。
- */
-function restoreBuiltInLineItems() {
-  return withLock_(function () {
-    var upserts = PL_LINE_ITEMS.map(function (line) {
-      var row = {};
-      SCHEMA.PLLineItems.forEach(function (h) { row[h] = line[h] !== undefined ? line[h] : ''; });
-      return row;
-    });
-    batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineCode', upserts, []);
-    return getPLLineItems();
-  });
-}
-
-function getPLLineItems() {
-  return (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).sort(function (a, b) { return a.SortOrder - b.SortOrder; });
-}
-function savePLLineItem(rowObj) {
-  return withLock_(function () { return savePLLineItem_(rowObj); });
-}
-
-/**
- * 儲存一筆科目。沒有帶 LineCode 就視為新增，代碼與排序值由系統產生
- * （使用者只選父科目、填名稱，不必自己編碼，也不會跟既有科目撞號）。
- * 呼叫端必須已經在 withLock_ 內。
- */
-function savePLLineItem_(rowObj) {
-  if (!rowObj.LineName) throw new Error('科目名稱為必填');
-
-  if (!rowObj.LineCode) {
-    var created = newLineItemRow_(rowObj.ParentLine, rowObj.LineName);
-    // 使用者若在新增列自己填了分類/排序值就尊重他的值，其餘沿用系統產生的預設
-    if (rowObj.Category) created.Category = rowObj.Category;
-    if (rowObj.SortOrder !== '' && rowObj.SortOrder !== undefined && rowObj.SortOrder !== null) {
-      created.SortOrder = toNumber_(rowObj.SortOrder);
-    }
-    return upsertRow_(SHEETS.PL_LINE_ITEMS, 'LineCode', created);
-  }
-
-  var existing = getPLLineItems().filter(function (d) { return d.LineCode === rowObj.LineCode; })[0];
-  // 自動計算科目由 CalcEngine 產生，使用者新增的科目一律是手動輸入科目；
-  // CommodityTaxDeduct(貨物稅完稅價格可扣除)等表單沒有的欄位由合併式 upsert 保留原值
-  rowObj.AutoSource = existing ? (existing.AutoSource || '') : '';
-  // 結構科目(A/B/C/E/G/I/K)與自動計算科目改掉父科目會讓損益鏈接錯段，一律沿用原值
-  if (existing && (PROTECTED_LINE_CODES.indexOf(rowObj.LineCode) !== -1 || existing.AutoSource)) {
-    rowObj.ParentLine = existing.ParentLine || '';
-  }
-  return upsertRowMerge_(SHEETS.PL_LINE_ITEMS, 'LineCode', rowObj);
-}
-
-/**
- * 科目設定整批儲存：整張表直接編輯、按一次儲存。
- * 沒有 LineCode 的列就是新增列，代碼由系統自動產生。
- *
- * 新增列跟既有列分兩段處理，不是圖方便，是新增列的代碼分配(nextLineCode_)必須看到
- * 「這一批已經配過的代碼」才不會撞號：同一批新增兩個科目，兩個都呼叫一次
- * nextLineCode_() 的話，沒看到前一個剛配好的代碼就會拿到同一組代碼。
- * 逐列呼叫 savePLLineItem_()／upsertRow_() 會在寫入後清快取，下一列重新讀最新代碼
- * 清單，天然沒有這個問題；新增列一次通常只有幾筆，逐列處理的成本可以忽略。
- * 既有列的代碼已經固定、不會撞號，這段才整批一次寫回。
- */
-function savePLLineItemGrid(rows) {
-  return withLock_(function () {
-    var newRows = [], existingRows = [];
+    var byKey = findLine();
+    var defs = getPLLineItems(vehicleTypeId);
+    var targets = [];
     (rows || []).forEach(function (r) {
-      // 完全空白的新增列直接跳過，使用者按了「新增一列」又沒填東西不該報錯
-      if (!r.LineCode && !r.LineName) return;
-      (r.LineCode ? existingRows : newRows).push(r);
+      var name = String(r.name || '').trim();
+      if (!name) return;
+      var d = byKey[normalizeLineNameKey_(name)];
+      if (d && (d.CalcType !== CALC_TYPES.INPUT || isCostSectionLine_(d, defs) !== isCost)) {
+        report.skipped.push({ name: name, reason: d.CalcType !== CALC_TYPES.INPUT ? '是' + CALC_TYPE_LABELS[d.CalcType] + '科目' : '屬於' + (isCost ? '營業費用' : '銷貨成本') + '頁' });
+        return;
+      }
+      if (!d) {
+        if (!createMissing) { report.unmatched.push(name); return; }
+        var row = newLineItemRow_(parent, name, vehicleTypeId);
+        upsertRow_(SHEETS.PL_LINE_ITEMS, 'LineID', row);
+        byKey = findLine();
+        defs = getPLLineItems(vehicleTypeId);
+        d = byKey[normalizeLineNameKey_(name)];
+        report.created.push(name);
+      } else {
+        report.matched.push(name);
+      }
+      targets.push({ code: d.LineCode, values: r.values || {} });
     });
 
-    newRows.forEach(function (r) { savePLLineItem_(r); });
-
-    if (existingRows.length) {
-      var byCode = indexByPk_(getPLLineItems(), 'LineCode');
-      var upserts = existingRows.map(function (r) {
-        if (!r.LineName) throw new Error('科目名稱為必填');
-        var existing = byCode[r.LineCode];
-        // 自動計算科目由 CalcEngine 產生，使用者新增的科目一律是手動輸入科目；
-        // CommodityTaxDeduct(貨物稅完稅價格可扣除)等表單沒有的欄位由合併補齊、保留原值
-        r.AutoSource = existing ? (existing.AutoSource || '') : '';
-        // 結構科目(A/B/C/E/G/I/K)與自動計算科目改掉父科目會讓損益鏈接錯段，一律沿用原值
-        if (existing && (PROTECTED_LINE_CODES.indexOf(r.LineCode) !== -1 || existing.AutoSource)) {
-          r.ParentLine = existing.ParentLine || '';
-        }
-        return mergeRowForBatch_(SHEETS.PL_LINE_ITEMS, 'LineCode', r, byCode);
+    var sheetName = isCost ? SHEETS.COST_OF_SALES : SHEETS.OPERATING_EXPENSE;
+    var existing = {};
+    (sheetToObjects_(sheetName) || []).forEach(function (r) {
+      if (r.ScenarioID === scenarioId) existing[r.LineCode + '|' + r.VehicleID] = r;
+    });
+    var upserts = [];
+    targets.forEach(function (t) {
+      Object.keys(t.values).forEach(function (vid) {
+        if (!vehicleIds[vid]) return;
+        var v = t.values[vid];
+        if (v === '' || v === null || v === undefined || isNaN(Number(v))) return;
+        var cur = existing[t.code + '|' + vid];
+        var row = {};
+        SCHEMA[sheetName].forEach(function (h) { row[h] = cur && cur[h] !== undefined ? cur[h] : ''; });
+        row.RowID = cur ? cur.RowID : '';
+        row.ScenarioID = scenarioId; row.VehicleID = vid; row.LineCode = t.code; row.Amount = Number(v);
+        if (isCost && !row.Currency) row.Currency = BASE_CURRENCY;
+        upserts.push(row);
+        report.updated++;
       });
-      batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineCode', upserts, []);
-    }
-    return getPLLineItems();
+    });
+    if (upserts.length) batchWriteRows_(sheetName, 'RowID', upserts, []);
+    return report;
   });
 }
-function deletePLLineItem(lineCode) {
-  return withLock_(function () {
-    if (PROTECTED_LINE_CODES.indexOf(lineCode) !== -1) {
-      throw new Error('「' + lineCode + '」是損益結構科目(小計/毛利/淨利)，刪除會讓損益鏈斷掉，不可刪除。');
-    }
-    var def = getPLLineItems().filter(function (d) { return d.LineCode === lineCode; })[0];
-    if (def && def.AutoSource && def.AutoSource !== AUTO_SOURCE.DEV_AMORT) {
-      throw new Error('「' + lineCode + ' ' + def.LineName + '」是自動計算科目，由比率設定或開發總投攤提產生，不可刪除。');
-    }
-    // DEV_AMORT 是使用者自己在「開發總投」頁面新增的攤提落點(非內建的模具/設備/CMC/BASE廠開發費四個)，
-    // 使用者建的東西應該讓使用者刪得掉 —— 只要目前沒有任何情境的開發總投列還指到這裡就放行，
-    // 否則那些列的金額會攤不到任何科目、憑空消失，所以先擋下來請使用者自己改選或刪除那些列。
-    if (def && def.AutoSource === AUTO_SOURCE.DEV_AMORT) {
-      var used = (sheetToObjects_(SHEETS.DEV_INVESTMENT) || []).filter(function (r) {
-        return devAmortTargetOf_(r) === lineCode;
-      });
-      if (used.length) {
-        throw new Error('「' + lineCode + ' ' + def.LineName + '」在「開發總投」還有 ' + used.length +
-          ' 筆資料指到這個攤提落點，請先把那些列改選別的攤提落點或刪除，才能刪除這個科目。');
-      }
-    }
-    return deleteRow_(SHEETS.PL_LINE_ITEMS, 'LineCode', lineCode);
-  });
-}
-
-/**
- * 科目下拉選單選項：只回傳「可手動輸入」的明細科目(排除自動計算科目)，
- * 回傳 [{value, label}]，前端 renderForm 直接吃這個格式。
- */
-function lineOptionsFor_(parentCodes, extraCodes) {
-  var opts = getPLLineItems()
-    .filter(function (d) {
-      return !d.AutoSource &&
-        (parentCodes.indexOf(d.ParentLine) !== -1 || (extraCodes || []).indexOf(d.LineCode) !== -1);
-    })
-    .map(function (d) { return { value: d.LineCode, label: d.LineCode + ' ' + d.LineName }; });
-  return opts;
-}
-/** 銷貨成本頁的成本項目選單（B 底下、可手動輸入的科目） */
-function getCostOfSalesLineOptions() {
-  return lineOptionsFor_(['B']);
-}
-/** 營業費用頁的科目選單（E/G/I 底下可手動輸入的科目，外加 J 前瞻費用） */
-function getOperatingExpenseLineOptions() {
-  return lineOptionsFor_(['E', 'G', 'I'], ['J']);
-}
-

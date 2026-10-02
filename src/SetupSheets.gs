@@ -26,6 +26,7 @@ function setupSpreadsheet() {
 
   invalidateSheetCache_();   // 分頁/標題列剛建立，清掉可能已快取的空結果
   seedPLLineItems_();
+  migrateDataModel_(false);
 
   // 移除當初建立 Sheet 時自動附帶的空白預設分頁。
   // 不同語系的 Google Sheet 預設分頁名稱不同(英文 Sheet1、中文 工作表1...)，
@@ -49,39 +50,21 @@ function setupSpreadsheet() {
 }
 
 /**
- * 灌入預設損益科目。已存在的科目不覆蓋（使用者可能已在「科目設定」頁面改過名稱或排序），
- * 但自動計算科目的 AutoSource 一律以程式碼為準補寫回去，避免使用者誤刪標記後
- * 該科目變成可手動輸入、跟自動計算的金額重複計列。
+ * 灌入標準範本科目：只在範本完全是空的時候才灌(全新資料庫)。
+ * 範本之後屬於使用者(可以增刪改)，不能每次開頁就把使用者刪掉的科目又補回來。
+ * 舊版資料(全域科目表)的升級交給 migrateDataModel_()。
  */
 function seedPLLineItems_() {
-  var sheet = getSheet_(SHEETS.PL_LINE_ITEMS);
-  // 本函式直接用 appendRow/setValue 寫入(沒走 upsertRow_)，所以要自己負責讓讀取快取失效
-
-  var existing = sheetToObjects_(SHEETS.PL_LINE_ITEMS);
-  var existingCodes = existing.map(function (r) { return r.LineCode; });
-
-  var codeCol = SCHEMA.PLLineItems.indexOf('LineCode') + 1;
-  var autoCol = SCHEMA.PLLineItems.indexOf('AutoSource') + 1;
-  // 直接掃 LineCode 欄取得實際列號（sheetToObjects_ 會濾掉空白列，索引不能拿來當列號用）
-  var lastRow = sheet.getLastRow();
-  var codeRows = lastRow >= 2 ? sheet.getRange(2, codeCol, lastRow - 1, 1).getValues() : [];
-
-  PL_LINE_ITEMS.forEach(function (line) {
-    if (existingCodes.indexOf(line.LineCode) === -1) {
-      sheet.appendRow(SCHEMA.PLLineItems.map(function (h) { return line[h] !== undefined ? line[h] : ''; }));
-      return;
-    }
-    if (!line.AutoSource) return;
-    for (var i = 0; i < codeRows.length; i++) {
-      if (codeRows[i][0] === line.LineCode) {
-        if (sheet.getRange(i + 2, autoCol).getValue() !== line.AutoSource) {
-          sheet.getRange(i + 2, autoCol).setValue(line.AutoSource);
-        }
-        break;
-      }
-    }
+  var rows = sheetToObjects_(SHEETS.PL_LINE_ITEMS) || [];
+  if (rows.length) return;
+  var seed = PL_LINE_ITEMS.map(function (line) {
+    var row = {};
+    SCHEMA.PLLineItems.forEach(function (h) { row[h] = line[h] !== undefined ? line[h] : ''; });
+    row.VehicleTypeID = '';
+    row.LineID = lineIdOf_('', line.LineCode);
+    return row;
   });
-  invalidateSheetCache_(SHEETS.PL_LINE_ITEMS);
+  batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', seed, []);
 }
 
 /**
@@ -91,8 +74,8 @@ function seedPLLineItems_() {
  * 使用者自行新增的科目(不在 PL_LINE_ITEMS 內)完全不受影響。
  */
 function resetPLLineItemDefaults() {
-  restoreBuiltInLineItems();
-  reportMaintenance_('已重設 ' + PL_LINE_ITEMS.length + ' 個內建科目的名稱與排序（自訂科目未變動）。');
+  restoreBuiltInLineItems('');
+  reportMaintenance_('已重設標準範本 ' + PL_LINE_ITEMS.length + ' 個內建科目的名稱、公式與排序（自訂科目未變動）。');
 }
 
 /**
@@ -101,7 +84,7 @@ function resetPLLineItemDefaults() {
  * 沒有任何計算會讀它，留著只會讓匯率設定頁多一欄要填、卻怎麼填都不影響結果。
  */
 function removeUnusedParameters() {
-  var known = TAX_RATE_PARAM_NAMES.concat(FX_PARAM_NAMES);
+  var known = getParamDefs().map(function (d) { return d.ParamName; }).concat(FX_PARAM_NAMES);
   var removed = withLock_(function () {
     var stale = (sheetToObjects_(SHEETS.PARAMETERS) || []).filter(function (r) {
       return r.ParamName && known.indexOf(r.ParamName) === -1;

@@ -3,8 +3,8 @@
  *
  *   node tools/verify-ui.js
  *
- * script.html 只有在瀏覽器裡才跑得到，但裡面產生 HTML 的函式其實是純函式。
- * 這裡把 script.html 的 JS 抽出來、給最小的 document/google 假物件，
+ * 前端程式(src/ui/*.js)只有在瀏覽器裡才跑得到，但裡面產生 HTML 的函式其實是純函式。
+ * 這裡把前端 JS 串起來(tools/frontend.js)、給最小的 document/google 假物件，
  * 再用計算引擎真實算出來的資料呼叫那些函式，檢查產出的表格結構是否正確
  * （欄數、colspan、縮排、% 欄基準），避免版面改壞了卻要部署後才發現。
  */
@@ -17,7 +17,7 @@ const failures = [];
 function assert(cond, message) { if (!cond) failures.push(message); }
 
 /* ---- 1. 用計算引擎算出一份真實的比較結果 ---- */
-const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'DataService.gs', 'CalcEngine.gs', 'SetupSheets.gs']);
+const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs']);
 gs.setupSpreadsheet();
 gs.saveVehicleType({ VehicleTypeID: 'DA' });
 gs.saveVehicle({ VehicleID: 'V1', VehicleTypeID: 'DA', VehicleCode: '3人貨車' });
@@ -39,12 +39,12 @@ const comparison = gs.calculateComparison([
   { ScenarioID: sc.ScenarioID, VehicleID: '' }
 ]);
 
-/* ---- 2. 把 script.html 的 JS 載進來 ---- */
-const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'script.html'), 'utf8');
-const js = html.replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
+/* ---- 2. 把前端 JS 載進來 ---- */
+const js = require('./frontend').frontendJs();
 const noopEl = {
   innerHTML: '', textContent: '', className: '', value: '', style: {}, options: [],
-  querySelector: () => noopEl, querySelectorAll: () => [], insertAdjacentHTML: () => { }, select: () => { }
+  querySelector: () => noopEl, querySelectorAll: () => [], insertAdjacentHTML: () => { }, select: () => { },
+  classList: { add: () => { }, remove: () => { }, toggle: () => { }, contains: () => false }
 };
 // draw*() 函式常常對好幾個不同 id 的元素各自設 innerHTML(工具列/表格分開設定)，
 // 單一共用的 noopEl 會讓後面的賦值蓋掉前面的內容，測試就讀不到工具列那段 HTML。
@@ -68,9 +68,9 @@ const ctx = {
   confirm: () => true, alert: () => { }
 };
 vm.createContext(ctx);
-vm.runInContext(js, ctx, { filename: 'script.html' });
+vm.runInContext(js, ctx, { filename: 'src/ui' });
 
-// script.html 用 const/let 宣告，這些是 context 的語彙繫結而不是 global 屬性，
+// 前端用 const/let 宣告，這些是 context 的語彙繫結而不是 global 屬性，
 // 不能用 ctx.xxx 存取，得在同一個 context 裡再跑一段程式碼才拿得到／改得動。
 const api = expr => vm.runInContext(expr, ctx);
 ctx.__in = {};   // 要塞進 context 的外部資料先掛在這裡
@@ -179,7 +179,7 @@ const chartSection = api('chartSectionHtml')(cols, lines);
 assert(chartSection.indexOf('id="chart-lines"') !== -1, '圖表區塊應該有科目選擇區');
 assert(chartSection.indexOf('id="chart-area"') !== -1, '圖表區塊應該跟科目選擇區放在一起');
 assert(chartSection.indexOf('<svg') !== -1, '圖表應該直接以 SVG 產生，不依賴外部圖表程式庫');
-assert(chartSection.indexOf('google.visualization') === -1 && html.indexOf('gstatic.com/charts') === -1, '不該再用 Google Charts');
+assert(chartSection.indexOf('google.visualization') === -1 && js.indexOf('gstatic.com/charts') === -1, '不該再用 Google Charts');
 // 原生 multiple select 要按住 Ctrl 才能複選，等於選不動；必須是核取方塊
 assert(chartSection.indexOf('multiple') === -1, '圖表科目不該用原生 multiple select');
 const chartPicker = chartSection.split('id="chart-lines"')[1].split('</div>')[0];
@@ -197,31 +197,42 @@ api('onChartLineToggle')('A', false);
 assert(api('chartLineCodes').join(',') === 'K,C', `取消勾選後應移除科目，實際 ${api('chartLineCodes')}`);
 api("chartLineCodes = ['A', 'K']");
 
-/* ---- 6. 主檔表格：主鍵鎖定與自動編號提示 ---- */
+/* ---- 6. 主檔表格：主鍵鎖定；科目與公式編輯器 ---- */
 const ENTITIES = api('ENTITIES');
 const entityCellHtml = api('entityCellHtml');
-const entityRowActionHtml = api('entityRowActionHtml');
-const lineCfg = ENTITIES.lineitems;
-const codeCol = lineCfg.columns.filter(c => c.name === 'LineCode')[0];
-const newRowCell = entityCellHtml('lineitems', 0, codeCol, { __existing: false, LineCode: '' });
-assert(newRowCell.indexOf('自動編號') !== -1, '新增列的科目代碼應顯示為自動編號');
-assert(newRowCell.indexOf('<input') === -1, '科目代碼不該讓使用者手動輸入');
-
-const parentCol = lineCfg.columns.filter(c => c.name === 'ParentLine')[0];
-const fixedCell = entityCellHtml('lineitems', 0, parentCol, { __existing: true, LineCode: 'b13', AutoSource: 'RATE_COMMODITY_TAX' });
-assert(fixedCell.indexOf('<select') === -1, '自動計算科目的父科目不該可改');
-const freeCell = entityCellHtml('lineitems', 0, parentCol, { __existing: true, LineCode: 'b1', AutoSource: '', ParentLine: 'B' });
-assert(freeCell.indexOf('<select') !== -1, '一般科目的父科目應該可以直接改');
-assert(freeCell.indexOf('value="B" selected') !== -1, '父科目下拉應該選中目前的值');
-
+assert(!ENTITIES.lineitems, '科目設定改用專用的「科目與公式」編輯器，不再是通用主檔表格');
 const typeCfg = ENTITIES.vehicletypes;
 const idCol = typeCfg.columns[0];
 assert(entityCellHtml('vehicletypes', 0, idCol, { __existing: true, VehicleTypeID: 'DA' }).indexOf('<input') === -1,
   '已建立的車型代號應該鎖住');
 assert(entityCellHtml('vehicletypes', 0, idCol, { __existing: false, VehicleTypeID: '' }).indexOf('<input') !== -1,
   '新增列的車型代號應該可以輸入');
-assert(entityRowActionHtml('lineitems', 0, { __existing: true, LineCode: 'B' }).indexOf('不可刪除') !== -1,
-  '結構科目不該顯示刪除按鈕');
+assert(ENTITIES.vehicles.sortable === 'setVehicleOrder' && !ENTITIES.vehicles.columns.some(c => c.name === 'SortOrder'),
+  '車系順序改用拖曳(放開即存)，不再要使用者自己填排序值');
+
+ctx.__in.chartEditor = gs.getChartEditor('DA', sc.ScenarioID);
+api('chartEditor = __in.chartEditor');
+ctx.__in.sid = sc.ScenarioID;
+api('currentScenarioId = __in.sid');
+const readable = api('formulaReadableHtml_')('P8 * [季Margin率] + CHILDREN() - zz9');
+assert(readable.indexOf('廠價(未稅)') !== -1, '公式的可讀版本應該把代碼換成科目名稱');
+assert(readable.indexOf('季Margin率') !== -1 && readable.indexOf('[') === -1, '[名稱] 應顯示成名稱、不留中括號');
+assert(readable.indexOf('Σ子科目') !== -1, 'CHILDREN() 應顯示成「Σ子科目」');
+assert(/negative">zz9/.test(readable), '不存在的代碼要標紅');
+const parents = api('chartParentOptions_')('b1').map(o => o[0]);
+assert(parents.indexOf('B') !== -1 && parents.indexOf('E') !== -1 && parents.indexOf('') !== -1, '父科目選項應包含各段小計與頂層');
+assert(parents.indexOf('P8') === -1 && parents.indexOf('b1') === -1, '不會加總子科目的科目、自己都不該是父科目選項');
+assert(api('chartParentOptions_')('B').indexOf('b1') === -1, '不能把自己的子科目選成父科目');
+api("chartSelected = 'd4'");
+api("chartDraft = JSON.parse(JSON.stringify(chartEditor.lines.find(l => l.LineCode === 'd4')))");
+const paneHtml = api('chartEditorPaneHtml_')();
+assert(paneHtml.indexOf('calc-type-card active') !== -1 && paneHtml.indexOf('id="ce-formula"') !== -1, '公式科目應該選中「公式」並顯示公式編輯框');
+assert(paneHtml.indexOf('個別車系的算法') !== -1, '應該可以設定車系個別公式');
+assert(api('toNameForm_')('P8 * [季Margin率] + ROUND(B)') === '[廠價(未稅)] * [季Margin率] + ROUND([銷貨成本合計])', '公式應該用科目名稱顯示，函式名稱不動：' + api('toNameForm_')('P8 * [季Margin率] + ROUND(B)'));
+assert(api('toNameForm_')('P2') === 'P2', '科目名稱跟系統變數撞名(強配件售價)時要保留代碼，不然存回去意思會變');
+const previewHtml = api('chartPreviewHtml_')();
+api("currentScenarioId = ''");
+assert(previewHtml.indexOf('3人貨車') !== -1 && previewHtml.indexOf('目前') !== -1, '試算表應列出各車系目前的值');
 
 /* ---- 6b. 開發總投：攤提落點直接選損益科目，畫面上不出現科目代碼 ---- */
 gs.saveDevInvestmentGrid(sc.ScenarioID, [
@@ -238,7 +249,7 @@ api('devRows = __in.devSummary.rows.map(r => Object.assign({}, r))');
 api('drawDevGrid')();
 assert(elFor_('grid-devinvestment').innerHTML.indexOf('value="f4" selected') !== -1,
   '目前選取的攤提落點應該在下拉選單中被選中');
-assert(elFor_('toolbar-devinvestment').innerHTML.indexOf('新增攤提科目') !== -1,
+assert(elFor_('toolbar-devinvestment').innerHTML.indexOf('新增攤提落點科目') !== -1,
   '應該有新增攤提科目的入口');
 // f4 屬於「費用」大類，大類下拉應該自動選中「費用」，且落點選單只列出費用大類底下的選項(f3/f4)
 const devGridHtml = elFor_('grid-devinvestment').innerHTML;
@@ -462,7 +473,7 @@ api('comparisonSelections = [{ ScenarioID: __in.comparison.columns[0].scenarioId
   '{ ScenarioID: __in.comparison.columns[0].scenarioId, VehicleID: "V2" }]');
 api('builderDraft_ = { vehicleTypeId: "", scenarioId: "", vehicleId: "" }');
 const builderHtml = api('comparisonBuilderHtml_')();
-assert((builderHtml.match(/<tr draggable="true"/g) || []).length === 2, '已加入的比較欄位每一列都應該可以拖曳排序');
+assert((builderHtml.match(/class="drag-handle"/g) || []).length === 2, '已加入的比較欄位每一列都應該有拖曳把手');
 assert(builderHtml.indexOf('builder-new-row') !== -1, '最後應該有一列新增列');
 assert(builderHtml.indexOf('onchange="onBuilderRowTypeChange_') !== -1 &&
   builderHtml.indexOf('onchange="onBuilderRowScenarioChange_') !== -1 &&

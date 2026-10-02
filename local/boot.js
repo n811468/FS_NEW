@@ -1,6 +1,6 @@
 /**
- * 地端版開機：在前端 script.html 執行之前，把後端主機架好、換上 google.script.run 替身。
- * 這段一定要比 script.html 早執行(build-local.js 把它放在 <body> 最前面)，
+ * 地端版開機：在前端 前端程式(src/ui) 執行之前，把後端主機架好、換上 google.script.run 替身。
+ * 這段一定要比 前端程式(src/ui) 早執行(build-local.js 把它放在 <body> 最前面)，
  * 前端 DOMContentLoaded 一開場就會呼叫 getBootstrap()。
  */
 (function () {

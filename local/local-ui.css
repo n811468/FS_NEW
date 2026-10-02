@@ -1,23 +1,25 @@
-/* 地端版工具列：顏色沿用頁首的深藍，視覺上是頁首的延伸，不搶主畫面 */
-#fs-local-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 20px; background: #2a3b4f; color: #e2e8f0; font-size: 13px; }
-#fs-local-bar .fsl-badge { background: #d69e2e; color: #1a202c; font-weight: 600; font-size: 12px; padding: 2px 8px; border-radius: 10px; }
+/* 地端版工具列：放在頁首下方的細條，跟 v2 版面同一套配色，不搶主畫面 */
+#fs-local-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 28px; background: #fff; color: #475069;
+  font-size: 12.5px; border-bottom: 1px solid #e3e7ef; }
+#fs-local-bar .fsl-badge { background: #fff1c9; color: #7a4c02; font-weight: 700; font-size: 11px; padding: 2px 9px; border-radius: 999px; }
 #fs-local-bar .fsl-spacer { flex: 1; }
-#fs-local-bar .fsl-status { color: #cbd5e0; }
-#fs-local-bar .fsl-warn { color: #fbd38d; font-weight: 600; }
-#fs-local-bar .fsl-link { background: none; border: none; color: #fff; text-decoration: underline dotted; cursor: pointer; font-size: 13px; padding: 0; }
-#fs-local-bar .fsl-more { width: auto; flex: none; padding: 4px 6px; font-size: 13px; border-radius: 4px; border: 1px solid #4a5568; background: #1f2d3d; color: #e2e8f0; }
-.fsl-btn { background: #4a5568; color: #fff; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
-.fsl-btn:hover { background: #2d3748; }
-.fsl-btn.primary { background: #2b6cb0; }
-.fsl-btn.primary:hover { background: #2c5282; }
-.fsl-btn.danger { background: #c53030; }
-.fsl-btn.danger:hover { background: #9b2c2c; }
-#fs-local-banner { align-items: center; gap: 12px; padding: 8px 20px; font-size: 13px; }
-#fs-local-banner.fsl-banner-info { background: #ebf8ff; color: #2a4365; }
-#fs-local-banner.fsl-banner-danger { background: #fed7d7; color: #822727; }
-#fs-local-dialog { border: none; border-radius: 8px; padding: 20px 24px; max-width: 640px; width: calc(100% - 32px); box-shadow: 0 10px 30px rgba(0,0,0,.25); }
-#fs-local-dialog::backdrop { background: rgba(0,0,0,.35); }
+#fs-local-bar .fsl-status { color: #8a93a8; }
+#fs-local-bar .fsl-warn { color: #b9770e; font-weight: 700; }
+#fs-local-bar .fsl-link { background: none; border: none; color: #3157d5; text-decoration: underline dotted; cursor: pointer; font-size: 12.5px; padding: 0; font-weight: 600; }
+#fs-local-bar .fsl-more { width: auto; flex: none; padding: 4px 8px; font-size: 12.5px; border-radius: 6px; border: 1px solid #cdd4e1; background: #fff; color: #18213a; }
+.fsl-btn { background: #fff; color: #18213a; border: 1px solid #cdd4e1; padding: 4px 11px; border-radius: 6px; cursor: pointer; font-size: 12.5px; font-weight: 600; }
+.fsl-btn:hover { background: #eef1f7; }
+.fsl-btn.primary { background: #3157d5; color: #fff; border-color: transparent; }
+.fsl-btn.primary:hover { background: #2445b4; }
+.fsl-btn.danger { background: #d23c3c; color: #fff; border-color: transparent; }
+.fsl-btn.danger:hover { background: #a92b2b; }
+#fs-local-banner { align-items: center; gap: 12px; padding: 9px 28px; font-size: 13px; }
+#fs-local-banner.fsl-banner-info { background: #edf1fe; color: #213c91; }
+#fs-local-banner.fsl-banner-danger { background: #fdeeee; color: #8b1f1f; }
+#fs-local-dialog { border: none; border-radius: 14px; padding: 22px 24px; max-width: 640px; width: calc(100% - 32px); box-shadow: 0 10px 30px -12px rgba(16,27,51,.35); }
+#fs-local-dialog::backdrop { background: rgba(16,27,51,.42); }
 #fs-local-dialog h3 { margin: 0 0 12px; font-size: 16px; }
-#fs-local-dialog .fsl-pre { white-space: pre-wrap; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px 12px; font-family: inherit; font-size: 13px; line-height: 1.6; max-height: 50vh; overflow: auto; }
-#fs-local-dialog .fsl-help { font-size: 12px; color: #4a5568; padding-left: 18px; line-height: 1.7; }
+#fs-local-dialog .fsl-pre { white-space: pre-wrap; background: #f8f9fc; border: 1px solid #e3e7ef; border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: 13px; line-height: 1.6; max-height: 50vh; overflow: auto; }
+#fs-local-dialog .fsl-help { font-size: 12px; color: #475069; padding-left: 18px; line-height: 1.7; }
 #fs-local-dialog .fsl-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+@media print { #fs-local-bar, #fs-local-banner { display: none !important; } }

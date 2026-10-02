@@ -1,6 +1,6 @@
 /**
  * 地端版工具列：放在頁首下方，負責資料包的匯出/匯入、提醒使用者備份、顯示暫存狀態。
- * 前端 script.html 完全不知道自己跑在地端版，所有地端專屬的介面都在這裡。
+ * 前端 前端程式(src/ui) 完全不知道自己跑在地端版，所有地端專屬的介面都在這裡。
  */
 (function () {
   'use strict';
@@ -202,8 +202,12 @@
 
   host.onChange(render);
   window.addEventListener('DOMContentLoaded', function () {
+    var slot = document.getElementById('local-bar-slot');
     var header = document.querySelector('header');
-    if (header && header.parentNode) {
+    if (slot) {
+      slot.appendChild(bar);
+      slot.appendChild(banner);
+    } else if (header && header.parentNode) {
       header.parentNode.insertBefore(bar, header.nextSibling);
       bar.parentNode.insertBefore(banner, bar.nextSibling);
     } else {

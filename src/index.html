@@ -5,71 +5,112 @@
   <?!= include('style'); ?>
 </head>
 <body>
-  <header>
-    <h1>車型損益試算系統</h1>
-    <label style="color:#fff; font-size:13px; display:flex; align-items:center; gap:6px;">
-      車型：
-      <select id="vehicletype-selector" onchange="onVehicleTypeChange(this.value)"></select>
-    </label>
-    <label style="color:#fff; font-size:13px; display:flex; align-items:center; gap:6px;">
-      情境：
-      <select id="scenario-selector" onchange="onScenarioChange(this.value)"></select>
-      <span id="scenario-type-badge" class="type-badge" style="display:none;"></span>
-    </label>
-  </header>
-  <div id="global-error" style="display:none; background:#fed7d7; color:#822727; padding:10px 20px; font-size:13px;"></div>
-
   <!--
-    導覽列依系統的三個主軸分組：先定義「拿什麼來比」(車型與情境)，再填「損益怎麼組成」
-    (各項輸入與計算參數)，最後看「結果長怎樣」(儀表板)。分組只是版面上的區隔，
-    每個分頁本身的行為沒有改變。
+    v2 版面：左側導覽依工作流程分四組 ——
+      結果呈現(看數字、做簡報) → 輸入資料(每個情境要填的數字) → 計算設定(科目與公式、參數、匯率) → 主檔(車型/車系/情境)
+    右側上方固定顯示「目前在哪個車型、哪個情境」，所有輸入頁都以它為範圍。
   -->
-  <nav>
-    <div class="nav-group">
-      <span class="nav-group-label">車型與情境</span>
-      <div class="nav-group-tabs">
-        <button data-tab="vehicletypes" class="active" onclick="switchTab('vehicletypes')">車型主檔</button>
-        <button data-tab="vehicles" onclick="switchTab('vehicles')">車系設定</button>
-        <button data-tab="scenarios" onclick="switchTab('scenarios')">情境設定</button>
+  <div class="app">
+    <aside class="sidebar" aria-label="主選單">
+      <div class="brand">
+        <div class="brand-mark">FS</div>
+        <div class="brand-text"><b>車型損益試算</b><span>Feasibility Study</span></div>
       </div>
-    </div>
-    <div class="nav-group">
-      <span class="nav-group-label">損益項目與計算</span>
-      <div class="nav-group-tabs">
-        <button data-tab="salesmix" onclick="switchTab('salesmix')">銷售構成</button>
-        <button data-tab="costofsales" onclick="switchTab('costofsales')">銷貨成本</button>
-        <button data-tab="devinvestment" onclick="switchTab('devinvestment')">開發總投</button>
-        <button data-tab="operatingexpense" onclick="switchTab('operatingexpense')">營業費用</button>
-        <span class="nav-sep"></span>
-        <button data-tab="lineitems" onclick="switchTab('lineitems')">科目設定</button>
-        <button data-tab="paramrates" onclick="switchTab('paramrates')">稅務費用比率</button>
-        <button data-tab="paramfx" onclick="switchTab('paramfx')">匯率設定</button>
-      </div>
-    </div>
-    <div class="nav-group">
-      <span class="nav-group-label">結果呈現</span>
-      <div class="nav-group-tabs">
-        <button data-tab="dashboard" onclick="switchTab('dashboard')">損益儀表板</button>
-      </div>
-    </div>
-  </nav>
+      <nav>
+        <div class="nav-group">
+          <div class="nav-group-label">結果呈現</div>
+          <button class="nav-item" data-tab="dashboard" onclick="switchTab('dashboard')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>損益儀表板</button>
+          <button class="nav-item" data-tab="report" onclick="switchTab('report')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M7 12l3-3 2 2 4-4"/></svg>GATE 報告<span class="nav-badge">簡報</span></button>
+          <button class="nav-item" data-tab="whatif" onclick="switchTab('whatif')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>目標反推與敏感度</button>
+          <button class="nav-item" data-tab="waterfall" onclick="switchTab('waterfall')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><rect x="4" y="5" width="3" height="12"/><rect x="10" y="5" width="3" height="4"/><rect x="16" y="9" width="3" height="8"/></svg>瀑布圖工具</button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">輸入資料（目前情境）</div>
+          <button class="nav-item" data-tab="salesmix" onclick="switchTab('salesmix')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>銷售構成與售價</button>
+          <button class="nav-item" data-tab="costofsales" onclick="switchTab('costofsales')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>銷貨成本</button>
+          <button class="nav-item" data-tab="devinvestment" onclick="switchTab('devinvestment')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/></svg>開發總投</button>
+          <button class="nav-item" data-tab="operatingexpense" onclick="switchTab('operatingexpense')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>營業費用</button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">計算設定（目前車型）</div>
+          <button class="nav-item" data-tab="lineitems" onclick="switchTab('lineitems')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>科目與公式</button>
+          <button class="nav-item" data-tab="paramrates" onclick="switchTab('paramrates')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5L5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>參數與比率</button>
+          <button class="nav-item" data-tab="paramfx" onclick="switchTab('paramfx')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4M3 8l4-4 4 4M17 8v12M21 16l-4 4-4-4"/></svg>匯率設定</button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">主檔</div>
+          <button class="nav-item" data-tab="vehicletypes" onclick="switchTab('vehicletypes')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M6 17l1.5-6h9L18 17M7 17v2M17 17v2"/><circle cx="8" cy="14.5" r=".5"/><circle cx="16" cy="14.5" r=".5"/></svg>車型主檔</button>
+          <button class="nav-item" data-tab="vehicles" onclick="switchTab('vehicles')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>車系設定</button>
+          <button class="nav-item" data-tab="scenarios" onclick="switchTab('scenarios')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"/></svg>情境設定</button>
+        </div>
+      </nav>
+      <div class="sidebar-foot">v2 · 每個車型各自一份科目表<br>公式式計算來源 · 拖曳排序</div>
+    </aside>
 
-  <main>
-    <div id="panel-vehicletypes" class="panel active"></div>
-    <div id="panel-vehicles" class="panel"></div>
-    <div id="panel-scenarios" class="panel"></div>
-    <div id="panel-salesmix" class="panel"></div>
-    <div id="panel-costofsales" class="panel"></div>
-    <div id="panel-devinvestment" class="panel"></div>
-    <div id="panel-operatingexpense" class="panel"></div>
-    <div id="panel-lineitems" class="panel"></div>
-    <div id="panel-paramrates" class="panel"></div>
-    <div id="panel-paramfx" class="panel"></div>
-    <div id="panel-dashboard" class="panel">
-      <div class="dash-head"><h3>損益儀表板</h3></div>
-      <div id="dashboard-content"></div>
+    <div class="main-col">
+      <header class="topbar">
+        <button type="button" class="btn ghost icon sidebar-toggle" onclick="document.body.classList.toggle('nav-open')" aria-label="選單">☰</button>
+        <div class="page-title">
+          <span class="crumb" id="page-crumb"></span>
+          <h1 id="page-title">車型損益試算</h1>
+        </div>
+        <div class="context-bar">
+          <div class="ctx-picker">
+            <label for="vehicletype-selector">車型</label>
+            <select id="vehicletype-selector" onchange="onVehicleTypeChange(this.value)"></select>
+          </div>
+          <div class="ctx-picker">
+            <label for="scenario-selector">情境</label>
+            <select id="scenario-selector" onchange="onScenarioChange(this.value)"></select>
+            <span id="scenario-type-badge" class="type-badge" style="display:none;"></span>
+          </div>
+        </div>
+      </header>
+      <div id="local-bar-slot"></div>
+      <div id="global-error" style="display:none;"></div>
+
+      <main>
+        <div id="panel-dashboard" class="panel">
+          <div class="dash-head"><h3>損益儀表板</h3></div>
+          <div id="dashboard-content"></div>
+        </div>
+        <div id="panel-report" class="panel"></div>
+        <div id="panel-whatif" class="panel"></div>
+        <div id="panel-waterfall" class="panel"></div>
+        <div id="panel-salesmix" class="panel"></div>
+        <div id="panel-costofsales" class="panel"></div>
+        <div id="panel-devinvestment" class="panel"></div>
+        <div id="panel-operatingexpense" class="panel"></div>
+        <div id="panel-lineitems" class="panel"></div>
+        <div id="panel-paramrates" class="panel"></div>
+        <div id="panel-paramfx" class="panel"></div>
+        <div id="panel-vehicletypes" class="panel active"></div>
+        <div id="panel-vehicles" class="panel"></div>
+        <div id="panel-scenarios" class="panel"></div>
+      </main>
     </div>
-  </main>
+  </div>
+
+  <div class="savebar" id="savebar" role="status" aria-live="polite">
+    <span class="dot"></span><span id="savebar-text">有尚未儲存的修改</span>
+    <button type="button" class="btn secondary sm" id="savebar-discard">放棄修改</button>
+    <button type="button" class="btn sm" id="savebar-save">儲存 <kbd>Ctrl+S</kbd></button>
+  </div>
+  <div class="toasts" id="toasts"></div>
 
   <?!= include('script'); ?>
 </body>

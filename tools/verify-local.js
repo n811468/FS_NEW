@@ -93,7 +93,7 @@ function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 }
 
 /* ---- 1. 地端版與 Node 驗算層算出來的數字完全相同 -------------------------------------------- */
-const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'DataService.gs', 'CalcEngine.gs', 'SetupSheets.gs']);
+const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs']);
 const sidRef = gatef.buildScenario(gs);
 const refSel = gatef.VEHICLES.map(v => ({ ScenarioID: sidRef, VehicleID: v.id })).concat([{ ScenarioID: sidRef, VehicleID: '' }]);
 const reference = numbers(gs.calculateComparison(refSel));
@@ -151,38 +151,42 @@ assert(dePack.scope.kind === 'vehicleTypes' && same(dePack.scope.vehicleTypeIds,
 assert(same(dePack.tables.VehicleTypes.map(r => r.VehicleTypeID), ['DE']), '單一車型資料包帶到了別的車型');
 assert(dePack.tables.Vehicles.every(r => r.VehicleTypeID === 'DE'), '單一車型資料包帶到了別的車型的車系');
 assert(dePack.tables.SalesMix.every(r => r.ScenarioID === deSc.ScenarioID) && dePack.tables.SalesMix.length === 1, '單一車型資料包帶到了別的情境的銷售構成');
-assert(dePack.tables.PLLineItems.length === hostA.readTables().PLLineItems.length, '單一車型資料包要帶整份科目表');
+assert(dePack.tables.PLLineItems.length > 30 && dePack.tables.PLLineItems.every(r => r.VehicleTypeID === 'DE'), '單一車型資料包要帶這個車型自己的科目表');
 assert(hostA.state.changesSinceExport > 0, '只匯出單一車型不該被當成「整份備份過了」');
 
 /* ---- 4. 合併匯入 --------------------------------------------------------------------------------- */
-// 小明(hostM)負責 DA，新增自訂科目「運費」(b15)；小華(hostH)負責 DX，先後新增「關稅」(b15)、「運費」(b16)
+// 小明(hostM)負責 DA，在 DA 的科目表新增「運費」；小華(hostH)負責 DX，在 DX 的科目表先後新增「關稅」「運費」。
+// 科目表跟著車型走：兩邊拿到同一個代碼也互不干擾，合併時不需要改號。
 const hostM = newHost(memoryStorage(), '小明');
 const apiM = apiOf(hostM);
 const sidM = gatef.buildScenario(apiM);
-const freightM = apiM.addLineItemInline('B', '運費');
-apiM.saveCostOfSalesMatrix(sidM, [{ RowID: '', VehicleID: 'V1', LineCode: freightM.LineCode || 'b15', Amount: 1234, Currency: 'TWD' }]);
+apiM.getBootstrap('DA');
+const freightM = apiM.addLineItemInline('B', '運費', 'DA');
+apiM.saveCostOfSalesMatrix(sidM, [{ RowID: '', VehicleID: 'V1', LineCode: freightM.LineCode, Amount: 1234, Currency: 'TWD' }]);
 const selM = gatef.VEHICLES.map(v => ({ ScenarioID: sidM, VehicleID: v.id })).concat([{ ScenarioID: sidM, VehicleID: '' }]);
 const mBefore = numbers(apiM.calculateComparison(selM), true);
-const codeOf = (api, name) => api.getPLLineItems().filter(d => d.LineName === name)[0].LineCode;
-const freightCodeM = codeOf(apiM, '運費');
+const codeOf = (api, type, name) => api.getPLLineItems(type).filter(d => d.LineName === name)[0].LineCode;
+const daChartBefore = JSON.stringify(apiM.getPLLineItems('DA'));
 
 const hostH = newHost(memoryStorage(), '小華');
 const apiH = apiOf(hostH);
-apiH.saveVehicleType({ VehicleTypeID: 'DX', Notes: '' });
+apiH.createVehicleType('DX', '', '');
 apiH.saveVehicle({ VehicleID: 'DX1', VehicleTypeID: 'DX', VehicleCode: '電動廂車' });
 const dxSc = apiH.createScenarioFrom({ ScenarioID: '', Gate: 'GATE D', ScenarioName: '現況', ScenarioType: '現況', VehicleTypeID: 'DX' }, '', []);
 apiH.saveSalesMixGrid(dxSc.ScenarioID, 'DX', [{ RowID: '', VehicleID: 'DX1', SalesMixPct: 100, MonthlyVolume: 100, LifeCycleYears: 6, ListPriceTaxIncl: 1800000, ScrapFee: 3990, ScrapFeeTaxStatus: '含稅' }]);
-apiH.addLineItemInline('B', '關稅');
-apiH.addLineItemInline('B', '運費');
-const dutyCodeH = codeOf(apiH, '關稅');
-const freightCodeH = codeOf(apiH, '運費');
-assert(dutyCodeH === freightCodeM, '測試前提不成立：小華的「關稅」應該跟小明的「運費」撞同一個代碼（' + dutyCodeH + ' vs ' + freightCodeM + '）');
+apiH.addLineItemInline('B', '關稅', 'DX');
+apiH.addLineItemInline('B', '運費', 'DX');
+const dutyCodeH = codeOf(apiH, 'DX', '關稅');
+const freightCodeH = codeOf(apiH, 'DX', '運費');
+assert(dutyCodeH === freightM.LineCode, '測試前提不成立：小華的「關稅」應該跟小明的「運費」是同一個代碼（' + dutyCodeH + ' vs ' + freightM.LineCode + '）');
+apiH.saveParamDef({ ParamName: '關稅率', Unit: '%', DefaultValue: 13 });
 apiH.saveDevInvestmentGrid(dxSc.ScenarioID, [{ RowID: '', Department: '生技部', AssetType: '模具', TargetLineCode: 'b5', Amount: 6000000, Currency: 'TWD' }]);
 apiH.saveCostOfSalesMatrix(dxSc.ScenarioID, [
   { RowID: '', VehicleID: 'DX1', LineCode: 'b1', Amount: 900000, Currency: 'TWD' },
   { RowID: '', VehicleID: 'DX1', LineCode: dutyCodeH, Amount: 50000, Currency: 'TWD' },
   { RowID: '', VehicleID: 'DX1', LineCode: freightCodeH, Amount: 7000, Currency: 'TWD' }
 ]);
+apiH.saveActions(dxSc.ScenarioID, [{ Title: '關稅低減', LineCode: dutyCodeH, Effect: 5000 }]);
 const selH = [{ ScenarioID: dxSc.ScenarioID, VehicleID: 'DX1' }, { ScenarioID: dxSc.ScenarioID, VehicleID: '' }];
 const hBefore = numbers(apiH.calculateComparison(selH), true);
 const dxPack = Pack.parsePack(JSON.stringify(hostH.exportPack(['DX'])));
@@ -192,28 +196,37 @@ assert(same(hostM.readTables().VehicleTypes.map(r => r.VehicleTypeID), ['DA']), 
 const report = hostM.mergePack(dxPack);
 assert(same(report, preview.report), '預覽與實際合併的結果不同');
 assert(report.addedTypes.length === 1 && report.addedTypes[0].VehicleTypeID === 'DX' && report.replacedTypes.length === 0, '合併報告的車型不對');
-assert(report.lineItemsRemapped.length === 1 && report.lineItemsRemapped[0].name === '關稅', '撞號的自訂科目沒有被改號：' + JSON.stringify(report.lineItemsRemapped));
-assert(report.lineItemsReused.length === 1 && report.lineItemsReused[0].to === freightCodeM, '同名的自訂科目沒有併到本機既有的科目：' + JSON.stringify(report.lineItemsReused));
-assert(/關稅/.test(Pack.describeMerge(report)), '合併說明沒有提到改號的科目');
+assert(same(report.chartsReplaced, ['DX']), '合併報告沒有列出換掉的科目表：' + JSON.stringify(report.chartsReplaced));
+assert(same(report.paramDefsAdded, ['關稅率']), '自訂參數沒有帶進來');
+assert(/科目表/.test(Pack.describeMerge(report)), '合併說明沒有提到科目表');
 
+assert(JSON.stringify(apiM.getPLLineItems('DA')) === daChartBefore, '合併別人的車型後，自己車型(DA)的科目表變了');
 assert(same(numbers(apiM.calculateComparison(selM), true), mBefore), '合併別人的車型後，自己車型(DA)的數字變了');
-assert(same(numbers(apiM.calculateComparison(selH), true), hBefore), '合併進來的車型(DX)數字跟對方原本的不同（科目改號後金額沒跟上？）');
-const dutyCodeMerged = codeOf(apiM, '關稅');
-assert(dutyCodeMerged !== freightCodeM, '「關稅」合併後仍佔用小明「運費」的代碼');
-const dxCost = apiM.getCostOfSalesMatrix(dxSc.ScenarioID, 'DX').values;
-assert(dxCost[dutyCodeMerged] && dxCost[dutyCodeMerged].DX1.Amount === 50000, '關稅的金額沒有跟著改號');
-assert(dxCost[freightCodeM] && dxCost[freightCodeM].DX1.Amount === 7000, '運費的金額沒有併到本機的運費科目');
+assert(same(numbers(apiM.calculateComparison(selH), true), hBefore), '合併進來的車型(DX)數字跟對方原本的不同');
+assert(codeOf(apiM, 'DX', '關稅') === dutyCodeH && codeOf(apiM, 'DA', '運費') === freightM.LineCode, '同一個代碼在兩個車型各自代表自己的科目');
+assert(apiM.getActions(dxSc.ScenarioID).length === 1, '改善作法沒有跟著車型帶進來');
 
 // 小華後來又改了數字，重新給一包：同一個車型以新的資料包為準，不會出現重複的列或重複的科目
 apiH.saveCostOfSalesMatrix(dxSc.ScenarioID, [{ RowID: apiH.getCostOfSalesMatrix(dxSc.ScenarioID, 'DX').values.b1.DX1.RowID, VehicleID: 'DX1', LineCode: 'b1', Amount: 880000, Currency: 'TWD' }]);
 const hAfter = numbers(apiH.calculateComparison(selH), true);
-const lineCountBefore = apiM.getPLLineItems().length;
+const lineCountBefore = apiM.getPLLineItems('DX').length;
 const report2 = hostM.mergePack(Pack.parsePack(JSON.stringify(hostH.exportPack(['DX']))));
 assert(report2.replacedTypes.length === 1 && report2.addedTypes.length === 0, '第二次合併同一個車型應該是「取代」');
-assert(apiM.getPLLineItems().length === lineCountBefore, '重複合併長出了重複的科目');
+assert(apiM.getPLLineItems('DX').length === lineCountBefore, '重複合併長出了重複的科目');
 assert(same(numbers(apiM.calculateComparison(selH), true), hAfter), '第二次合併後 DX 的數字沒有更新成新的');
 assert(hostM.readTables().CostOfSales.filter(r => r.ScenarioID === dxSc.ScenarioID).length === 3, '重複合併後 DX 的成本列重複了');
 assert(same(numbers(apiM.calculateComparison(selM), true), mBefore), '第二次合併後 DA 的數字變了');
+
+// 舊版資料包(只有一份全域科目表、沒有 LineID)合併進來：科目表視為資料包裡那個車型自己的
+{
+  const legacyTables = JSON.parse(JSON.stringify(hostH.exportPack(['DX']).tables));
+  legacyTables.PLLineItems = legacyTables.PLLineItems.map(r => Object.assign({}, r, { LineID: '', VehicleTypeID: '' }));
+  const hostL = newHost(memoryStorage());
+  apiOf(hostL).getBootstrap('');
+  hostL.mergePack(Pack.parsePack({ format: Pack.FORMAT, formatVersion: 1, tables: legacyTables }));
+  assert(same(numbers(apiOf(hostL).calculateComparison(selH), true), hAfter), '舊版資料包合併後 DX 的數字不同');
+  assert(apiOf(hostL).getPLLineItems('DX').some(d => d.LineName === '關稅'), '舊版資料包的自訂科目沒有成為 DX 的科目');
+}
 
 // 合併結果要能存進暫存、重開後還在
 const mStorage = memoryStorage();
@@ -237,7 +250,7 @@ const oldPack = Pack.parsePack({ format: Pack.FORMAT, formatVersion: 1, tables: 
 const hostOld = newHost(memoryStorage());
 hostOld.replaceWithPack(oldPack);
 assert(same(apiOf(hostOld).getVehicleTypes().map(t => t.VehicleTypeID), ['OLD']), '缺少欄位/多出欄位的舊資料包讀不進來');
-assert(apiOf(hostOld).getPLLineItems().length > 30, '資料包沒有科目表時應該自動補上內建科目');
+assert(apiOf(hostOld).getPLLineItems('OLD').length > 30, '資料包沒有科目表時應該自動補上內建科目');
 
 const brokenStorage = memoryStorage();
 brokenStorage.setItem(Host.STORAGE_KEY, '{"tables": 壞掉');

@@ -23,12 +23,39 @@
 
   // 資料包收錄的表(順序即匯出順序)。PLResult 是計算快照不收；AuditLog 另外處理。
   var PACK_TABLES = ['VehicleTypes', 'Vehicles', 'Scenarios', 'SalesMix', 'CostOfSales',
-    'DevInvestment', 'OperatingExpense', 'Parameters', 'PLLineItems'];
+    'DevInvestment', 'OperatingExpense', 'Parameters', 'PLLineItems', 'ParamDefs', 'LineNotes', 'Actions', 'Snapshots'];
   var AUDIT_TABLE = 'AuditLog';
   var AUDIT_HEADERS = ['Timestamp', 'User', 'SheetName', 'RowID', 'Action', 'Payload'];
 
   // 依 ScenarioID 掛在情境底下的表，與各自的主鍵
-  var SCENARIO_TABLES = { SalesMix: 'RowID', CostOfSales: 'RowID', DevInvestment: 'RowID', OperatingExpense: 'RowID', Parameters: 'ParamID' };
+  var SCENARIO_TABLES = {
+    SalesMix: 'RowID', CostOfSales: 'RowID', DevInvestment: 'RowID', OperatingExpense: 'RowID', Parameters: 'ParamID',
+    LineNotes: 'RowID', Actions: 'ActionID'
+  };
+
+  /**
+   * 科目表依車型各自一份(VehicleTypeID)；留白的是標準範本。舊版資料包只有一份全域科目表(沒有 LineID)，
+   * 視同「每個車型都用這一份」。回傳 { 車型: [科目列] }，車型沒有自己的科目表時用範本複製一份。
+   */
+  function lineIdOf_(typeId, code) { return (typeId || '*') + '|' + code; }
+  function chartsByType_(rows, typeIds) {
+    var legacy = rows.length && rows.every(function (r) { return !str_(r.LineID) && !str_(r.VehicleTypeID); });
+    var template = rows.filter(function (r) { return !str_(r.VehicleTypeID); });
+    var out = {};
+    typeIds.forEach(function (id) {
+      var own = legacy ? [] : rows.filter(function (r) { return str_(r.VehicleTypeID) === id; });
+      if (!own.length) {
+        own = template.map(function (r) {
+          var c = clone_(r);
+          c.VehicleTypeID = id;
+          c.LineID = lineIdOf_(id, c.LineCode);
+          return c;
+        });
+      }
+      out[id] = own;
+    });
+    return out;
+  }
 
   function str_(v) { return v === undefined || v === null ? '' : String(v); }
   function set_(list) { var s = {}; list.forEach(function (k) { s[str_(k)] = true; }); return s; }
@@ -46,7 +73,14 @@
       VehicleTypes: (tables.VehicleTypes || []).filter(function (r) { return types[str_(r.VehicleTypeID)]; }),
       Vehicles: vehicles,
       Scenarios: scenarios,
-      PLLineItems: (tables.PLLineItems || []).slice()
+      // 只帶這幾個車型自己的科目表(車型還沒有自己的一份時，帶它目前沿用的範本)
+      PLLineItems: (function () {
+        var charts = chartsByType_(tables.PLLineItems || [], Object.keys(types));
+        return Object.keys(charts).reduce(function (all, id) { return all.concat(charts[id]); }, []);
+      })(),
+      ParamDefs: (tables.ParamDefs || []).slice(),
+      // 情境快照跟著車型走(情境刪掉了快照仍保留，所以不是依情境篩)
+      Snapshots: (tables.Snapshots || []).filter(function (r) { return types[str_(r.VehicleTypeID)]; })
     };
     Object.keys(SCENARIO_TABLES).forEach(function (name) {
       out[name] = (tables[name] || []).filter(function (r) {
@@ -116,31 +150,20 @@
     return byType;
   }
 
-  function lineSignature_(d) {
-    return [str_(d.ParentLine), str_(d.AutoSource), str_(d.LineName).trim()].join('|');
-  }
-
   /**
-   * 合併匯入：資料包裡有的車型，以資料包為準整個換掉(本機這幾個車型的車系、情境與所有輸入資料都會被取代)；
+   * 合併匯入：資料包裡有的車型，以資料包為準整個換掉(本機這幾個車型的車系、情境、科目表與所有輸入資料都會被取代)；
    * 資料包裡沒有的車型完全不動。對應「每個人負責自己的車型」：誰負責的車型，誰的資料包說了算。
    *
-   * 科目表是全域共用的，兩邊各自新增的自訂科目可能拿到同一個代碼(兩人都新增了 b15，但一個是「運費」一個是「關稅」)，
-   * 所以科目要逐一比對：
-   *   - 內建科目(PL_LINE_ITEMS 裡的代碼)：代碼相同就是同一個科目，沿用本機的設定
-   *   - 代碼、父科目、名稱都相同：同一個科目
-   *   - 本機已經有「父科目+名稱」相同、代碼不同的科目：視為同一個科目，資料包的金額改掛到本機的代碼
-   *   - 代碼撞到本機另一個不同的科目：重新配號(父科目字首 + 最小未使用號碼，規則跟 nextLineCode_ 一樣)，
-   *     資料包裡指到舊代碼的金額、攤提落點一起改過去
+   * 科目表是跟著車型走的(每個車型各一份)，所以兩個人各自新增的科目就算拿到同一個代碼也不會互相干擾，
+   * 不需要再逐一比對、改號。舊版資料包(只有一份全域科目表)的科目表，視為資料包裡每個車型各自的科目表。
+   * 自訂參數(ParamDefs)是全域共用的：本機沒有的參數才加進來，同名參數保留本機的設定。
    *
-   * ctx.lineCodePrefix：Constants.gs 的 LINE_CODE_PREFIX；ctx.builtInLineCodes：內建科目代碼清單。
    * 回傳 { tables, report }，不修改傳進來的資料。
    */
   function mergePack(localTables, incomingTables, ctx) {
     var local = clone_(localTables);
     var incoming = clone_(incomingTables);
     PACK_TABLES.concat([AUDIT_TABLE]).forEach(function (n) { local[n] = local[n] || []; incoming[n] = incoming[n] || []; });
-    var prefixOf = ctx.lineCodePrefix || {};
-    var builtIn = set_(ctx.builtInLineCodes || []);
 
     var types = set_([].concat(
       incoming.VehicleTypes.map(function (r) { return r.VehicleTypeID; }),
@@ -150,8 +173,7 @@
     var typeIds = Object.keys(types);
 
     var report = {
-      replacedTypes: [], addedTypes: [],
-      lineItemsAdded: [], lineItemsRemapped: [], lineItemsReused: [],
+      replacedTypes: [], addedTypes: [], chartsReplaced: [], paramDefsAdded: [],
       globalParamsAdded: 0, globalParamsKept: [], rowIdsReassigned: 0
     };
     var localSummary = summarize(local);
@@ -180,57 +202,26 @@
       }
     });
 
-    // ---- 科目對照 ----
-    var localByCode = {}, localBySig = {};
-    local.PLLineItems.forEach(function (d) {
-      localByCode[str_(d.LineCode)] = d;
-      if (!localBySig[lineSignature_(d)]) localBySig[lineSignature_(d)] = d;
+    // ---- 科目表：資料包裡的車型換成資料包的那一份 ----
+    var incomingCharts = chartsByType_(incoming.PLLineItems, typeIds);
+    var localTemplateEmpty = !local.PLLineItems.some(function (r) { return !str_(r.VehicleTypeID) && str_(r.LineID); });
+    local.PLLineItems = local.PLLineItems.filter(function (r) { return !types[str_(r.VehicleTypeID)]; });
+    typeIds.forEach(function (id) {
+      if (incomingCharts[id].length) report.chartsReplaced.push(id);
+      local.PLLineItems = local.PLLineItems.concat(incomingCharts[id]);
     });
-    var taken = {};
-    local.PLLineItems.forEach(function (d) { taken[str_(d.LineCode)] = true; });
-    incoming.PLLineItems.forEach(function (d) { taken[str_(d.LineCode)] = true; });
-    var codeMap = {};
-    incoming.PLLineItems.forEach(function (d) {
-      var code = str_(d.LineCode);
-      var mine = localByCode[code];
-      if (builtIn[code]) {
-        codeMap[code] = code;
-        if (!mine) { local.PLLineItems.push(d); localByCode[code] = d; }
-        return;
-      }
-      if (mine && lineSignature_(mine) === lineSignature_(d)) { codeMap[code] = code; return; }
-      var same = localBySig[lineSignature_(d)];
-      if (same) {
-        codeMap[code] = str_(same.LineCode);
-        report.lineItemsReused.push({ from: code, to: str_(same.LineCode), name: str_(d.LineName) });
-        return;
-      }
-      if (mine) {
-        var prefix = prefixOf[str_(d.ParentLine)];
-        if (!prefix) throw new Error('科目「' + d.LineName + '」(' + code + ') 跟本機的科目撞號，且無法自動改號。');
-        var n = 1;
-        while (taken[prefix + n]) n++;
-        var newCode = prefix + n;
-        taken[newCode] = true;
-        codeMap[code] = newCode;
-        var copy = clone_(d);
-        copy.LineCode = newCode;
-        local.PLLineItems.push(copy);
-        localByCode[newCode] = copy;
-        localBySig[lineSignature_(copy)] = copy;
-        report.lineItemsRemapped.push({ from: code, to: newCode, name: str_(d.LineName) });
-        return;
-      }
-      codeMap[code] = code;
-      local.PLLineItems.push(d);
-      localByCode[code] = d;
-      localBySig[lineSignature_(d)] = d;
-      report.lineItemsAdded.push({ code: code, name: str_(d.LineName) });
+    // 本機還是全新資料庫(沒有範本)時，順便把資料包的範本帶進來
+    if (localTemplateEmpty) {
+      incoming.PLLineItems.filter(function (r) { return !str_(r.VehicleTypeID) && str_(r.LineID); })
+        .forEach(function (r) { local.PLLineItems.push(r); });
+    }
+    var localParams = set_(local.ParamDefs.map(function (r) { return r.ParamName; }));
+    incoming.ParamDefs.forEach(function (r) {
+      if (localParams[str_(r.ParamName)]) return;
+      localParams[str_(r.ParamName)] = true;
+      local.ParamDefs.push(r);
+      report.paramDefsAdded.push(str_(r.ParamName));
     });
-    function mapCode(c) { return codeMap[str_(c)] !== undefined ? codeMap[str_(c)] : c; }
-    incoming.CostOfSales.forEach(function (r) { r.LineCode = mapCode(r.LineCode); });
-    incoming.OperatingExpense.forEach(function (r) { r.LineCode = mapCode(r.LineCode); });
-    incoming.DevInvestment.forEach(function (r) { if (str_(r.TargetLineCode)) r.TargetLineCode = mapCode(r.TargetLineCode); });
 
     // ---- 拿掉本機這幾個車型的舊資料 ----
     var dropScenarios = set_(local.Scenarios.filter(function (r) { return types[str_(r.VehicleTypeID)]; })
@@ -274,6 +265,16 @@
       });
     });
 
+    // ---- 情境快照是歷史紀錄：兩邊都留(同一個快照代號只留一份)，不因為換掉車型資料就消失 ----
+    var snapIds = set_(local.Snapshots.map(function (r) { return r.SnapshotID; }));
+    report.snapshotsAdded = 0;
+    incoming.Snapshots.forEach(function (r) {
+      if (snapIds[str_(r.SnapshotID)]) return;
+      snapIds[str_(r.SnapshotID)] = true;
+      local.Snapshots.push(r);
+      report.snapshotsAdded++;
+    });
+
     // ---- 稽核紀錄：兩邊都留，去掉完全相同的列 ----
     var seen = set_(local[AUDIT_TABLE].map(function (r) { return JSON.stringify(r); }));
     incoming[AUDIT_TABLE].forEach(function (r) {
@@ -294,15 +295,13 @@
     report.addedTypes.forEach(function (t) {
       lines.push('・車型 ' + t.VehicleTypeID + '：新增（' + counts(t.incoming) + '）');
     });
-    if (report.lineItemsAdded.length) {
-      lines.push('・新增科目：' + report.lineItemsAdded.map(function (x) { return x.code + ' ' + x.name; }).join('、'));
+    if (report.chartsReplaced.length) {
+      lines.push('・科目表跟著車型一起換成資料包的版本：' + report.chartsReplaced.join('、') + '（其他車型的科目表不受影響）');
     }
-    report.lineItemsRemapped.forEach(function (x) {
-      lines.push('・科目「' + x.name + '」代碼跟本機撞號，改為 ' + x.to + '（原 ' + x.from + '）');
-    });
-    report.lineItemsReused.forEach(function (x) {
-      lines.push('・科目「' + x.name + '」本機已有（' + x.to + '），資料包的 ' + x.from + ' 併到同一個科目');
-    });
+    if (report.snapshotsAdded) lines.push('・新增 ' + report.snapshotsAdded + ' 份情境快照（本機原有的快照保留）');
+    if (report.paramDefsAdded.length) {
+      lines.push('・新增自訂參數：' + report.paramDefsAdded.join('、'));
+    }
     report.globalParamsKept.forEach(function (p) {
       lines.push('・全域參數「' + p.ParamName + '」兩邊不同，保留本機的值 ' + p.local + '（資料包是 ' + p.incoming + '）');
     });

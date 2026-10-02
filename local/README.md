@@ -4,7 +4,7 @@
 把 `dist/FS-local.html` 複製到電腦任何位置，用 Chrome / Edge **雙擊**就能用。
 所有資料只存在你這台電腦的瀏覽器裡，不會上傳到任何地方。
 
-後端是 `src/*.gs`（計算引擎與資料存取），前端是 `src/index.html` / `script.html` / `style.html`，
+後端是 `src/*.gs`（計算引擎與資料存取），前端是 `src/index.html` / `style.html` / `src/ui/*.js`，
 build 時原封不動放進這一個檔案。`tools/verify-local.js` 會用 Gate F 實際數字逐格確認算出來的結果正確。
 
 ## 日常使用
@@ -34,8 +34,10 @@ build 時原封不動放進這一個檔案。`tools/verify-local.js` 會用 Gate
 
 - **資料包裡有的車型，以資料包為準整個取代**（車系、情境、所有輸入資料）；資料包裡沒有的車型完全不動。
   誰負責的車型，誰的資料包說了算。合併前會列出哪些車型會被取代、哪些是新增，確認後才寫入。
-- **自訂科目自動處理撞號**：科目表是全域共用的，兩個人各自新增的科目可能拿到同一個代碼（例如都是 b15）。
-  合併時逐一比對：名稱與父科目都相同就視為同一個科目；代碼撞到別的科目就自動改號，金額與攤提落點跟著改過去。
+- **科目表跟著車型走**：每個車型各自一份科目表，合併時資料包裡的車型連同它的科目表一起取代，
+  兩個人各自新增的科目就算代碼相同(都是 b15)也互不干擾，不需要改號。v1 的資料包(只有一份全域科目表)
+  合併進來時，那份科目表視為資料包裡每個車型自己的科目表。
+- 自訂參數(參數與比率頁新增的)：本機沒有的才加進來，同名參數保留本機的定義。改善作法、科目說明跟著情境走。
 - 車系代號在本機屬於別的車型時會擋下來，請先在其中一邊改名。
 - 沒有掛在情境底下的全域參數，本機已經有的不會被覆蓋。
 
@@ -59,7 +61,7 @@ local/
 ├─ gas-shim.js   # 瀏覽器版的 Apps Script 模擬層(記憶體試算表、LockService、Session...)
 ├─ pack.js       # 資料包格式：匯出、讀取檢查、只取部分車型、合併(含科目改號)
 ├─ host.js       # 後端主機：.gs 後端 + 暫存 + google.script.run 替身
-├─ boot.js       # 開機：在前端 script.html 執行前架好主機
+├─ boot.js       # 開機：在前端程式執行前架好主機
 ├─ local-ui.js   # 地端版工具列與匯入對話框
 └─ local-ui.css
 tools/build-local.js   # 組成 dist/FS-local.html(單一檔案)
@@ -75,6 +77,6 @@ node tools/verify-local.js    # 會檢查 dist 是不是最新的
 node tools/e2e-local.js       # 有 Playwright 時跑瀏覽器測試
 ```
 
-`.gs` 被整段包進 `FSBackendFactory(G)` 函式裡，跟前端 `script.html` 的全域名稱互不干擾；
+`.gs` 被整段包進 `FSBackendFactory(G)` 函式裡，跟前端程式的全域名稱互不干擾；
 `G` 是模擬的 Apps Script 全域物件。每次前端呼叫都比照 Apps Script「每次都是新的執行」清掉單次執行快取，
 參數與回傳值都走一次 JSON，跟 `google.script.run` 的序列化行為一致。

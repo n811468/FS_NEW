@@ -64,6 +64,7 @@ function invalidateSheetCache_(sheetName) {
  */
 function resetCalcMemo_() {
   if (typeof PL_CORE_MEMO_ !== 'undefined') PL_CORE_MEMO_ = {};
+  if (typeof SNAPSHOT_MEMO_ !== 'undefined') SNAPSHOT_MEMO_ = {};
 }
 
 /** 把整張表讀成 [{欄位:值,...}, ...]，第一列為標題 */
