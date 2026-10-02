@@ -861,7 +861,7 @@ function copyFromScenario() {
   });
 }
 
-/* ================= 參數與比率(內建稅率 + 自訂參數) ================= */
+/* ================= 參數與比率(預設參數 + 自訂參數，全部可改、可刪) ================= */
 let rateData = null;
 
 function renderRatePanel() {
@@ -907,8 +907,7 @@ function drawRateGrid() {
                 placeholder="${esc(rate.globalValue)}" oninput="${dirty()}"></td>`;
             }).join('')}
             <td class="muted" style="text-align:left;max-width:260px;white-space:normal;">${esc(rate.description || '')}</td>
-            <td class="row-actions">${rate.isBuiltIn ? '<span class="muted">內建</span>' :
-              `<button type="button" class="btn ghost sm" onclick="editParamDialog('${esc(rate.ParamName)}')">編輯</button><button type="button" class="btn ghost sm" onclick="deleteParam('${esc(rate.ParamName)}')">✕</button>`}</td>
+            <td class="row-actions" style="white-space:nowrap;"><button type="button" class="btn ghost sm" onclick="editParamDialog(${rateData.rates.indexOf(rate)})">編輯</button><button type="button" class="btn ghost sm" onclick="deleteParam(${rateData.rates.indexOf(rate)})" aria-label="刪除">✕</button></td>
           </tr>`).join('')}
       </tbody>
     </table>
@@ -942,7 +941,7 @@ function paramDialog_(title, def, isNew) {
     title,
     body: '<p class="help">參數是全系統共用的定義(名稱/單位/預設值)；每個情境、每個車系的實際數值在這張表上填。</p>',
     fields: [
-      { name: 'ParamName', label: '參數名稱', value: def.ParamName || '', placeholder: '例：關稅率', help: isNew ? '' : '名稱建立後不能修改' },
+      { name: 'ParamName', label: '參數名稱', value: def.ParamName || '', placeholder: '例：關稅率', help: isNew ? '' : '改名時，公式裡的 [舊名稱] 與各情境填的數值會一起改過去' },
       { name: 'Unit', label: '單位', type: 'select', value: def.Unit || '%', options: [['%', '%（以百分比輸入，公式取出時 ÷100）'], ['數值', '數值（原值取用，如倍率、金額）']] },
       { name: 'DefaultValue', label: '預設值', type: 'number', value: def.DefaultValue === undefined ? '' : def.DefaultValue, help: '情境沒有填這個參數時用這個值' },
       { name: 'Description', label: '說明', value: def.Description || '', placeholder: '選填，例：KD件平均關稅率' }
@@ -959,20 +958,32 @@ function addParamDialog() {
       .withFailureHandler(err => toast(err.message, 'err')).saveParamDef(v);
   });
 }
-function editParamDialog(name) {
-  const rate = rateData.rates.find(r => r.ParamName === name) || {};
-  paramDialog_('編輯參數', { ParamName: name, Unit: rate.unit, DefaultValue: '', Description: rate.description }, false).then(v => {
+function editParamDialog(i) {
+  const rate = rateData.rates[i];
+  if (!rate) return;
+  const name = rate.ParamName;
+  paramDialog_('編輯參數', { ParamName: name, Unit: rate.unit, DefaultValue: rate.defaultValue, Description: rate.description }, false).then(v => {
     if (!v) return;
-    v.ParamName = name;
-    google.script.run.withSuccessHandler(safeHandler(() => { toast('已更新參數', 'ok'); renderRatePanel(); }))
-      .withFailureHandler(err => toast(err.message, 'err')).saveParamDef(v);
+    const newName = String(v.ParamName || '').trim();
+    const save = () => {
+      v.ParamName = newName;
+      google.script.run.withSuccessHandler(safeHandler(() => { toast('已更新參數', 'ok'); renderRatePanel(); }))
+        .withFailureHandler(err => toast(err.message, 'err')).saveParamDef(v);
+    };
+    if (newName === name) { save(); return; }
+    // 改名：公式裡的 [舊名稱] 與各情境填的數值一起改過去，再存單位/預設值/說明
+    google.script.run.withSuccessHandler(safeHandler(save))
+      .withFailureHandler(err => toast(err.message, 'err')).renameParamDef(name, newName);
   });
 }
-function deleteParam(name) {
-  confirmModal('刪除參數「' + name + '」？', '所有情境填過的數值會一起刪除。有公式還在使用這個參數時會被擋下來。', '刪除', true).then(ok => {
+function deleteParam(i) {
+  const rate = rateData.rates[i];
+  if (!rate) return;
+  const name = rate.ParamName;
+  confirmModal('刪除參數「' + esc(name) + '」？', '所有情境填過的數值會一起刪除。有公式還在使用這個參數時會被擋下來（先改公式再刪）。', '刪除', true).then(ok => {
     if (!ok) return;
     google.script.run.withSuccessHandler(safeHandler(() => { toast('已刪除參數', 'ok'); renderRatePanel(); }))
-      .withFailureHandler(err => toast(err.message, 'err')).deleteParamDef(name);
+      .withFailureHandler(err => toast(err.message, 'err', 5000)).deleteParamDef(name);
   });
 }
 

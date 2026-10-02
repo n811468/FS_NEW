@@ -169,7 +169,12 @@ check('拖曳排序：車系與科目一次送完整順序', () => {
   const tmp = bKids[i1]; bKids[i1] = bKids[i2]; bKids[i2] = tmp;
   const lines = gs.setLineOrder('DA', bKids).map(d => d.LineCode);
   assert(lines.indexOf('b2') < lines.indexOf('b1'), 'b2 應排到 b1 前面');
-  throws(() => gs.setLineOrder('DA', [{ LineCode: 'B', ParentLine: 'E' }]), /結構科目/, '結構科目不能換父科目');
+  // 預設的小計科目也能換父科目(全部都是「預設」不是「內建」)；循環父子仍會擋下
+  const before = gs.getPLLineItems('DA').map(d => ({ LineCode: d.LineCode, ParentLine: d.ParentLine || '' }));
+  gs.setLineOrder('DA', [{ LineCode: 'J', ParentLine: 'I' }]);
+  assert(gs.getPLLineItems('DA').find(d => d.LineCode === 'J').ParentLine === 'I', '預設科目可以換父科目');
+  gs.setLineOrder('DA', before);
+  assert(gs.getPLLineItems('DA').find(d => d.LineCode === 'J').ParentLine === '', '換回來');
   gs.setVehicleOrder('DA', ['V1', 'V2', 'V3']);
 });
 
@@ -348,6 +353,41 @@ check('情境快照：存下當時的數字，之後改資料不影響；可以�
   gs.deleteSnapshot(snap.SnapshotID);
   assert(!gs.getSnapshots('DA').length, '刪除');
   near(kOf(), k0, '還原', 0.01);
+});
+
+check('所有科目、參數都可以刪除/改名：預設小計(K)可刪，預設參數可改名/刪除且不會被補回來', () => {
+  reset();
+  gs.saveVehicleType({ VehicleTypeID: 'DZ' });
+  gs.saveVehicle({ VehicleID: 'Z1', VehicleTypeID: 'DZ', VehicleCode: 'Z車' });
+  const zs = gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE F', ScenarioName: '刪科目測試', ScenarioType: '現況', VehicleTypeID: 'DZ' }, '', []);
+  gs.saveSalesMixGrid(zs.ScenarioID, 'DZ', [{ RowID: '', VehicleID: 'Z1', SalesMixPct: 100, MonthlyVolume: 10, LifeCycleYears: 5, ListPriceTaxIncl: 500000 }]);
+  gs.deletePLLineItem('K', 'DZ');
+  assert(!gs.getPLLineItems('DZ').some(d => d.LineCode === 'K'), '營業淨利(K)可以刪除');
+  throws(() => gs.deletePLLineItem('I', 'DZ'), /被這些科目的公式引用|子科目/, '還有子科目/被引用時仍會擋下');
+  gs.setLineOrder('DZ', gs.getPLLineItems('DZ').map(d => ({ LineCode: d.LineCode, ParentLine: d.LineCode === 'J' ? 'I' : d.ParentLine || '' })));
+  assert(gs.getPLLineItems('DZ').find(d => d.LineCode === 'J').ParentLine === 'I', '預設科目可以換父科目');
+  const cmp = gs.calculateComparison([{ ScenarioID: zs.ScenarioID, VehicleID: '' }]);
+  assert(cmp.lines.length && !cmp.lines.some(l => l.LineCode === 'K'), '刪掉 K 之後儀表板照常計算');
+  gs.getWhatIfOptions(zs.ScenarioID);
+  gs.getGateReport('', zs.ScenarioID, '');
+  // 預設參數：被公式用到時擋下；改名會連公式一起改；刪掉後資料升級不會補回來；恢復預設科目時補回
+  throws(() => gs.deleteParamDef('季Margin率'), /公式使用/, '被公式使用的參數不能刪');
+  const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.find(l => l.LineCode === 'K').Amount;
+  gs.renameParamDef('營業稅率', '營業稅稅率');
+  assert(gs.getParamDefs().some(p => p.ParamName === '營業稅稅率') && !gs.getParamDefs().some(p => p.ParamName === '營業稅率'), '改名');
+  assert(/\[營業稅稅率\]/.test(gs.getPLLineItems('DA').find(d => d.LineCode === 'P6').Formula), '公式跟著改名：' + gs.getPLLineItems('DA').find(d => d.LineCode === 'P6').Formula);
+  near(gs.calculatePLAllVehicles(sid).weightedAverage.find(l => l.LineCode === 'K').Amount, k0, '改名後數字不變', 0.01);
+  gs.setupSpreadsheet();
+  assert(!gs.getParamDefs().some(p => p.ParamName === '營業稅率'), '改名後資料升級不會把舊的預設參數補回來');
+  gs.renameParamDef('營業稅稅率', '營業稅率');
+  near(gs.calculatePLAllVehicles(sid).weightedAverage.find(l => l.LineCode === 'K').Amount, k0, '改回來數字不變', 0.01);
+  gs.saveParamDef({ ParamName: '貨物稅完稅價格計算率', Unit: '%', DefaultValue: 90, Description: '改過' });
+  assert(gs.getParamDefs().find(p => p.ParamName === '貨物稅完稅價格計算率').DefaultValue === 90, '預設參數可以改預設值');
+  gs.saveParamDef({ ParamName: '貨物稅完稅價格計算率', Unit: '%', DefaultValue: 91, Description: '預設參數' });
+  gs.saveParamDef({ ParamName: '測試參數', Unit: '數值', DefaultValue: 1 });
+  gs.deleteParamDef('測試參數');
+  assert(!gs.getParamDefs().some(p => p.ParamName === '測試參數'), '自訂參數刪除');
+  gs.deleteScenario(zs.ScenarioID);
 });
 
 check('預設公式下 Gate F 數字不變(回歸)', () => {

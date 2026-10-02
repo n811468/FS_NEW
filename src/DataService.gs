@@ -682,7 +682,7 @@ function getRateGrid(scenarioId, vehicleTypeId) {
       globalValue: global ? toNumber_(global.Value) : (def.DefaultValue !== '' && def.DefaultValue !== undefined ? def.DefaultValue :
         (DEFAULT_PARAMS[name] !== undefined ? DEFAULT_PARAMS[name] : '')),
       isDefault: !global,
-      unit: def.Unit, description: def.Description, isBuiltIn: def.isBuiltIn,
+      unit: def.Unit, description: def.Description, isPreset: def.isPreset, defaultValue: def.DefaultValue,
       overrides: overrides
     };
   });

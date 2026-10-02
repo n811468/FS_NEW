@@ -224,6 +224,9 @@ v2 新頁面：「科目與公式」(`renderChartPanel`：科目樹 + 編輯器 
     改版重新編號（售價結構從 8 列變 9 列）之後，舊 Sheet 上會出現欄位名稱與數字對不起來的情形，
     而 `seedPLLineItems_()` 為了保留使用者改過的名稱不會覆蓋既有科目 —— 名稱是描述公式的，
     就該由公式那一邊決定。明細科目的名稱仍屬使用者，要整批回復用 `restoreBuiltInLineItems()`。
+  - **沒有「內建」鎖**：`PROTECTED_LINE_CODES`（A/B/C/E/G/I/K）只用來標示「預設小計」與表格樣式，不再擋刪除或換父科目；
+    刪除只擋資料完整性（公式引用、子科目、開發總投攤提落點）。預設參數（`TAX_RATE_PARAM_NAMES`）可改單位/預設值/改名/刪除，
+    刪除或改名時在 ParamDefs 留一列墓碑（`Unit = DELETED`），`seedParamDefs_` 才不會補回來；`restoreBuiltInLineItems` 會移除墓碑。
   - 情境設定另有「以既有情境為基礎建立」（`createScenarioFrom()`）與「帶入目前情境」
     （`copyScenarioData()`），限同一車型 —— 跨車型的車系對不上，會產生看不見卻仍被計入損益的資料。
 

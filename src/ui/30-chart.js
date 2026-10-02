@@ -131,7 +131,7 @@ function drawChartEditor_() {
         <div class="menu-list">
           <button type="button" ${others.length ? '' : 'disabled'} onclick="copyChartDialog()">從其他車型或範本複製…<span>整份換掉</span></button>
           <button type="button" onclick="saveChartAsTemplateUi()">存成標準範本<span>之後新建車型的預設</span></button>
-          <button type="button" onclick="restoreChartDefaults()">恢復內建預設<span>內建科目回到系統預設，自訂科目不動</span></button>
+          <button type="button" onclick="restoreChartDefaults()">恢復預設科目<span>預設科目回到系統預設（刪掉的會補回來），自訂科目不動</span></button>
         </div>
       </details>
     </div>
@@ -344,11 +344,11 @@ function chartEditorPaneHtml_() {
           oninput="chartDraft.LineName=this.value;chartDirty_()">
         <div class="ed-sub">
           <label>計入
-            <select ${d.isProtected ? 'disabled' : ''} onchange="chartDraft.ParentLine=this.value;chartDirty_();schedulePreview_()">
+            <select onchange="chartDraft.ParentLine=this.value;chartDirty_();schedulePreview_()">
               ${parentOpts.map(o => `<option value="${esc(o[0])}"${String(d.ParentLine || '') === o[0] ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}
             </select></label>
           ${isNew ? '<span class="muted">代碼儲存時自動產生</span>' : `<span class="tree-code">代碼 ${esc(d.LineCode)}</span>`}
-          ${d.isProtected ? '<span class="type-badge" data-tip="小計/毛利/淨利，儀表板與報告會用到，不能刪除；算法可以改">結構科目</span>' : ''}
+          ${d.isProtected ? '<span class="type-badge" data-tip="預設的小計/毛利/淨利。跟其他科目一樣可以改名、改算法、移動或刪除；儀表板重點指標、GATE 報告會用到它，刪除後那些地方會顯示空白">預設小計</span>' : ''}
           ${!isNew && d.usage ? `<span class="muted">${d.usage} 筆輸入金額</span>` : ''}
         </div>
       </div>
@@ -374,7 +374,7 @@ function chartEditorPaneHtml_() {
               <td class="row-head" style="width:170px;">${esc(v.VehicleCode || v.VehicleID)}</td>
               <td><input type="text" value="${esc(overrides[v.VehicleID] || '')}" placeholder="（照上面的設定）"
                 oninput="setChartOverride('${esc(v.VehicleID)}', this.value)"></td></tr>`).join('')}</tbody></table>` : '<p class="muted">這個車型還沒有車系。</p>'}
-          <label class="chk" style="margin-top:12px;" data-tip="貨物稅的完稅價格要扣除這個科目（內建：廣宣、促銷、批標售、季Margin）。公式 TAXDEDUCT() 就是這些科目的合計。">
+          <label class="chk" style="margin-top:12px;" data-tip="貨物稅的完稅價格要扣除這個科目（預設：廣宣、促銷、批標售、季Margin）。公式 TAXDEDUCT() 就是這些科目的合計。">
             <input type="checkbox" ${String(d.CommodityTaxDeduct).toUpperCase() === 'Y' ? 'checked' : ''}
               onchange="chartDraft.CommodityTaxDeduct=this.checked?'Y':'';chartDirty_();schedulePreview_()"> 貨物稅完稅價格可以扣除這個科目</label>
           <label class="field" style="margin-top:12px;"><span>科目說明（算法依據、資料來源）</span>
@@ -383,7 +383,7 @@ function chartEditorPaneHtml_() {
       </details>
 
       <div class="ed-foot">
-        ${!isNew && !d.isProtected ? `<button type="button" class="btn danger" onclick="deleteChartLine()">刪除科目</button>` : ''}
+        ${!isNew ? `<button type="button" class="btn danger" onclick="deleteChartLine()">刪除科目</button>` : ''}
         <span class="spacer"></span>
         <button type="button" class="btn secondary" onclick="cancelChartEdit()">${isNew ? '取消' : '還原'}</button>
         <button type="button" class="btn" onclick="saveChartLineUi()">${isNew ? '新增科目' : '儲存'}</button>
@@ -797,12 +797,12 @@ function saveChartAsTemplateUi() {
   });
 }
 function restoreChartDefaults() {
-  confirmModal('恢復內建科目預設值？', '內建科目的名稱、公式、父科目與排序會回復成系統預設；你自己新增的科目與車系個別公式不受影響。', '恢復', true).then(ok => {
+  confirmModal('恢復預設科目？', '預設科目的名稱、公式、父科目與排序會回復成系統預設，刪掉的預設科目會補回來；你自己新增的科目與車系個別公式不受影響。', '恢復', true).then(ok => {
     if (!ok) return;
     google.script.run.withSuccessHandler(safeHandler(() => {
       clearDirty();
       Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
-      toast('已恢復內建科目預設值', 'ok');
+      toast('已恢復預設科目', 'ok');
       loadChartEditor_(true);
     })).withFailureHandler(err => toast(err.message, 'err')).restoreBuiltInLineItems(currentVehicleTypeId);
   });

@@ -408,9 +408,6 @@ function saveChartLine(vehicleTypeId, line) {
     }
     if (row.CalcType === CALC_TYPES.DEV_AMORT && !row.AutoSource) row.AutoSource = AUTO_SOURCE.DEV_AMORT;
     if (row.CalcType !== CALC_TYPES.DEV_AMORT && DEV_AMORT_AUTO_SOURCES.indexOf(row.AutoSource) !== -1) row.AutoSource = '';
-    if (existing && PROTECTED_LINE_CODES.indexOf(existing.LineCode) !== -1 && row.ParentLine !== existing.ParentLine) {
-      throw new Error('「' + existing.LineName + '」是損益結構科目，不能移到別的父科目底下');
-    }
     if (row.ParentLine && row.ParentLine === row.LineCode) throw new Error('科目不能當自己的父科目');
     if (row.ParentLine && !defs.some(function (d) { return d.LineCode === row.ParentLine; })) {
       throw new Error('父科目不存在：' + row.ParentLine);
@@ -473,8 +470,7 @@ function savePLLineItemGrid(rows, vehicleTypeId) {
         row.LineName = r.LineName;
         if (r.Category !== undefined) row.Category = r.Category;
         if (r.SortOrder !== undefined && r.SortOrder !== '') row.SortOrder = toNumber_(r.SortOrder);
-        if (r.ParentLine !== undefined && PROTECTED_LINE_CODES.indexOf(existing.LineCode) === -1 &&
-            existing.CalcType === CALC_TYPES.INPUT) row.ParentLine = r.ParentLine;
+        if (r.ParentLine !== undefined && existing.CalcType === CALC_TYPES.INPUT) row.ParentLine = r.ParentLine;
       } else {
         row = newLineItemRow_(r.ParentLine, r.LineName, vehicleTypeId);
         if (r.Category) row.Category = r.Category;
@@ -509,14 +505,11 @@ function lineReferencedBy_(defs, lineCode) {
 
 /**
  * 刪除科目，連同這個車型所有情境裡該科目已輸入的金額/說明。
- * 擋下來的情況：損益結構科目、還有其他科目公式引用它、還有子科目、還有開發總投列攤提到這裡。
+ * 所有科目(含預設的小計/毛利/淨利)都可以刪；只會擋下會讓資料壞掉的情況：還有其他科目公式引用它、還有子科目、還有開發總投列攤提到這裡。
  */
 function deletePLLineItem(lineCode, vehicleTypeId) {
   return withLock_(function () {
     ensureTypeChart_(vehicleTypeId);
-    if (PROTECTED_LINE_CODES.indexOf(lineCode) !== -1) {
-      throw new Error('「' + lineCode + '」是損益結構科目(小計/毛利/淨利)，儀表板與報告都要用到，不可刪除。');
-    }
     var defs = getPLLineItems(vehicleTypeId);
     var def = defs.filter(function (d) { return d.LineCode === lineCode; })[0];
     if (!def) return false;
@@ -554,7 +547,7 @@ function deleteLineItemInline(lineCode, vehicleTypeId) { return deletePLLineItem
 
 /**
  * 調整科目順序/層級(科目設定頁拖曳後一次送出)。
- * items = [{LineCode, ParentLine}]，依陣列順序重新編排序值；結構科目不能換父科目。
+ * items = [{LineCode, ParentLine}]，依陣列順序重新編排序值；任何科目都可以換父科目。
  */
 function setLineOrder(vehicleTypeId, items) {
   return withLock_(function () {
@@ -571,7 +564,6 @@ function setLineOrder(vehicleTypeId, items) {
       var row = copyLineRow_(d, vehicleTypeId);
       row.SortOrder = (i + 1) * 10;
       if (it.ParentLine !== undefined && it.ParentLine !== d.ParentLine) {
-        if (PROTECTED_LINE_CODES.indexOf(d.LineCode) !== -1) throw new Error('「' + d.LineName + '」是損益結構科目，不能換父科目');
         if (it.ParentLine && !byCode[it.ParentLine]) throw new Error('父科目不存在：' + it.ParentLine);
         if (it.ParentLine === d.LineCode) throw new Error('科目不能當自己的父科目');
         row.ParentLine = it.ParentLine;
@@ -638,6 +630,11 @@ function restoreBuiltInLineItems(vehicleTypeId) {
       return row;
     });
     batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', upserts, []);
+    // 預設公式會用到預設參數：之前刪掉(墓碑)的預設參數一起補回來，公式才不會出錯
+    var tomb = (sheetToObjects_(SHEETS.PARAM_DEFS) || []).filter(function (r) {
+      return r.Unit === DELETED_PARAM_UNIT && TAX_RATE_PARAM_NAMES.indexOf(r.ParamName) !== -1;
+    }).map(function (r) { return r.ParamName; });
+    if (tomb.length) { batchWriteRows_(SHEETS.PARAM_DEFS, 'ParamName', [], tomb); seedParamDefs_(); }
     return getPLLineItems(vehicleTypeId);
   });
 }
@@ -854,49 +851,91 @@ function seedParamDefs_() {
   if (add.length) batchWriteRows_(SHEETS.PARAM_DEFS, 'ParamName', add, []);
 }
 
+/**
+ * 參數定義。稅率、佣金率…這幾個是「預設參數」(系統一開始幫你建好)，跟自訂參數一樣可以改單位、預設值、改名或刪除。
+ * 刪掉的預設參數留一列墓碑(Unit = DELETED_PARAM_UNIT)，資料升級時才不會又被補回來；同名再新增就會復活。
+ */
+var DELETED_PARAM_UNIT = 'DELETED';
 function getParamDefs() {
-  var rows = sortByOrder_(sheetToObjects_(SHEETS.PARAM_DEFS) || [], 'SortOrder');
-  var names = rows.map(function (r) { return r.ParamName; });
-  // 還沒跑過資料升級(例如 Node 驗算直接呼叫)時，內建參數仍然要在
+  var all = sortByOrder_(sheetToObjects_(SHEETS.PARAM_DEFS) || [], 'SortOrder');
+  var names = all.map(function (r) { return r.ParamName; });
+  // 還沒跑過資料升級(例如 Node 驗算直接呼叫)時，預設參數仍然要在
   TAX_RATE_PARAM_NAMES.forEach(function (name) {
-    if (names.indexOf(name) === -1) rows.push({ ParamName: name, Unit: '%', DefaultValue: DEFAULT_PARAMS[name], Description: '內建參數', SortOrder: '' });
+    if (names.indexOf(name) === -1) all.push({ ParamName: name, Unit: BUILTIN_PARAM_UNITS[name] || '%', DefaultValue: DEFAULT_PARAMS[name], Description: '預設參數', SortOrder: '' });
   });
-  return rows.map(function (r) {
+  return all.filter(function (r) { return r.Unit !== DELETED_PARAM_UNIT; }).map(function (r) {
     return {
       ParamName: r.ParamName, Unit: r.Unit || '%',
       DefaultValue: r.DefaultValue === undefined ? '' : r.DefaultValue,
-      Description: r.Description || '', SortOrder: r.SortOrder,
-      isBuiltIn: TAX_RATE_PARAM_NAMES.indexOf(r.ParamName) !== -1
+      Description: r.Description === '內建參數' ? '預設參數' : (r.Description || ''), SortOrder: r.SortOrder,
+      isPreset: TAX_RATE_PARAM_NAMES.indexOf(r.ParamName) !== -1
     };
   });
 }
 
-/** 新增/修改參數定義；內建參數只能改說明 */
+function validateParamName_(name) {
+  if (!name) throw new Error('請輸入參數名稱');
+  if (/[\[\]"]/.test(name)) throw new Error('參數名稱不能包含 [ ] 或引號');
+  if (FX_PARAM_NAMES.indexOf(name) !== -1) throw new Error('「' + name + '」是匯率，請到匯率設定頁維護');
+  if (SYSTEM_VARIABLES.some(function (v) { return v.name === name; })) throw new Error('「' + name + '」是系統變數名稱，請換一個名稱');
+}
+
+/** 新增/修改參數定義(預設參數也一樣可以改單位與預設值) */
 function saveParamDef(def) {
   return withLock_(function () {
     var name = String(def.ParamName || '').trim();
-    if (!name) throw new Error('請輸入參數名稱');
-    if (/[\[\]"]/.test(name)) throw new Error('參數名稱不能包含 [ ] 或引號');
-    if (FX_PARAM_NAMES.indexOf(name) !== -1) throw new Error('「' + name + '」是匯率，請到匯率設定頁維護');
-    if (SYSTEM_VARIABLES.some(function (v) { return v.name === name; })) throw new Error('「' + name + '」是系統變數名稱，請換一個名稱');
+    validateParamName_(name);
     var existing = indexByPk_(sheetToObjects_(SHEETS.PARAM_DEFS) || [], 'ParamName')[name];
-    var isBuiltIn = TAX_RATE_PARAM_NAMES.indexOf(name) !== -1;
-    var unit = isBuiltIn ? (BUILTIN_PARAM_UNITS[name] || '%') : (PARAM_UNITS.indexOf(def.Unit) !== -1 ? def.Unit : '%');
+    if (existing && existing.Unit === DELETED_PARAM_UNIT) existing = null;
     var row = {
-      ParamName: name, Unit: unit,
+      ParamName: name, Unit: PARAM_UNITS.indexOf(def.Unit) !== -1 ? def.Unit : '%',
       DefaultValue: def.DefaultValue === '' || def.DefaultValue === undefined || def.DefaultValue === null ? '' : toNumber_(def.DefaultValue),
       Description: def.Description || '',
       SortOrder: existing ? existing.SortOrder : (getParamDefs().length + 1)
     };
-    if (isBuiltIn) row.DefaultValue = DEFAULT_PARAMS[name];
     upsertRow_(SHEETS.PARAM_DEFS, 'ParamName', row);
+    return getParamDefs();
+  });
+}
+
+/** 參數改名：公式裡的 [舊名稱]、各情境填的數值一起改過去 */
+function renameParamDef(oldName, newName) {
+  return withLock_(function () {
+    newName = String(newName || '').trim();
+    if (oldName === newName) return getParamDefs();
+    validateParamName_(newName);
+    var defs = getParamDefs();
+    var def = defs.filter(function (d) { return d.ParamName === oldName; })[0];
+    if (!def) throw new Error('找不到參數：' + oldName);
+    if (defs.some(function (d) { return d.ParamName === newName; })) throw new Error('已經有參數叫「' + newName + '」');
+    if (allLineItemRows_().some(function (r) { return r.LineName === newName; })) throw new Error('已經有科目叫「' + newName + '」，請換一個名稱');
+    var deletes = TAX_RATE_PARAM_NAMES.indexOf(oldName) === -1 ? [oldName] : [];
+    var adds = [{ ParamName: newName, Unit: def.Unit, DefaultValue: def.DefaultValue, Description: def.Description, SortOrder: def.SortOrder }];
+    // 預設參數改名後留墓碑，資料升級才不會把舊名稱補回來
+    if (TAX_RATE_PARAM_NAMES.indexOf(oldName) !== -1) adds.push({ ParamName: oldName, Unit: DELETED_PARAM_UNIT, DefaultValue: '', Description: '已改名為 ' + newName, SortOrder: '' });
+    batchWriteRows_(SHEETS.PARAM_DEFS, 'ParamName', adds, deletes);
+    var pUps = (sheetToObjects_(SHEETS.PARAMETERS) || []).filter(function (r) { return r.ParamName === oldName; }).map(function (r) {
+      var c = {}; SCHEMA.Parameters.forEach(function (h) { c[h] = r[h]; }); c.ParamName = newName; return c;
+    });
+    if (pUps.length) batchWriteRows_(SHEETS.PARAMETERS, 'ParamID', pUps, []);
+    var lineUps = [];
+    allLineItemRows_().forEach(function (r) {
+      var f = replaceNameRef_(r.Formula, oldName, '[' + newName + ']');
+      var vf = parseVehicleFormulas_(r.VehicleFormulas), vfChanged = false;
+      Object.keys(vf).forEach(function (k) { var nf = replaceNameRef_(vf[k], oldName, '[' + newName + ']'); if (nf !== vf[k]) { vf[k] = nf; vfChanged = true; } });
+      if (f === r.Formula && !vfChanged) return;
+      var c = {}; SCHEMA.PLLineItems.forEach(function (h) { c[h] = r[h] === undefined ? '' : r[h]; });
+      c.Formula = f;
+      if (vfChanged) c.VehicleFormulas = JSON.stringify(vf);
+      lineUps.push(c);
+    });
+    if (lineUps.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', lineUps, []);
     return getParamDefs();
   });
 }
 
 function deleteParamDef(name) {
   return withLock_(function () {
-    if (TAX_RATE_PARAM_NAMES.indexOf(name) !== -1) throw new Error('內建參數不能刪除');
     var usedBy = [];
     var seen = {};
     allLineItemRows_().map(normalizeLineDef_).forEach(function (d) {
@@ -908,11 +947,12 @@ function deleteParamDef(name) {
         if (!seen[label]) { seen[label] = true; usedBy.push(label); }
       }
     });
-    if (usedBy.length) throw new Error('參數「' + name + '」被這些科目的公式使用：' + usedBy.join('、'));
+    if (usedBy.length) throw new Error('參數「' + name + '」被這些科目的公式使用：' + usedBy.join('、') + '。請先修改那些公式再刪除。');
     var pks = (sheetToObjects_(SHEETS.PARAMETERS) || []).filter(function (p) { return p.ParamName === name; })
       .map(function (p) { return p.ParamID; });
     if (pks.length) batchWriteRows_(SHEETS.PARAMETERS, 'ParamID', [], pks);
-    deleteRow_(SHEETS.PARAM_DEFS, 'ParamName', name);
+    if (TAX_RATE_PARAM_NAMES.indexOf(name) !== -1) upsertRow_(SHEETS.PARAM_DEFS, 'ParamName', { ParamName: name, Unit: DELETED_PARAM_UNIT, DefaultValue: '', Description: '已刪除', SortOrder: '' });
+    else deleteRow_(SHEETS.PARAM_DEFS, 'ParamName', name);
     return getParamDefs();
   });
 }

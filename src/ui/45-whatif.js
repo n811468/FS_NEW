@@ -62,6 +62,10 @@ function drawWhatIf_() {
   const g = whatIfPrefs.goal, s = whatIfPrefs.sens;
   const body = document.getElementById('whatif-body');
   if (!body || !whatIfOptions) return;
+  // 營業淨利(K)等預設科目可能被刪掉或換掉：記住的指標不存在時改用最後一個科目(通常是最底下的淨利)
+  const metrics = whatIfOptions.metrics || [];
+  const fallback = metrics.length ? metrics[metrics.length - 1].code : 'K';
+  [g, s, whatIfPrefs.multi].forEach(p => { if (!metrics.some(m => m.code === p.metric)) p.metric = fallback; });
   const basisSeg = (scope, cur) => `<div class="seg">
       <button type="button" class="seg-btn${cur === 'unit' ? ' active' : ''}" onclick="whatIfPrefs.${scope}.basis='unit';saveWhatIfPrefs_();drawWhatIf_()">單台</button>
       <button type="button" class="seg-btn${cur === 'month' ? ' active' : ''}" onclick="whatIfPrefs.${scope}.basis='month';saveWhatIfPrefs_();drawWhatIf_()">月總額</button></div>`;
