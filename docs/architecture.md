@@ -45,9 +45,13 @@ Dashboard 頁面渲染損益表 + 結構圖表
 src/                        # 系統本體(後端 + 前端)，build 時原封不動放進 dist/FS-local.html
 ├─ Constants.gs            # 分頁名稱、SCHEMA、科目表、預設參數
 ├─ Utils.gs                # ID 產生器、日期正規化、upsert/delete、整批寫入、分頁讀取快取(單次執行內)
+├─ FormulaEngine.gs        # v2：公式解析/計算(自己寫的遞迴下降解析器，不用 eval)、引用分析
+├─ ChartService.gs         # v2：每個車型各自的科目表、計算來源、公式檢查(循環引用/未計入)、試算、
+│                          #     參數定義、科目說明、改善作法、拖曳排序 API、範本複製、資料升級
+├─ ReportService.gs        # v2：GATE 報告資料(現況/目標/前回、各車系 + 加權、說明、作法、開發總投 by 部門)
 ├─ SetupSheets.gs          # 建立分頁與科目表；重設科目排序、清除未使用參數等維護作業
 ├─ DataService.gs          # 各表 CRUD 與表格式整批存檔：getXxxGrid() / saveXxxGrid()
-├─ CalcEngine.gs           # 損益計算引擎，對應 Gate F 公式鏈；比較 API 與小計驗算
+├─ CalcEngine.gs           # 損益計算引擎：依科目表逐科目取值(手動輸入/公式/開發攤提)；比較 API 與小計驗算
 ├─ index.html              # SPA 外殼（nav 分頁 + 各 panel 容器）
 ├─ style.html              # 共用 CSS
 └─ script.html             # 全部前端 JS：主檔表格、各輸入表格、儀表板
@@ -66,7 +70,8 @@ tools/                      # 開發用，只在本機用 Node 執行
 ├─ fake-apps-script.js     # Node 版的記憶體試算表(會數 API 呼叫次數)，讓 .gs 能在 Node 驗算
 ├─ verify-gatef.js         # 用實際 Gate F 表的數字逐格驗算計算引擎
 ├─ verify-features.js      # 情境帶入、科目自動編號、匯率精簡等行為
-├─ verify-ui.js            # 前端純函式的靜態驗證（損益表結構、hover 提示內容、SVG 圖表、差異模式…）
+├─ verify-ui.js            # 前端純函式的靜態驗證（損益表結構、hover 提示內容、SVG 圖表、差異模式、公式編輯器…）
+├─ verify-formula.js       # v2：公式語法、車型各自的科目表、車系個別公式、REF、分攤車系、作法、報告
 ├─ verify-write-batching.js # 整批寫入(batchWriteRows_)：跨情境隔離、新增/更新/刪除混合、呼叫次數量測
 ├─ verify-local.js         # 地端版：與 Node 驗算層逐格比對、暫存/資料包/合併、dist 為最新
 ├─ e2e-local.js            # 用 Chromium 以 file:// 開啟的端對端測試(需要 Playwright)
@@ -136,50 +141,53 @@ function saveSalesMixRow(rowObj) {
 
 ---
 
-## 4. 計算引擎（CalcEngine.gs）介面
+## 4. 計算引擎（CalcEngine.gs + FormulaEngine.gs）
+
+v2 起損益公式鏈不再寫死在程式裡：每個科目的計算來源是**資料**（`PLLineItems.CalcType/Formula`，見 `data-schema.md` 2.7）。
 
 ```js
-function calculatePL(scenarioId, vehicleId) {
-  // 1. 讀取該 scenario+vehicle 的 SalesMix、CostOfSales、DevInvestment、OperatingExpense、Parameters
-  //    (比率參數一律以百分比數值儲存，取用時經 pct_() 除以 100)
-  // 2. 依序算出（P1~P9 售價結構會逐列輸出到儀表板，不再只是中間變數）：
-  //    P3 建議零售價(不含強配,含稅) = P1 建議零售價(含稅) - P2 強配件售價
-  //    P5 實際零售價(含稅) = P3 - P4 廢車處理費(換算含稅)
-  //    P6 營業稅 = P5 × 稅率/(1+稅率)        → 內含稅反推
-  //    P7 銷售佣金 = (P5 - P6) × 佣金率        → 基礎為未稅零售價
-  //    P8 廠價(未稅) = P5 - P6 - P7
-  //    A 收入(未稅,含強配) = P8 + P9 強配收入
-  //    B 銷貨成本 = Σ(手動輸入的成本科目，外幣以現況匯率換算)
-  //               + b5 模具攤提 + b8 設備攤提 (開發總投 ÷ LC總台數)
-  //               + b13 貨物稅 ((廠價-水平配件調降-廣促margin)×完稅計算率÷(1+率)×率)
-  //    C 生產毛利 = A - B
-  //    E 銷貨毛利 = C - Σd(廣宣/促銷/批標售/索賠 + d4 季Margin = P8 廠價(未稅) × 季Margin率)
-  //    G 產品貢獻 = E - Σf(直接歸屬費用 + 車型專案開發費用，由 DevInvestment 分攤單台成本得出)
-  //    I 營業淨利(未扣前瞻) = G - Σh(固定營業費用/品牌廣宣/特別加發)
-  //    K 營業淨利 = I - J(前瞻費用)
-  // 3. 每個科目連同 %收入 寫入 PLResult（先刪除該 scenario+vehicle 的舊快照再寫新的）
-  // 4. 回傳計算後的 JSON 給前端直接渲染，不必等前端再查一次
-  return { scenarioId, vehicleId, lines: [...], calculatedAt: new Date() };
-}
-
-function calculatePLAllVehicles(scenarioId) {
-  // 迴圈呼叫 calculatePL，並額外算出「DA車加權平均」列（用 SalesMixPct 加權）
+function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
+  // 1. 讀這個情境所屬車型的科目表(或科目設定頁傳來還沒存的版本)、SalesMix、Parameters
+  // 2. 系統變數 [建議零售價]、[月銷量]、[LC總台數]、[攤提總台數]… (systemVariables_)
+  // 3. 手動輸入金額 = 銷貨成本 + 營業費用 依科目代碼加總(外幣換算)
+  // 4. 開發總投攤提 = 全車系分攤(÷ LC 總台數) + 只攤給這個車系的部分(÷ 那些車系的攤提台數)
+  // 5. 逐科目遞迴求值(用到誰先算誰)：
+  //      INPUT → 手動輸入金額；DEV_AMORT → 攤提金額；FORMULA(或車系個別公式) → evalFormulaAst_
+  //      [名稱] 依序找：系統變數 → 參數(% 參數 ÷100) → XXX匯率 → 科目名稱
+  //      CHILDREN() = 直接子科目合計；TAXDEDUCT() = CommodityTaxDeduct=Y 的科目合計
+  //      REF(情境, 科目[, 車系]) = calculatePLCore_ 另一個情境(循環引用以 REF_STACK_ 擋下)
+  //    單一科目公式出錯 → 該科目以 0 計、錯誤放在 errors，不讓整張損益表掛掉；traces 記錄每個公式的引用值給 hover 用
+  return { lineValues, errors, traces, lines, revenue, exFactoryPrice };
 }
 ```
 
-DevInvestment → 單台成本分攤邏輯（對應 Excel 的 CMC單台/BASE廠單台）：
-```
-LIFE CYCLE 總台數 = 情境的攤提基準(AmortMonthlyVolume × 12 × AmortLifeCycleYears)
-                    留空才用 Σ(SalesMix.MonthlyVolume × 12 × LifeCycleYears)
-低減後金額 = Amount × (1 - ChallengeReductionPct/100)
-單台攤提 = 低減後金額 / LIFE CYCLE 總台數，依 AssetType 落到不同科目：
-  模具 → b5 模具費用(銷貨成本)          設備 → b8 新增專屬設備(銷貨成本)
-  費用 → f3 開發費用-CMC；Department = 「BASE廠開發費」時落 f4 開發費用-BASE廠
-```
+標準範本的預設公式跟 v1 寫死的算法逐格相同，`tools/verify-gatef.js` 用實際 Gate F 表驗算 317 格。
+科目設定頁存檔前會跑 `chartProblems_()`：語法錯誤、引用不存在的科目/名稱、循環引用(error，擋下存檔)；
+沒有被任何小計算進營業淨利的科目(warning)。
 
----
+`calculatePLAllVehicles` / `calculateComparison` / `getGateReport` 都建在 `calculatePLCore_` 之上，
+同一次執行內以「情境|車系」記住結果。比較不同車型時，科目依代碼取聯集(`unionLineDefs_`)。
+
+DevInvestment → 單台攤提：
+```
+LIFE CYCLE 總台數 = 情境的攤提基準(AmortMonthlyVolume × 12 × AmortLifeCycleYears)，留空用 Σ(月銷量 × 12 × LC年限)
+低減後金額 = Amount × 匯率 × (1 - ChallengeReductionPct/100)  (現況情境不低減)
+VehicleScope 留白 → ÷ LC 總台數，每個車系都分攤
+VehicleScope 有值 → ÷ 這些車系的攤提台數合計，只加在這些車系
+攤到哪個科目 = TargetLineCode(計算來源為 DEV_AMORT 的科目)
+```
 
 ## 5. 前端頁面設計
+
+**v2 共用元件**（`script.html` 開頭）：`toast()` 右上角提示、`openModal()` 對話框(取代 prompt/confirm)、
+`markDirty()/clearDirty()` 未儲存提醒(底部浮動儲存列、Ctrl+S、切頁/切車型前確認、關閉視窗前警告)、
+`makeSortable()` 拖曳排序(指標事件，滑鼠/觸控都可以；把手取得焦點時 Alt+↑↓ 也能移動；巢狀清單用 `direct`)。
+所有原本的 ▲▼/◀▶ 移動鈕都換成拖曳：車系/情境(放開立即 `setVehicleOrder`/`setScenarioOrder`)、
+科目樹(`setLineOrder`)、開發總投列、比較欄位、改善作法(跟著頁面儲存)。
+
+v2 新頁面：「科目與公式」(`renderChartPanel`：科目樹 + 編輯器 + 即時試算 `previewLineFormula`)、
+「GATE 報告」(`renderReportPanel`：投影片式版面、`@media print` 每張一頁 16:9、複製表格成 TSV)。
+
 
 所有頁面都是表格式編輯：一次看到全部資料、直接在格子裡改、最後按一次「儲存」整批送出。
 沒有「先按編輯才能改某一列」的模式 —— 那會讓一次要調十幾個數字的作業變成點十幾次編輯。

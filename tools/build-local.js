@@ -21,7 +21,7 @@ const LOCAL_DIR = path.join(REPO, 'local');
 const OUT_FILE = path.join(REPO, 'dist', 'FS-local.html');
 
 // 後端檔案(依載入順序)
-const BACKEND_FILES = ['Constants.gs', 'Utils.gs', 'DataService.gs', 'CalcEngine.gs', 'SetupSheets.gs'];
+const BACKEND_FILES = ['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'SetupSheets.gs'];
 // .gs 用到的 Apps Script 全域物件，由 local/gas-shim.js 的 createGlobals() 提供
 const GAS_GLOBALS = ['SpreadsheetApp', 'LockService', 'CacheService', 'Utilities', 'Session', 'Logger'];
 const EXPORTED_CONSTS = ['SCHEMA', 'TEXT_COLUMNS', 'PL_LINE_ITEMS', 'LINE_CODE_PREFIX'];

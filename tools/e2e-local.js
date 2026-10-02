@@ -75,6 +75,36 @@ async function main() {
   await page.waitForFunction(() => /營業淨利/.test(document.getElementById('dashboard-content').textContent || ''), null, { timeout: 15000 });
   assert(!(await page.isVisible('#global-error')), '儀表板顯示錯誤：' + (await page.textContent('#global-error')));
 
+  // v2：GATE 報告每一張投影片都畫得出來
+  await page.click('nav button[data-tab="report"]');
+  await page.waitForFunction(() => document.querySelectorAll('#panel-report .slide').length >= 6, null, { timeout: 15000 });
+  assert(/目標成本作法/.test(await page.textContent('#panel-report')), 'GATE 報告應該有「目標成本作法」');
+  assert(/差距/.test(await page.textContent('#panel-report .slide')), '報告第一頁應該有現況與目標的差距');
+
+  // v2：科目與公式 —— 改季Margin 的公式，Ctrl+S 存檔，後端真的換成新公式
+  await page.click('nav button[data-tab="lineitems"]');
+  await page.waitForSelector('.tree-row');
+  await page.click('.tree-row:has-text("季Margin")');
+  await page.waitForSelector('#ce-formula');
+  await page.fill('#ce-formula', 'P8 * 1%');
+  await page.waitForFunction(() => /公式正確/.test((document.getElementById('ce-status') || {}).textContent || ''));
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'));
+  const d4 = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DA')));
+  assert(d4.find(l => l.LineCode === 'd4').Formula === 'P8 * 1%', '科目與公式存檔後，後端的公式應該換成新的');
+  const de4 = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DE')));
+  assert(de4.find(l => l.LineCode === 'd4').Formula === 'P8 * [季Margin率]', '改 DA 的公式不該影響 DE 的科目表');
+
+  // v2：拖曳把手可以用鍵盤 Alt+↓ 調整車系順序，放開(按下)就存檔
+  await page.click('nav button[data-tab="vehicles"]');
+  await page.waitForSelector('#entity-body-vehicles .drag-handle');
+  const before = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getVehicles('DA')));
+  await page.focus('#entity-body-vehicles tr:first-child .drag-handle');
+  await page.keyboard.press('Alt+ArrowDown');
+  await page.waitForTimeout(500);
+  const after = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getVehicles('DA')));
+  assert(after[1].VehicleID === before[0].VehicleID, '用鍵盤把第一個車系往下移，應該立即存成新的順序');
+
   // 透過前端同一條路徑(google.script.run)改資料：新增車型 DQ
   await page.evaluate(() => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail)
     .saveVehicleTypeGrid([{ VehicleTypeID: 'DQ', Notes: '端對端測試' }])));
@@ -153,7 +183,7 @@ async function main() {
     failures.forEach(f => console.log('  ✗ ' + f));
     process.exit(1);
   }
-  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、暫存/匯出/匯入/合併/多分頁保護）。`);
+  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
 }
 
 main().catch(e => { console.error(e); if (ERRS.length) console.error('頁面錯誤：', ERRS.join(' | ')); process.exit(1); });

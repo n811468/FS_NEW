@@ -24,7 +24,7 @@ function assertEqual(actual, expected, message) {
   }
 }
 
-const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'DataService.gs', 'CalcEngine.gs', 'SetupSheets.gs']);
+const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'SetupSheets.gs']);
 gs.setupSpreadsheet();
 gs.saveVehicleType({ VehicleTypeID: 'DA' });
 gs.saveVehicleType({ VehicleTypeID: 'DE' });
@@ -91,10 +91,10 @@ check('科目直接改名/改排序，一次儲存就生效', () => {
   assertEqual(after.SortOrder, 26.5, '改過的排序值');
 });
 
-check('結構科目與自動計算科目不可刪除，父科目也改不掉', () => {
+check('結構科目、被公式引用的科目不可刪除；公式科目的父科目在表格存檔時改不掉', () => {
   let threw = 0;
   try { gs.deletePLLineItem('B'); } catch (e) { threw++; }
-  try { gs.deletePLLineItem('b13'); } catch (e) { threw++; }
+  try { gs.deletePLLineItem('P8'); } catch (e) { threw++; }     // P9/b13/d4 的公式都引用 P8
   assertEqual(threw, 2, '應該擋下的刪除次數');
 
   gs.savePLLineItemGrid([{ LineCode: 'b13', LineName: '貨物稅', ParentLine: 'E', SortOrder: 34 }]);
@@ -158,34 +158,29 @@ check('儀表板的小計驗算對正常資料不應報警', () => {
   assert(cmp.lines.some(l => l.isSubtotal), '應該標示出小計科目');
 });
 
-check('舊版留下的科目名稱會自動對回程式碼（欄位名稱不再跟數字對不起來）', () => {
-  // 重現使用者 Sheet 的狀態：舊版售價結構只有 8 列，P2 是廢車處理費、P7 才是廠價。
-  // 改版重新編號後 seedPLLineItems_ 不覆蓋既有名稱，於是新代碼配著舊名稱留在 Sheet 上。
-  const stale = {
-    P2: '廢車處理費(換算含稅)', P3: '實際零售價(含稅)(=P1-P2)', P4: '營業稅(內含反推)',
-    P5: '銷售佣金', P6: '實際零售價(未稅)', P7: '廠價(未稅)', P8: '強配件售價',
-    f3: '車型專案開發費用-CMC(單台攤提)'
-  };
-  Object.keys(stale).forEach(code => {
-    const row = gs.getPLLineItems().filter(d => d.LineCode === code)[0];
-    gs.upsertRow_('PLLineItems', 'LineCode', Object.assign({}, row, { LineName: stale[code] }));
+check('舊版全域科目表開頁時自動升級：名稱去掉公式、補上公式欄位、每個車型各一份，數字不變', () => {
+  const before = gs.calculatePL(base.ScenarioID, 'V1').lines;
+  // 重現舊版 Sheet：沒有 LineID/CalcType/Formula，名稱裡寫公式
+  const legacy = gs.getPLLineItems().map(d => {
+    const row = Object.assign({}, d, { LineID: '', VehicleTypeID: '', CalcType: '', Formula: '' });
+    if (gs.LEGACY_LINE_NAMES[d.LineCode]) row.LineName = gs.LEGACY_LINE_NAMES[d.LineCode];
+    return row;
   });
-  assertEqual(gs.getPLLineItems().filter(d => d.LineCode === 'P2')[0].LineName, stale.P2, '前置：P2 應為舊名稱');
+  gs.rewriteTable_('PLLineItems', legacy);
+  assertEqual(gs.getPLLineItems().filter(d => d.LineCode === 'P8')[0].LineName, '廠價(未稅)(=P5-P6-P7)', '前置：舊名稱');
 
-  // 開啟頁面就會自動修好，使用者不必知道有維護選單
   gs.getBootstrap('DA');
 
-  const nameOf = code => gs.getPLLineItems().filter(d => d.LineCode === code)[0].LineName;
-  assert(nameOf('P2').indexOf('強配件售價') === 0, `P2 應為強配件售價，實際 ${nameOf('P2')}`);
-  assert(nameOf('P4').indexOf('廢車處理費') === 0, `P4 應為廢車處理費，實際 ${nameOf('P4')}`);
-  assert(nameOf('P6').indexOf('營業稅') === 0, `P6 應為營業稅，實際 ${nameOf('P6')}`);
-  assert(nameOf('P8').indexOf('廠價(未稅)') === 0, `P8 應為廠價，實際 ${nameOf('P8')}`);
-  assert(nameOf('f3').indexOf('開發總投') !== -1, `f3 名稱應說明攤提來源，實際 ${nameOf('f3')}`);
-
-  // 名稱與數字必須指的是同一件事：P8 的數字就是廠價 = P5-P6-P7
-  const lines = gs.calculatePL(base.ScenarioID, 'V1').lines;
-  const v = code => lines.filter(l => l.LineCode === code)[0].Amount;
-  assert(Math.abs(v('P8') - (v('P5') - v('P6') - v('P7'))) < 0.01, 'P8 的數字應為 P5-P6-P7');
+  const nameOf = code => gs.getPLLineItems('DA').filter(d => d.LineCode === code)[0].LineName;
+  assertEqual(nameOf('P8'), '廠價(未稅)', 'P8 名稱');
+  assertEqual(nameOf('b13'), '貨物稅', 'b13 名稱');
+  assertEqual(gs.getPLLineItems('DA').filter(d => d.LineCode === 'P8')[0].Formula, 'P5 - P6 - P7', 'P8 公式');
+  assert(gs.hasOwnChart_('DA'), 'DA 應該有自己的一份科目表');
+  const after = gs.calculatePL(base.ScenarioID, 'V1').lines;
+  before.forEach(l => {
+    const m = after.filter(x => x.LineCode === l.LineCode)[0];
+    assert(m && Math.abs(m.Amount - l.Amount) < 0.01, `${l.LineCode} 升級前後應相同：${l.Amount} vs ${m && m.Amount}`);
+  });
 });
 
 check('明細科目的名稱不會被自動修復蓋掉', () => {
@@ -260,9 +255,10 @@ check('銷貨成本頁看得到自動計算科目與貨物稅計算過程', () =
   assert(autoCodes.indexOf('b13') !== -1, '貨物稅(b13)應該出現在自動計算科目');
   assert(autoCodes.indexOf('b5') !== -1, '模具費用(b5)應該出現在自動計算科目');
   assert(matrix.autoValues.b13.V1 > 0, 'V1 的貨物稅應該算得出數字');
-  const detail = matrix.commodityTaxDetail.V1;
-  assert(detail && detail.tax === matrix.autoValues.b13.V1, '貨物稅計算過程的 tax 應該跟 autoValues 的金額一致');
-  assert(detail.deductTotal > 0, '完稅價格的扣除項(廣宣/促銷/批標售/季Margin)應該有值');
+  const trace = matrix.autoTraces.b13.V1;
+  assert(trace && trace.kind === 'formula', '貨物稅應附公式計算過程');
+  assert(trace.refs['TAXDEDUCT()'] > 0, '完稅價格的扣除項(廣宣/促銷/批標售/季Margin)應該有值');
+  assert(trace.refs.P8 > 0, '計算過程應列出廠價');
 });
 
 check('車系可以自訂排列順序，影響銷貨成本矩陣等所有用車系排欄位的地方', () => {

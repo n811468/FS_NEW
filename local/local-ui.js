@@ -202,8 +202,12 @@
 
   host.onChange(render);
   window.addEventListener('DOMContentLoaded', function () {
+    var slot = document.getElementById('local-bar-slot');
     var header = document.querySelector('header');
-    if (header && header.parentNode) {
+    if (slot) {
+      slot.appendChild(bar);
+      slot.appendChild(banner);
+    } else if (header && header.parentNode) {
       header.parentNode.insertBefore(bar, header.nextSibling);
       bar.parentNode.insertBefore(banner, bar.nextSibling);
     } else {

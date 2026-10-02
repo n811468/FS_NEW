@@ -25,56 +25,44 @@ const SCENARIO_COPY_PARTS = [
   { key: 'costofsales', label: '銷貨成本' },
   { key: 'devinvestment', label: '開發總投' },
   { key: 'operatingexpense', label: '營業費用' },
-  { key: 'parameters', label: '費率/匯率' }
+  { key: 'parameters', label: '費率/匯率' },
+  { key: 'linenotes', label: '科目說明' },
+  { key: 'actions', label: '改善作法' }
 ];
 
 const ENTITIES = {
   vehicletypes: {
     label: '車型主檔', pk: 'VehicleTypeID',
     getFn: 'getVehicleTypes', saveGridFn: 'saveVehicleTypeGrid', deleteFn: 'deleteVehicleType',
-    renameFn: 'renameVehicleType', scopedBy: null,
+    renameFn: 'renameVehicleType', scopedBy: null, createUi: 'vehicleType',
+    intro: '車型是最上層的單位。<b>每個車型各自有一份科目表</b>（科目在不同車型間差異很大，不再共用同一份），建立車型時可以選擇從標準範本或從既有車型複製。',
     columns: [
       { name: 'VehicleTypeID', label: '車型代號', lockAfterCreate: true, width: 140 },
-      { name: 'Notes', label: '備註', width: 360 }
+      { name: 'Notes', label: '備註', width: 420 }
     ]
   },
   vehicles: {
     label: '車系設定', pk: 'VehicleID',
     getFn: 'getVehicles', saveGridFn: 'saveVehicleGrid', deleteFn: 'deleteVehicle',
-    renameFn: 'renameVehicle', scopedBy: 'vehicleType',
+    renameFn: 'renameVehicle', scopedBy: 'vehicleType', sortable: 'setVehicleOrder',
+    intro: '車系是車型底下的細車型（如 3人貨車、9人客貨車）。拖曳 ⠿ 調整順序，放開就生效 —— 所有頁面的車系欄位都照這個順序排。',
     columns: [
       { name: 'VehicleID', label: '車系代號', lockAfterCreate: true, width: 140 },
-      { name: 'VehicleCode', label: '車系名稱', width: 220 },
-      { name: 'SortOrder', label: '排序', type: 'number', width: 70 },
-      { name: 'Notes', label: '備註', width: 320 }
+      { name: 'VehicleCode', label: '車系名稱', width: 240 },
+      { name: 'Notes', label: '備註', width: 360 }
     ]
   },
   scenarios: {
     label: '情境設定', pk: 'ScenarioID',
     getFn: 'getScenarios', saveGridFn: 'saveScenarioGrid', deleteFn: 'deleteScenario',
-    scopedBy: 'vehicleType', createUi: 'scenario',
+    scopedBy: 'vehicleType', createUi: 'scenario', sortable: 'setScenarioOrder',
+    intro: '同一個 GATE 底下可以有多個情境（現況 / 目標 / 前回）。目標情境才有挑戰低減目標；新情境可以整批帶入既有情境的資料再調整。拖曳 ⠿ 調整情境選單的順序。',
     columns: [
       { name: 'Gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, width: 110 },
       { name: 'ScenarioName', label: '情境名稱', width: 200 },
       { name: 'ScenarioType', label: '情境性質', type: 'select', options: SCENARIO_TYPES, width: 90 },
       { name: 'CreatedDate', label: '建立日期', type: 'date', width: 140 },
-      { name: 'Notes', label: '備註', width: 280 }
-    ]
-  },
-  lineitems: {
-    label: '科目設定', pk: 'LineCode',
-    getFn: 'getPLLineItems', saveGridFn: 'savePLLineItemGrid', deleteFn: 'deletePLLineItem',
-    scopedBy: null,
-    restorable: true,
-    columns: [
-      { name: 'LineCode', label: '科目代碼', auto: true, width: 80 },
-      // 自動計算科目與結構科目的名稱寫的就是它的公式，由程式決定；改了只會讓名稱跟數字對不起來
-      { name: 'LineName', label: '科目名稱', width: 280, lockIf: r => r.__existing && isFixedLineItem(r) },
-      { name: 'ParentLine', label: '父科目', type: 'select', options: LINE_PARENT_OPTIONS, width: 190,
-        lockIf: r => r.__existing && isFixedLineItem(r) },
-      { name: 'Category', label: '分類', width: 110 },
-      { name: 'SortOrder', label: '排序值', type: 'number', width: 80 },
-      { name: 'AutoSource', label: '自動計算來源', readOnly: true, width: 150 }
+      { name: 'Notes', label: '備註', width: 300 }
     ]
   }
 };
@@ -166,34 +154,290 @@ function safeHandler(fn) {
     catch (e) { showGlobalError(e); }
   };
 }
+/** 狀態訊息：處理中的文字留在頁面上；成功/失敗另外跳 toast(看得到又不會一直佔位置) */
 function setStatus(key, text, cls) {
   const el = document.getElementById('status-' + key);
-  if (el) { el.textContent = text; el.className = 'status-msg' + (cls ? ' ' + cls : ''); }
+  if (el) {
+    el.textContent = cls ? '' : text;
+    el.className = 'status-msg';
+  }
+  if (cls === 'ok') toast(text, 'ok');
+  else if (cls === 'err') toast(String(text).replace(/^錯誤：/, ''), 'err');
 }
 /** 表格編輯頁的共用外框：標題 + 工具列 + 狀態 + 內容 */
-function gridShell(key, title) {
+function gridShell(key, title, intro) {
   return `
-    <h3>${title}</h3>
+    ${intro ? `<p class="page-intro">${intro}</p>` : ''}
     <div id="toolbar-${key}" class="toolbar"></div>
     <div id="status-${key}" class="status-msg"></div>
     <div id="grid-${key}"></div>
   `;
+}
+function emptyStateHtml(icon, title, text, actionHtml) {
+  return `<div class="card empty-state"><div class="empty-icon">${icon}</div><h4>${esc(title)}</h4><p>${text}</p>${actionHtml || ''}</div>`;
 }
 function scenarioLabel(s) {
   return [s.Gate, s.ScenarioName].filter(v => v).join(' ') || s.ScenarioID;
 }
 function requireScope(key, needScenario) {
   const panel = document.getElementById('panel-' + key);
-  if (!currentVehicleTypeId) { panel.innerHTML = '<p class="muted">請先在上方選擇車型</p>'; return false; }
-  if (needScenario && !currentScenarioId) { panel.innerHTML = '<p class="muted">請先在上方選擇情境</p>'; return false; }
+  if (!currentVehicleTypeId) {
+    panel.innerHTML = emptyStateHtml('🚗', '還沒有選擇車型', '請先在右上角選擇車型；還沒有車型的話，到「車型主檔」建立一個。',
+      `<button class="btn" onclick="switchTab('vehicletypes')">前往車型主檔</button>`);
+    return false;
+  }
+  if (needScenario && !currentScenarioId) {
+    panel.innerHTML = emptyStateHtml('🧭', '還沒有選擇情境', '請先在右上角選擇情境；這個車型還沒有情境的話，到「情境設定」建立。',
+      `<button class="btn" onclick="switchTab('scenarios')">前往情境設定</button>`);
+    return false;
+  }
   return true;
 }
 
+/* ================= v2 共用介面元件：Toast / 對話框 / 未儲存提醒 / 拖曳排序 ================= */
+
+/** 右上角短暫提示：儲存成功、錯誤等不必停在畫面上的訊息 */
+function toast(text, kind, ms) {
+  const box = document.getElementById('toasts');
+  if (!box || !text) return;
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind || '');
+  el.textContent = text;
+  box.appendChild(el);
+  setTimeout(() => { el.classList.add('hide'); setTimeout(() => el.remove(), 250); }, ms || (kind === 'err' ? 6000 : 2600));
+}
+
+/**
+ * 對話框：取代瀏覽器的 prompt()/confirm()（那兩個長得很突兀、不能放說明、也不能一次問好幾個欄位）。
+ * openModal({ title, body(HTML), okText, danger, wide, fields:[{name,label,value,type,options,help,placeholder}] })
+ * 回傳 Promise：按確定 → 欄位值物件(沒有欄位就是 true)；按取消/Esc → null。
+ */
+function openModal(opts) {
+  return new Promise(resolve => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'modal' + (opts.wide ? ' wide' : '');
+    const fields = opts.fields || [];
+    const fieldHtml = fields.map((f, i) => {
+      const id = 'mf-' + i;
+      let input;
+      if (f.type === 'select') {
+        input = `<select id="${id}">${(f.options || []).map(o => {
+          const [v, t] = Array.isArray(o) ? o : [o, o];
+          return `<option value="${esc(v)}"${String(v) === String(f.value || '') ? ' selected' : ''}>${esc(t)}</option>`;
+        }).join('')}</select>`;
+      } else if (f.type === 'textarea') {
+        input = `<textarea id="${id}" rows="3" placeholder="${esc(f.placeholder || '')}">${esc(f.value || '')}</textarea>`;
+      } else if (f.type === 'checks') {
+        input = `<div class="chip-list" id="${id}">${(f.options || []).map(o => `<label class="chk"><input type="checkbox" value="${esc(o[0])}"${(f.value || []).indexOf(o[0]) !== -1 ? ' checked' : ''}> ${esc(o[1])}</label>`).join('')}</div>`;
+      } else {
+        input = `<input id="${id}" type="${f.type || 'text'}" step="any" value="${esc(f.value === undefined ? '' : f.value)}" placeholder="${esc(f.placeholder || '')}">`;
+      }
+      return `<label class="field"><span>${esc(f.label)}</span>${input}${f.help ? `<span class="help">${esc(f.help)}</span>` : ''}</label>`;
+    }).join('');
+    dlg.innerHTML = `
+      <form method="dialog">
+        <div class="modal-head"><h3>${esc(opts.title || '')}</h3></div>
+        <div class="modal-body">${opts.body || ''}${fieldHtml}</div>
+        <div class="modal-foot">
+          ${opts.noCancel ? '' : `<button type="button" class="btn secondary" value="cancel">${esc(opts.cancelText || '取消')}</button>`}
+          <button type="submit" class="btn${opts.danger ? ' danger solid' : ''}" value="ok">${esc(opts.okText || '確定')}</button>
+        </div>
+      </form>`;
+    document.body.appendChild(dlg);
+    let done = false;
+    const finish = val => { if (done) return; done = true; dlg.close(); dlg.remove(); resolve(val); };
+    dlg.querySelector('button[value=cancel]') && dlg.querySelector('button[value=cancel]').addEventListener('click', () => finish(null));
+    dlg.addEventListener('cancel', e => { e.preventDefault(); finish(null); });
+    dlg.querySelector('form').addEventListener('submit', e => {
+      e.preventDefault();
+      if (!fields.length) { finish(true); return; }
+      const out = {};
+      fields.forEach((f, i) => {
+        const el = dlg.querySelector('#mf-' + i);
+        out[f.name] = f.type === 'checks' ? Array.from(el.querySelectorAll('input:checked')).map(x => x.value) : el.value;
+      });
+      if (opts.validate) {
+        const msg = opts.validate(out);
+        if (msg) { toast(msg, 'err'); return; }
+      }
+      finish(out);
+    });
+    dlg.showModal();
+    const first = dlg.querySelector('input,select,textarea');
+    if (first) { first.focus(); if (first.select) first.select(); }
+  });
+}
+function confirmModal(title, body, okText, danger) {
+  return openModal({ title, body: `<p>${body}</p>`, okText: okText || '確定', danger: !!danger });
+}
+
+/**
+ * 未儲存的修改：表格編輯頁一改東西就在畫面底部浮出「有尚未儲存的修改」+ 儲存/放棄，
+ * 不必回到頁首找儲存鈕；Ctrl+S 也能存。切換分頁/車型/情境、關閉視窗前會先確認，不會默默把改到一半的東西丟掉。
+ */
+let dirtyState_ = null;   // { key, save, discard, count }
+function markDirty(key, save, discard) {
+  if (!dirtyState_ || dirtyState_.key !== key) dirtyState_ = { key, save, discard, count: 0 };
+  dirtyState_.save = save; dirtyState_.discard = discard || dirtyState_.discard;
+  dirtyState_.count++;
+  const bar = document.getElementById('savebar');
+  if (bar) bar.classList.add('show');
+}
+function clearDirty() {
+  dirtyState_ = null;
+  const bar = document.getElementById('savebar');
+  if (bar) bar.classList.remove('show');
+}
+function isDirty_() { return !!dirtyState_; }
+/** 要離開目前畫面前問一下；回傳 Promise<boolean>(true = 可以離開) */
+function confirmLeave_() {
+  if (!dirtyState_) return Promise.resolve(true);
+  return openModal({
+    title: '有尚未儲存的修改', body: '<p>這一頁還有修改沒有儲存，要先儲存嗎？</p>',
+    okText: '放棄修改並離開', danger: true, cancelText: '留在這一頁'
+  }).then(ok => { if (ok) clearDirty(); return !!ok; });
+}
+function installSaveBar_() {
+  const save = document.getElementById('savebar-save');
+  const discard = document.getElementById('savebar-discard');
+  if (save) save.onclick = () => { if (dirtyState_ && dirtyState_.save) dirtyState_.save(); };
+  if (discard) discard.onclick = () => {
+    const d = dirtyState_;
+    clearDirty();
+    if (d && d.discard) d.discard(); else renderTab(currentTab);
+  };
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      if (dirtyState_ && dirtyState_.save) dirtyState_.save();
+    }
+  });
+  window.addEventListener('beforeunload', e => { if (dirtyState_) { e.preventDefault(); e.returnValue = ''; } });
+}
+
+/**
+ * 拖曳排序(全系統共用)：取代一次只能移一格的 ▲▼/◀▶ 按鈕。
+ *   - 抓住 ⠿ 把手拖到想要的位置放開(滑鼠、觸控都可以)，拖曳中其他列即時讓位
+ *   - 鍵盤：把手取得焦點後 Alt+↑/↓(或 ←/→) 一次移一格
+ * makeSortable(container, { items: '選擇器', handle: '選擇器', onEnd(keys, moved) })
+ *   items 要有 data-key；放開後依畫面順序回傳 key 陣列，由呼叫端決定要不要立即存檔。
+ *   group(item) 可選：回傳群組鍵，只允許在同一群組內移動(科目樹的同一個父科目底下)。
+ */
+function makeSortable(container, opts) {
+  if (!container || !container.addEventListener || container.__sortable) return;
+  container.__sortable = true;
+  const itemSel = opts.items, handleSel = opts.handle || '.drag-handle';
+  // direct：只管直接子元素(巢狀清單如科目樹，每一層各自排序，互不干擾)
+  const itemsNow = () => Array.from(container.querySelectorAll(itemSel)).filter(el => !opts.direct || el.parentNode === container);
+  const keysNow = () => itemsNow().map(el => el.getAttribute('data-key'));
+  let drag = null;
+  const groupOf = el => opts.group ? opts.group(el) : '';
+
+  container.addEventListener('pointerdown', e => {
+    const handle = e.target.closest(handleSel);
+    if (!handle || !container.contains(handle) || e.button > 0) return;
+    const item = handle.closest(itemSel);
+    if (!item || (opts.direct && item.parentNode !== container)) return;
+    e.preventDefault();
+    drag = { item, startY: e.clientY, startX: e.clientX, before: keysNow().join('\u0001'), group: groupOf(item), moved: false };
+    item.classList.add('sort-dragging');
+    document.body.classList.add('sorting');
+    hideTooltip_ && hideTooltip_();
+    handle.setPointerCapture && handle.setPointerCapture(e.pointerId);
+  });
+  container.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const horizontal = !!opts.horizontal;
+    const siblings = itemsNow().filter(el => el !== drag.item && groupOf(el) === drag.group);
+    const pos = horizontal ? e.clientX : e.clientY;
+    for (const sib of siblings) {
+      const r = sib.getBoundingClientRect();
+      const mid = horizontal ? r.left + r.width / 2 : r.top + r.height / 2;
+      const isAfterDrag = drag.item.compareDocumentPosition(sib) & Node.DOCUMENT_POSITION_FOLLOWING;
+      if (isAfterDrag && pos > mid) { insertAfterGroupBlock_(sib, drag.item, opts); drag.moved = true; break; }
+      if (!isAfterDrag && pos < mid) { sib.parentNode.insertBefore(drag.item, sib); moveTrailing_(drag.item, opts); drag.moved = true; break; }
+    }
+  });
+  const end = () => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    d.item.classList.remove('sort-dragging');
+    document.body.classList.remove('sorting');
+    const after = keysNow();
+    if (after.join('\u0001') !== d.before) {
+      d.item.classList.add('sort-flash');
+      setTimeout(() => d.item.classList.remove('sort-flash'), 900);
+      opts.onEnd(after, d.item.getAttribute('data-key'));
+    }
+  };
+  container.addEventListener('pointerup', end);
+  container.addEventListener('pointercancel', end);
+  container.addEventListener('keydown', e => {
+    const handle = e.target.closest && e.target.closest(handleSel);
+    if (!handle || !e.altKey) return;
+    const dir = (e.key === 'ArrowUp' || e.key === 'ArrowLeft') ? -1 : (e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : 0;
+    if (!dir) return;
+    e.preventDefault();
+    const item = handle.closest(itemSel);
+    if (!item || (opts.direct && item.parentNode !== container)) return;
+    const g = groupOf(item);
+    const peers = itemsNow().filter(el => groupOf(el) === g);
+    const idx = peers.indexOf(item), j = idx + dir;
+    if (j < 0 || j >= peers.length) return;
+    // 真的把 DOM 搬過去(有些呼叫端是照畫面順序讀，如科目樹)，再回傳新順序
+    const ref = peers[j];
+    if (dir < 0) ref.parentNode.insertBefore(item, ref);
+    else ref.parentNode.insertBefore(item, ref.nextSibling);
+    const key = item.getAttribute('data-key');
+    opts.onEnd(keysNow(), key, true);
+    // 重畫之後把焦點放回同一個把手，可以連續按 Alt+↑↓
+    setTimeout(() => {
+      const again = document.querySelector(`[data-key="${CSS.escape(key)}"] ${handleSel}`);
+      if (again) again.focus();
+    }, 700);
+  });
+}
+/** 科目樹拖曳：一個父科目連同它底下的子科目要一起搬(items 用 data-block 標出區塊成員) */
+function insertAfterGroupBlock_(sib, item, opts) {
+  let ref = sib;
+  if (opts.blockOf) { const tail = opts.blockOf(sib); if (tail) ref = tail; }
+  ref.parentNode.insertBefore(item, ref.nextSibling);
+  moveTrailing_(item, opts);
+}
+function moveTrailing_(item, opts) {
+  if (!opts.trailingOf) return;
+  const trail = opts.trailingOf(item);
+  let ref = item;
+  trail.forEach(el => { ref.parentNode.insertBefore(el, ref.nextSibling); ref = el; });
+}
+/** ⠿ 拖曳把手的 HTML(可以用鍵盤 Alt+↑↓ 操作) */
+function dragHandleHtml(label) {
+  return `<span class="drag-handle" tabindex="0" role="button" aria-label="${esc(label || '拖曳調整順序')}" data-tip="拖曳調整順序（或 Alt+↑↓）">⠿</span>`;
+}
+
+const PAGE_META = {
+  dashboard: ['結果呈現', '損益儀表板'], report: ['結果呈現', 'GATE 審議報告'],
+  salesmix: ['輸入資料', '銷售構成與售價'], costofsales: ['輸入資料', '銷貨成本'],
+  devinvestment: ['輸入資料', '開發總投'], operatingexpense: ['輸入資料', '營業費用'],
+  lineitems: ['計算設定', '科目與公式'], paramrates: ['計算設定', '參數與比率'], paramfx: ['計算設定', '匯率設定'],
+  vehicletypes: ['主檔', '車型主檔'], vehicles: ['主檔', '車系設定'], scenarios: ['主檔', '情境設定']
+};
+
 /* ---------------- 頁籤 / 上方選單 ---------------- */
-function switchTab(key) {
+function switchTab(key, force) {
+  if (!force && key !== currentTab && isDirty_()) {
+    confirmLeave_().then(ok => { if (ok) switchTab(key, true); });
+    return;
+  }
+  clearDirty();
   currentTab = key;
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === key));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.tab === key));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + key));
+  const meta = PAGE_META[key] || ['', ''];
+  const crumb = document.getElementById('page-crumb'), title = document.getElementById('page-title');
+  if (crumb) crumb.textContent = meta[0];
+  if (title) title.textContent = meta[1];
+  document.body.classList.remove('nav-open');
   saveAppState_();
   renderTab(key);
 }
@@ -223,6 +467,8 @@ function loadAppState_() {
 function renderTab(key) {
   if (silent) return;
   if (key === 'dashboard') loadComparisonPicker();
+  else if (key === 'report') renderReportPanel();
+  else if (key === 'lineitems') renderChartPanel();
   else if (GRID_PANELS[key]) window[GRID_PANELS[key]]();
   else if (ENTITIES[key]) renderEntityPanel(key);
 }
@@ -269,13 +515,21 @@ function setCurrentScenario(value) {
   currentScenario = scenarioCache.filter(s => s.ScenarioID === value)[0] || null;
   const badge = document.getElementById('scenario-type-badge');
   if (badge) {
-    badge.textContent = currentScenario ? (currentScenario.ScenarioType || '現況') : '';
-    badge.style.display = currentScenario ? 'inline-block' : 'none';
+    const t = currentScenario ? (currentScenario.ScenarioType || '現況') : '';
+    badge.textContent = t;
+    badge.className = 'type-badge t-' + t;
+    badge.style.display = currentScenario ? 'inline-flex' : 'none';
   }
   saveAppState_();
 }
 
 function onVehicleTypeChange(value) {
+  if (isDirty_()) {
+    const sel = document.getElementById('vehicletype-selector');
+    sel.value = currentVehicleTypeId;
+    confirmLeave_().then(ok => { if (ok) { sel.value = value; onVehicleTypeChange(value); } });
+    return;
+  }
   currentVehicleTypeId = value;
   currentScenarioId = '';
   currentScenario = null;
@@ -305,6 +559,12 @@ function loadScenarioSelector(preferredId) {
 }
 
 function onScenarioChange(value) {
+  if (isDirty_()) {
+    const sel = document.getElementById('scenario-selector');
+    sel.value = currentScenarioId;
+    confirmLeave_().then(ok => { if (ok) { sel.value = value; onScenarioChange(value); } });
+    return;
+  }
   setCurrentScenario(value);
   renderTab(currentTab);
 }
@@ -316,11 +576,8 @@ let pendingStatus = null;   // 重畫表格後才顯示的訊息（例如建立�
 function renderEntityPanel(key) {
   const cfg = ENTITIES[key];
   const panel = document.getElementById('panel-' + key);
-  if (cfg.scopedBy === 'vehicleType' && !currentVehicleTypeId) {
-    panel.innerHTML = '<p class="muted">請先在上方選擇車型</p>';
-    return;
-  }
-  panel.innerHTML = gridShell(key, cfg.label);
+  if (cfg.scopedBy === 'vehicleType' && !requireScope(key, false)) return;
+  panel.innerHTML = gridShell(key, cfg.label, cfg.intro);
   loadEntityData(key);
 }
 
@@ -331,7 +588,11 @@ function loadEntityData(key) {
   const cfg = ENTITIES[key];
   const args = cfg.scopedBy === 'vehicleType' ? [currentVehicleTypeId] : [];
   const cacheKey = panelCacheKey_(key, entityCacheScope_(cfg));
-  const apply = rows => { entityRows[key] = (rows || []).map(r => Object.assign({}, r, { __existing: true })); drawEntityGrid(key); };
+  const apply = rows => {
+    if (isDirty_()) return;   // 使用者已經開始改了，背景回來的資料不要蓋掉畫面
+    entityRows[key] = (rows || []).map(r => Object.assign({}, r, { __existing: true }));
+    drawEntityGrid(key);
+  };
   if (panelDataCache_[cacheKey]) apply(panelDataCache_[cacheKey]);
   google.script.run
     .withSuccessHandler(safeHandler(rows => { panelDataCache_[cacheKey] = rows; apply(rows); }))
@@ -342,31 +603,58 @@ function loadEntityData(key) {
 function drawEntityGrid(key) {
   const cfg = ENTITIES[key];
   const rows = entityRows[key] || [];
+  const toolbar = document.getElementById('toolbar-' + key);
+  if (!toolbar) return;
 
-  document.getElementById('toolbar-' + key).innerHTML = `
-    <button type="button" class="btn" onclick="saveEntityGrid('${key}')">儲存</button>
-    ${cfg.createUi === 'scenario' ? '' :
-      `<button type="button" class="btn secondary" onclick="addEntityRow('${key}')">新增一列</button>`}
-    ${cfg.restorable ? '<button type="button" class="btn secondary" onclick="restoreBuiltInLines()">恢復內建科目預設值</button>' : ''}
-  ` + (cfg.createUi === 'scenario' ? scenarioToolbarHtml() : '');
+  toolbar.innerHTML = (cfg.createUi === 'scenario' ? '' : cfg.createUi === 'vehicleType'
+    ? `<button type="button" class="btn" onclick="createVehicleTypeDialog()">＋ 新增車型</button>`
+    : `<button type="button" class="btn" onclick="addEntityRow('${key}')">＋ 新增一列</button>`) +
+    `<span class="spacer"></span><button type="button" class="btn secondary" onclick="saveEntityGrid('${key}')">儲存</button>` +
+    (cfg.createUi === 'scenario' ? scenarioToolbarHtml() : '');
 
+  const sortable = cfg.sortable && rows.length > 1;
   const body = rows.length
-    ? rows.map((r, i) => `<tr${r.__existing ? '' : ' class="new-row"'}>
+    ? rows.map((r, i) => `<tr${r.__existing ? '' : ' class="new-row"'} data-key="${i}">
+        ${sortable ? `<td class="row-actions">${r.__existing ? dragHandleHtml() : ''}</td>` : ''}
         ${cfg.columns.map(col => entityCellHtml(key, i, col, r)).join('')}
         <td class="row-actions">${entityRowActionHtml(key, i, r, rows.length)}</td>
       </tr>`).join('')
-    : `<tr><td class="muted" colspan="${cfg.columns.length + 1}">尚無資料</td></tr>`;
+    : `<tr><td class="muted" colspan="${cfg.columns.length + 2}" style="text-align:center;padding:24px;">尚無資料</td></tr>`;
 
   document.getElementById('grid-' + key).innerHTML = `
     <div class="grid-scroll">
       <table class="grid-table entity-table">
-        <thead><tr>${cfg.columns.map(c => `<th>${esc(c.label)}</th>`).join('')}<th>操作</th></tr></thead>
-        <tbody>${body}</tbody>
+        <thead><tr>${sortable ? '<th style="width:36px;"></th>' : ''}${cfg.columns.map(c => `<th>${esc(c.label)}</th>`).join('')}<th>操作</th></tr></thead>
+        <tbody id="entity-body-${key}">${body}</tbody>
       </table>
     </div>`;
 
+  if (sortable) {
+    makeSortable(document.getElementById('entity-body-' + key), {
+      items: 'tr[data-key]',
+      onEnd: keys => {
+        const old = entityRows[key];
+        entityRows[key] = keys.map(k => old[Number(k)]);
+        if (entityRows[key].some(r => !r.__existing)) {
+          drawEntityGrid(key);
+          toast('新增的列還沒儲存，先按「儲存」後再調整順序會立即生效', 'warn');
+          return;
+        }
+        const ids = entityRows[key].map(r => r[cfg.pk]);
+        drawEntityGrid(key);
+        google.script.run
+          .withSuccessHandler(safeHandler(saved => {
+            panelDataCache_[panelCacheKey_(key, entityCacheScope_(cfg))] = saved;
+            Object.keys(panelDataCache_).forEach(k => { if (k.indexOf(key + '::') !== 0) delete panelDataCache_[k]; });
+            toast('已更新順序', 'ok', 1400);
+            if (key === 'scenarios') refreshScenarioOptions(currentScenarioId);
+          }))
+          .withFailureHandler(err => { toast(err.message, 'err'); loadEntityData(key); })
+          [cfg.sortable](currentVehicleTypeId, ids);
+      }
+    });
+  }
   if (key === 'scenarios') autoFillNewScenarioName_();
-
   if (pendingStatus && pendingStatus.key === key) {
     setStatus(key, pendingStatus.text, pendingStatus.cls);
     pendingStatus = null;
@@ -381,9 +669,8 @@ function entityCellHtml(key, i, col, row) {
   const style = col.width ? ` style="width:${col.width}px;"` : '';
 
   if (locked) {
-    // 新增列的自動編號欄位還沒有值，先讓使用者知道存檔時系統會配號
     const shown = col.auto && !value ? '(儲存時自動編號)' : value;
-    return `<td class="row-head calc">${esc(shown)}</td>`;
+    return `<td class="row-head">${esc(shown)}</td>`;
   }
   if (col.type === 'select') {
     const options = col.options.map(o => {
@@ -396,81 +683,52 @@ function entityCellHtml(key, i, col, row) {
     oninput="onEntityField('${key}', ${i}, '${col.name}', this.value)"></td>`;
 }
 
-function entityHasSortOrder(key) {
-  return ENTITIES[key].columns.some(c => c.name === 'SortOrder');
-}
-
-/** 有排序值(SortOrder)的表格才給上下移動鈕：直接跟前/後一列交換排序值，比自己打數字調順序直覺 */
-function moveButtonsHtml(key, i, total) {
-  if (!entityHasSortOrder(key)) return '';
-  return `<button type="button" class="btn secondary row-move" title="往上移" ${i === 0 ? 'disabled' : ''}
-      onclick="moveEntityRow('${key}', ${i}, -1)">▲</button>` +
-    `<button type="button" class="btn secondary row-move" title="往下移" ${i === total - 1 ? 'disabled' : ''}
-      onclick="moveEntityRow('${key}', ${i}, 1)">▼</button>`;
-}
-
-/**
- * 上下移動：交換這一列跟相鄰列的排序值(SortOrder)與陣列位置，畫面馬上照新順序重排，
- * 不必先按儲存才看得到效果；跟其他修改一樣，最後按「儲存」才會真的送出。
- * 新增列(還沒存檔、沒有既有 SortOrder)只搬陣列位置，跟已存在列的排序值互換沒有意義。
- */
-function moveEntityRow(key, i, dir) {
-  const rows = entityRows[key];
-  const j = i + dir;
-  if (j < 0 || j >= rows.length) return;
-  const a = rows[i], b = rows[j];
-  if (a.SortOrder !== '' && a.SortOrder !== undefined && a.SortOrder !== null &&
-      b.SortOrder !== '' && b.SortOrder !== undefined && b.SortOrder !== null) {
-    const tmp = a.SortOrder; a.SortOrder = b.SortOrder; b.SortOrder = tmp;
-  }
-  rows[i] = b; rows[j] = a;
-  drawEntityGrid(key);
-}
-
-function entityRowActionHtml(key, i, row, total) {
-  const move = moveButtonsHtml(key, i, total);
+function entityRowActionHtml(key, i, row) {
   if (!row.__existing) {
-    return move + `<button type="button" class="btn secondary" onclick="removeEntityRow('${key}', ${i})">移除</button>`;
+    return `<button type="button" class="btn ghost sm" onclick="removeEntityRow('${key}', ${i})">移除</button>`;
   }
   const cfg = ENTITIES[key];
   const renameBtn = cfg.renameFn
-    ? `<button type="button" class="btn secondary" onclick="renameEntityRow('${key}', ${i})">重新命名</button>` : '';
-  if (key === 'lineitems' && isFixedLineItem(row) && !isDeletableAutoLineItem(row)) {
-    return move + renameBtn + '<span class="muted">不可刪除</span>';
-  }
-  return move + renameBtn + `<button type="button" class="btn danger" onclick="deleteEntityRow('${key}', ${i})">刪除</button>`;
+    ? `<button type="button" class="btn ghost sm" onclick="renameEntityRow('${key}', ${i})">改代號</button>` : '';
+  return renameBtn + `<button type="button" class="btn danger sm" onclick="deleteEntityRow('${key}', ${i})">刪除</button>`;
 }
 
 /**
- * 車型/車系代號重新命名：不能直接在格子裡改代號 —— 代號是其他表格的外鍵(車系記著車型代號、
- * 銷售構成/成本記著車系代號)，直接改字串只會讓那些資料的鍵值對不到，變成孤兒資料。
- * 改用後端的 rename 函式，一次把所有引用該代號的地方都更新過去。
+ * 車型/車系代號重新命名：代號是其他表格的外鍵，不能直接在格子裡改字串，
+ * 改用後端的 rename 函式一次把所有引用該代號的地方(含科目表、作法、車系個別公式)都更新過去。
  */
 function renameEntityRow(key, i) {
   const cfg = ENTITIES[key];
   const row = entityRows[key][i];
   const oldId = row[cfg.pk];
-  const newId = (prompt('新的代號：', oldId) || '').trim();
-  if (!newId || newId === oldId) return;
-  const args = key === 'vehicles' ? [currentVehicleTypeId, oldId, newId] : [oldId, newId];
-  setStatus(key, '重新命名中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(() => {
-      // 改名會牽動其他表格裡引用這個代號的資料(銷售構成/成本/費用...)，這些頁面的快取一併清掉，
-      // 不然切分頁時會先看到還記得舊代號的畫面。
-      Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
-      // 目前選取的車型代號如果剛好是被改名的那個，選單跟後續呼叫都要跟著改用新代號
-      if (key === 'vehicletypes' && currentVehicleTypeId === oldId) currentVehicleTypeId = newId;
-      pendingStatus = { key: key, text: `已將「${oldId}」改名為「${newId}」`, cls: 'ok' };
-      loadEntityData(key);
-      afterEntityChange(key);
-    }))
-    .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
-    [cfg.renameFn](...args);
+  openModal({
+    title: '修改代號：' + oldId,
+    body: '<p class="help">所有引用這個代號的資料（車系、情境、銷售構成、成本、科目表…）會一起改成新代號。</p>',
+    fields: [{ name: 'id', label: '新的代號', value: oldId }],
+    okText: '修改',
+    validate: v => !v.id.trim() ? '代號不能空白' : ''
+  }).then(v => {
+    if (!v) return;
+    const newId = v.id.trim();
+    if (newId === oldId) return;
+    const args = key === 'vehicles' ? [currentVehicleTypeId, oldId, newId] : [oldId, newId];
+    setStatus(key, '修改中...');
+    google.script.run
+      .withSuccessHandler(safeHandler(() => {
+        Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+        if (key === 'vehicletypes' && currentVehicleTypeId === oldId) currentVehicleTypeId = newId;
+        pendingStatus = { key: key, text: `已將「${oldId}」改為「${newId}」`, cls: 'ok' };
+        loadEntityData(key);
+        afterEntityChange(key);
+      }))
+      .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
+      [cfg.renameFn](...args);
+  });
 }
 
 function onEntityField(key, i, field, value) {
   entityRows[key][i][field] = value;
+  markDirty(key, () => saveEntityGrid(key), () => { clearDirty(); loadEntityData(key); });
   if (key === 'scenarios' && (field === 'CreatedDate' || field === 'ScenarioType')) {
     autoFillScenarioName_(i);
   }
@@ -484,8 +742,7 @@ function dateToMMDD_(dateStr) {
 
 /**
  * 情境名稱自動帶入：選了建立日期(或改了情境性質)後，把名稱補成「情境性質+MMDD」(如「現況0901」)。
- * 只在名稱是空白、或還是上一次自動帶入的值時才覆蓋 —— 使用者手動打過的名稱不會被蓋掉，
- * 蓋掉之後再打的字仍算「手動」，之後就算又改日期也不會再被自動帶入的值覆蓋。
+ * 只在名稱是空白、或還是上一次自動帶入的值時才覆蓋 —— 使用者手動打過的名稱不會被蓋掉。
  */
 function autoFillScenarioName_(i) {
   const row = entityRows.scenarios[i];
@@ -506,6 +763,9 @@ function addEntityRow(key) {
   if (cfg.pk) row[cfg.pk] = '';
   entityRows[key].push(row);
   drawEntityGrid(key);
+  markDirty(key, () => saveEntityGrid(key), () => { clearDirty(); loadEntityData(key); });
+  const inputs = document.querySelectorAll(`#entity-body-${key} tr:last-child input`);
+  if (inputs[0]) inputs[0].focus();
 }
 
 /** 還沒存進後端的新增列，直接從畫面上拿掉就好 */
@@ -517,22 +777,27 @@ function removeEntityRow(key, i) {
 function deleteEntityRow(key, i) {
   const cfg = ENTITIES[key];
   const row = entityRows[key][i];
-  if (!confirm('確定要刪除這筆資料嗎？')) return;
-  setStatus(key, '刪除中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(() => {
-      pendingStatus = { key: key, text: '已刪除', cls: 'ok' };
-      loadEntityData(key);
-      afterEntityChange(key);
-    }))
-    .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
-    [cfg.deleteFn](row[cfg.pk]);
+  const label = row[cfg.pk] && cfg.pk !== 'ScenarioID' ? row[cfg.pk] : scenarioLabel(row);
+  confirmModal('刪除「' + label + '」？', key === 'vehicletypes'
+    ? '車型與它自己的科目表會一起刪除。底下的車系與情境資料不會被刪，但會看不到。這個動作無法復原。'
+    : '這個動作無法復原。', '刪除', true).then(ok => {
+    if (!ok) return;
+    setStatus(key, '刪除中...');
+    google.script.run
+      .withSuccessHandler(safeHandler(() => {
+        Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+        pendingStatus = { key: key, text: '已刪除', cls: 'ok' };
+        loadEntityData(key);
+        afterEntityChange(key);
+      }))
+      .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
+      [cfg.deleteFn](row[cfg.pk]);
+  });
 }
 
 function saveEntityGrid(key) {
   const cfg = ENTITIES[key];
   const rows = (entityRows[key] || []).map(r => {
-    // 只送出後端 schema 認得的欄位，__existing 這類前端旗標不要一起送過去
     const copy = {};
     cfg.columns.forEach(c => { copy[c.name] = r[c.name] === undefined ? '' : r[c.name]; });
     if (cfg.pk) copy[cfg.pk] = r[cfg.pk] === undefined ? '' : r[cfg.pk];
@@ -543,6 +808,7 @@ function saveEntityGrid(key) {
   setStatus(key, '儲存中...');
   google.script.run
     .withSuccessHandler(safeHandler(saved => {
+      clearDirty();
       panelDataCache_[panelCacheKey_(key, entityCacheScope_(cfg))] = saved;
       entityRows[key] = (saved || []).map(r => Object.assign({}, r, { __existing: true }));
       drawEntityGrid(key);
@@ -553,25 +819,37 @@ function saveEntityGrid(key) {
     [cfg.saveGridFn](...args);
 }
 
-/**
- * 把內建科目的名稱、父科目、分類、排序整個回復成程式預設值。
- * 自動計算科目的名稱平常就會自動對回程式碼（開頁時 getBootstrap 會同步），
- * 這顆按鈕是給明細科目的名稱與排序被改亂之後用的。
- */
-function restoreBuiltInLines() {
-  if (!confirm('會把所有內建科目的名稱、父科目、分類與排序回復成系統預設值（自己新增的科目不受影響），確定嗎？')) return;
-  setStatus('lineitems', '回復中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(rows => {
-      entityRows.lineitems = (rows || []).map(r => Object.assign({}, r, { __existing: true }));
-      drawEntityGrid('lineitems');
-      setStatus('lineitems', '已回復內建科目的預設名稱與排序', 'ok');
-    }))
-    .withFailureHandler(err => setStatus('lineitems', '錯誤：' + err.message, 'err'))
-    .restoreBuiltInLineItems();
+/** 新增車型：同時決定這個車型的科目表從哪裡開始(標準範本，或複製某個既有車型) */
+function createVehicleTypeDialog() {
+  const others = (entityRows.vehicletypes || []).filter(r => r.__existing).map(r => r.VehicleTypeID);
+  openModal({
+    title: '新增車型',
+    body: '<p class="help">科目表會依每個車型各自一份。可以從標準範本開始，或複製一個科目結構比較接近的既有車型，之後再到「科目與公式」調整。</p>',
+    fields: [
+      { name: 'id', label: '車型代號', placeholder: '例：DA' },
+      { name: 'notes', label: '備註', placeholder: '選填' },
+      { name: 'source', label: '科目表從哪裡開始', type: 'select', value: '',
+        options: [['', '標準範本']].concat(others.map(id => [id, '複製「' + id + '」的科目表'])) }
+    ],
+    okText: '建立',
+    validate: v => !v.id.trim() ? '請輸入車型代號' : ''
+  }).then(v => {
+    if (!v) return;
+    google.script.run
+      .withSuccessHandler(safeHandler(types => {
+        Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+        toast('已建立車型 ' + v.id.trim(), 'ok');
+        entityRows.vehicletypes = (types || []).map(r => Object.assign({}, r, { __existing: true }));
+        drawEntityGrid('vehicletypes');
+        currentVehicleTypeId = v.id.trim();
+        loadVehicleTypeSelector(currentVehicleTypeId);
+      }))
+      .withFailureHandler(err => toast(err.message, 'err'))
+      .createVehicleType(v.id.trim(), v.notes, v.source);
+  });
 }
 
-/** 車型/情境改動後，上方的選單也要跟著更新（但不要重畫目前這個分頁，會蓋掉剛顯示的訊息） */
+/** 車型/情境改動後，上方的選單也要跟著更新（但不要重畫目前這個分頁） */
 function afterEntityChange(key) {
   if (key === 'vehicletypes') refreshVehicleTypeOptions();
   if (key === 'scenarios') refreshScenarioOptions();
@@ -599,7 +877,7 @@ function scenarioToolbarHtml() {
 
   return `
     <div class="toolbar-block">
-      <div class="toolbar-block-title">新增情境</div>
+      <div class="toolbar-block-title">＋ 新增情境</div>
       <div class="toolbar">
         <label>GATE 別
           <select id="new-scenario-gate">${GATE_OPTIONS.map(g => `<option value="${g}">${g}</option>`).join('')}</select>
@@ -683,8 +961,8 @@ function importIntoCurrentScenario() {
   if (!source) { setStatus('scenarios', '請選擇來源情境', 'err'); return; }
   const parts = selectedCopyParts();
   if (!parts.length) { setStatus('scenarios', '請至少勾選一項要帶入的資料', 'err'); return; }
-  if (!confirm('帶入會先清掉目前情境所勾選類別的資料，再整批複製來源情境的內容，確定嗎？')) return;
-
+  confirmModal('帶入到目前情境？', '會先清掉目前情境所勾選類別的資料，再整批複製來源情境的內容。', '帶入', true).then(ok => {
+  if (!ok) return;
   setStatus('scenarios', '帶入中...');
   google.script.run
     .withSuccessHandler(safeHandler(() => {
@@ -692,6 +970,7 @@ function importIntoCurrentScenario() {
     }))
     .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
     .copyScenarioData(source, currentScenarioId, parts);
+  });
 }
 
 function today() {
@@ -706,12 +985,14 @@ let salesMixRows = [];
 function renderSalesMixPanel() {
   if (!requireScope('salesmix', true)) return;
   const panel = document.getElementById('panel-salesmix');
-  panel.innerHTML = gridShell('salesmix', '銷售構成與售價');
+  panel.innerHTML = gridShell('salesmix', '銷售構成與售價',
+    '每個車系一列。<b>台數與構成比會自動互相連動</b>：改台數 → 構成比重算；改構成比 → 依車型月總台數反推台數。售價欄位是售價結構(P1~P9)公式的來源。');
   const cacheKey = panelCacheKey_('salesmix');
   if (panelDataCache_[cacheKey]) { salesMixRows = panelDataCache_[cacheKey].rows || []; drawSalesMixGrid(); }
   google.script.run
     .withSuccessHandler(safeHandler(data => {
       panelDataCache_[cacheKey] = data;
+      if (isDirty_()) return;
       salesMixRows = data.rows || [];
       drawSalesMixGrid();
     }))
@@ -723,18 +1004,19 @@ function drawSalesMixGrid() {
   const grid = document.getElementById('grid-salesmix');
   if (!salesMixRows.length) {
     document.getElementById('toolbar-salesmix').innerHTML = '';
-    grid.innerHTML = '<p class="muted">這個車型還沒有車系，請先到「車系設定」建立車系。</p>';
+    grid.innerHTML = emptyStateHtml('📋', '這個車型還沒有車系', '銷售構成依車系逐列輸入，請先建立車系。', `<button class="btn" onclick="switchTab('vehicles')">前往車系設定</button>`);
     return;
   }
   const totalUnits = salesMixRows.reduce((s, r) => s + num(r.MonthlyVolume), 0);
 
   document.getElementById('toolbar-salesmix').innerHTML = `
-    <label style="display:flex;align-items:center;gap:6px;">車型月總台數：
-      <input id="sm-total" type="number" step="any" style="width:110px;" value="${totalUnits || ''}"
+    <label>車型月總台數
+      <input id="sm-total" type="number" step="any" style="width:120px;" value="${totalUnits || ''}"
              oninput="onSalesMixTotalInput()">
     </label>
-    <button type="button" class="btn" onclick="saveSalesMixGrid()">儲存</button>
-    <span class="muted">LIFE CYCLE 總台數 = 月台數 × 12 × LC年限</span>
+    <span class="muted" style="align-self:flex-end;padding-bottom:8px;">LIFE CYCLE 總台數 = 月台數 × 12 × LC年限</span>
+    <span class="spacer"></span>
+    <button type="button" class="btn secondary" onclick="saveSalesMixGrid()">儲存</button>
   `;
 
   grid.innerHTML = `
@@ -776,11 +1058,13 @@ function drawSalesMixGrid() {
   updateSalesMixTotals();
 }
 
-function onSalesMixField(i, field, value) { salesMixRows[i][field] = value; updateSalesMixTotals(); }
+function smDirty_() { markDirty('salesmix', saveSalesMixGrid, () => { clearDirty(); renderSalesMixPanel(); }); }
+function onSalesMixField(i, field, value) { salesMixRows[i][field] = value; updateSalesMixTotals(); smDirty_(); }
 
 /** 改台數：總台數 = 各車系台數加總，所有構成比依台數重算 */
 function onSalesMixVolumeInput(i, value) {
   salesMixRows[i].MonthlyVolume = value === '' ? '' : num(value);
+  smDirty_();
   const total = salesMixRows.reduce((s, r) => s + num(r.MonthlyVolume), 0);
   salesMixRows.forEach(r => { r.SalesMixPct = total > 0 ? round2(num(r.MonthlyVolume) / total * 100) : ''; });
   document.getElementById('sm-total').value = total || '';
@@ -790,6 +1074,7 @@ function onSalesMixVolumeInput(i, value) {
 /** 改構成比：以車型月總台數為基準反推該車系台數，其餘車系的構成比再依台數回算 */
 function onSalesMixPctInput(i, value) {
   salesMixRows[i].SalesMixPct = value === '' ? '' : num(value);
+  smDirty_();
   const total = num(val('sm-total'));
   if (total > 0) {
     // 台數保留小數：構成比 5% × 365 台 = 18.25 台，四捨五入會讓構成比對不回去
@@ -800,6 +1085,7 @@ function onSalesMixPctInput(i, value) {
 
 /** 改車型月總台數：各車系依目前構成比重新分配台數 */
 function onSalesMixTotalInput() {
+  smDirty_();
   const total = num(val('sm-total'));
   if (total > 0) {
     salesMixRows.forEach(r => { r.MonthlyVolume = round2(num(r.SalesMixPct) / 100 * total); });
@@ -849,6 +1135,7 @@ function saveSalesMixGrid() {
   setStatus('salesmix', '儲存中...');
   google.script.run
     .withSuccessHandler(safeHandler(data => {
+      clearDirty();
       panelDataCache_[panelCacheKey_('salesmix')] = data;
       salesMixRows = data.rows || [];
       drawSalesMixGrid();
@@ -863,17 +1150,19 @@ const MATRIX_CONFIG = {
   costofsales: {
     title: '銷貨成本',
     getFn: 'getCostOfSalesMatrix', saveFn: 'saveCostOfSalesMatrix',
-    parentLine: 'B', hasCurrency: true, totalLabel: '該車系合計(手動輸入部分)'
+    parentLine: 'B', hasCurrency: true, totalLabel: '手動輸入合計',
+    intro: '列 = 成本項目、欄 = 車系，每格填單台金額。<b>計算來源是「手動輸入」的科目</b>才會出現在上半部；公式或開發總投攤提的科目列在下方唯讀，滑鼠移到金額上可以看計算過程。「說明」欄會直接帶到 GATE 報告上。'
   },
   operatingexpense: {
     title: '營業費用',
     getFn: 'getOperatingExpenseMatrix', saveFn: 'saveOperatingExpenseMatrix',
-    parentLine: 'E', hasCurrency: false, totalLabel: '該車系合計(手動輸入部分)',
-    parentOptions: [['E', '銷售費用(銷貨毛利前)'], ['G', '產品貢獻前費用'], ['I', '固定營業費用']]
+    parentLine: 'E', hasCurrency: false, totalLabel: '手動輸入合計',
+    parentOptions: [['E', '銷售費用(銷貨毛利前)'], ['G', '產品貢獻前費用'], ['I', '固定營業費用']],
+    intro: '銷售費用、產品貢獻前費用、固定營業費用、前瞻費用的單台金額。季Margin、開發費用攤提等由公式或開發總投算出，列在下方唯讀。'
   }
 };
 
-let matrixData = {};   // key -> {lines, vehicles, values, currencies}
+let matrixData = {};   // key -> {lines, vehicles, values, currencies, lineNotes, autoLines...}
 
 function renderCostOfSalesPanel() { renderMatrixPanel('costofsales'); }
 function renderOperatingExpensePanel() { renderMatrixPanel('operatingexpense'); }
@@ -881,67 +1170,90 @@ function renderOperatingExpensePanel() { renderMatrixPanel('operatingexpense'); 
 function renderMatrixPanel(key) {
   if (!requireScope(key, true)) return;
   const cfg = MATRIX_CONFIG[key];
-  document.getElementById('panel-' + key).innerHTML = gridShell(key, cfg.title);
+  document.getElementById('panel-' + key).innerHTML = gridShell(key, cfg.title, cfg.intro);
   const cacheKey = panelCacheKey_(key);
   if (panelDataCache_[cacheKey]) { matrixData[key] = panelDataCache_[cacheKey]; drawMatrix(key); }
   google.script.run
-    .withSuccessHandler(safeHandler(data => { panelDataCache_[cacheKey] = data; matrixData[key] = data; drawMatrix(key); }))
+    .withSuccessHandler(safeHandler(data => {
+      panelDataCache_[cacheKey] = data;
+      if (isDirty_()) return;
+      matrixData[key] = data; drawMatrix(key);
+    }))
     .withFailureHandler(showGlobalError)
     [cfg.getFn](currentScenarioId, currentVehicleTypeId);
+}
+
+/** 公式/攤提的計算過程文字(hover 用)：公式換成看得懂的名稱，再列出每個引用到的值 */
+function traceText_(trace, codeNameMap) {
+  if (!trace) return '';
+  if (trace.kind === 'dev') {
+    return `開發總投攤提\n投資總額(低減後) ${fmt(trace.total)} ÷ 攤提台數 ${fmt(trace.units)}\n= 全車系分攤 ${fmt(trace.total && trace.units ? trace.total / trace.units : 0)}\n本車系合計 ${fmt(trace.perUnit)}（含只攤給部分車系的金額）`;
+  }
+  const lines = ['= ' + humanizeFormula_(trace.formula, codeNameMap)];
+  Object.keys(trace.refs || {}).forEach(k => {
+    let label = k;
+    if (/^[A-Za-z][A-Za-z0-9_]*$/.test(k)) label = codeNameMap[k] ? `${codeNameMap[k]}(${k})` : k;
+    else if (k === 'CHILDREN()') label = 'Σ子科目';
+    else if (k === 'TAXDEDUCT()') label = 'Σ可扣除貨物稅的科目';
+    lines.push(`${label}：${fmt(trace.refs[k], 4)}`);
+  });
+  return lines.join('\n');
 }
 
 function drawMatrix(key) {
   const cfg = MATRIX_CONFIG[key];
   const data = matrixData[key];
   const grid = document.getElementById('grid-' + key);
+  if (!grid) return;
 
   const parentSelect = cfg.parentOptions
     ? `<select id="${key}-new-parent">${cfg.parentOptions.map(o => `<option value="${o[0]}">${o[1]}</option>`).join('')}</select>`
     : '';
   document.getElementById('toolbar-' + key).innerHTML = `
-    <button type="button" class="btn" onclick="saveMatrix('${key}')">儲存</button>
-    <span class="toolbar-sep"></span>
     ${parentSelect}
-    <input id="${key}-new-name" type="text" placeholder="新增項目名稱" style="width:160px;">
-    <button type="button" class="btn secondary" onclick="addMatrixLine('${key}')">新增項目</button>
+    <input id="${key}-new-name" type="text" placeholder="新增項目名稱" style="width:180px;"
+      onkeydown="if(event.key==='Enter'){addMatrixLine('${key}')}">
+    <button type="button" class="btn secondary" onclick="addMatrixLine('${key}')">＋ 新增項目</button>
+    <span class="spacer"></span>
+    <button type="button" class="btn ghost" onclick="switchTab('lineitems')" data-tip="改科目的計算來源/公式、調整科目順序">科目與公式 →</button>
+    <button type="button" class="btn secondary" onclick="saveMatrix('${key}')">儲存</button>
   `;
 
   if (!data.vehicles.length) {
-    grid.innerHTML = '<p class="muted">這個車型還沒有車系，請先到「車系設定」建立車系。</p>';
+    grid.innerHTML = emptyStateHtml('📋', '這個車型還沒有車系', '請先到「車系設定」建立車系。', `<button class="btn" onclick="switchTab('vehicles')">前往車系設定</button>`);
     return;
   }
+  const codeNameMap = {};
+  data.lines.concat(data.autoLines || []).forEach(l => { codeNameMap[l.value] = matrixLineName(l); });
 
   const currencyCell = line => {
     if (!cfg.hasCurrency) return '';
     const cur = firstCellProp(data, line.value, 'Currency') || 'TWD';
     const opts = (data.currencies || ['TWD']).slice();
     if (opts.indexOf(cur) === -1) opts.push(cur);
-    return `<td><select id="${key}-cur-${esc(line.value)}">
+    return `<td><select id="${key}-cur-${esc(line.value)}" onchange="matrixDirty_('${key}')">
       ${opts.map(c => `<option value="${c}"${c === cur ? ' selected' : ''}>${c}</option>`).join('')}
     </select></td>`;
   };
+  const noteOf = code => (data.lineNotes && data.lineNotes[code] !== undefined) ? data.lineNotes[code] : firstCellProp(data, code, 'Notes');
 
-  // 欄標題直接標出銷售構成比，才看得出右邊那欄「加權平均」是用什麼權重算出來的
   const mixTotal = data.vehicles.reduce((sum, v) => sum + num(v.SalesMixPct), 0);
   grid.innerHTML = `
-    ${mixTotal ? '' : '<p class="status-msg err">這個情境還沒有銷售構成比，加權平均無法計算，請先到「銷售構成」頁填構成比。</p>'}
+    ${mixTotal ? '' : '<div class="callout warn">這個情境還沒有銷售構成比，加權平均無法計算，請先到「銷售構成」頁填構成比。</div>'}
+    ${data.vehicles.length > 1 ? `<div class="order-strip"><span class="muted">車系順序</span>
+      <div class="chip-list" id="${key}-vorder">${data.vehicles.map(v =>
+        `<span class="chip" data-key="${esc(v.VehicleID)}">${dragHandleHtml('拖曳調整車系順序')}${esc(v.VehicleCode || v.VehicleID)}</span>`).join('')}</div>
+      <span class="muted" style="font-weight:400;">拖曳調整，放開立即套用到所有頁面</span></div>` : ''}
     <div class="grid-scroll">
     <table class="grid-table sticky-head-col">
       <thead><tr>
         <th>項目</th>
         ${cfg.hasCurrency ? '<th>幣別</th>' : ''}
-        ${data.vehicles.map((v, i) => `<th>
-          <div class="col-move">
-            <button type="button" class="btn secondary row-move" title="往左移" ${i === 0 ? 'disabled' : ''}
-              onclick="reorderMatrixVehicle('${key}', '${esc(v.VehicleID)}', -1)">◀</button>
-            <button type="button" class="btn secondary row-move" title="往右移" ${i === data.vehicles.length - 1 ? 'disabled' : ''}
-              onclick="reorderMatrixVehicle('${key}', '${esc(v.VehicleID)}', 1)">▶</button>
-          </div>
-          ${esc(v.VehicleCode || v.VehicleID)}
-          <div class="th-sub">構成比 ${fmt(num(v.SalesMixPct), 1)}%</div></th>`).join('')}
-        <th>加權平均</th><th>備註</th><th></th>
+        ${data.vehicles.map(v => `<th>${esc(v.VehicleCode || v.VehicleID)}<div class="th-sub">構成比 ${fmt(num(v.SalesMixPct), 1)}%</div></th>`).join('')}
+        <th>加權平均</th><th>說明（帶到報告）</th><th></th>
       </tr></thead>
       <tbody>
+        ${data.lines.length ? '' : `<tr><td colspan="${data.vehicles.length + 5}" class="muted" style="text-align:center;padding:18px;">還沒有手動輸入的項目，用上方「新增項目」新增</td></tr>`}
         ${data.lines.map(line => `
           <tr data-line="${esc(line.value)}">
             <td class="row-head">${esc(matrixLineName(line))}</td>
@@ -950,18 +1262,21 @@ function drawMatrix(key) {
               const cell = (data.values[line.value] || {})[v.VehicleID] || {};
               return `<td><input type="number" step="any" value="${esc(cell.Amount)}"
                 data-line="${esc(line.value)}" data-vehicle="${esc(v.VehicleID)}" data-rowid="${esc(cell.RowID)}"
-                oninput="updateMatrixTotals('${key}')"></td>`;
+                oninput="updateMatrixTotals('${key}'); matrixDirty_('${key}')"></td>`;
             }).join('')}
             <td class="calc" id="${key}-sum-${esc(line.value)}"></td>
-            <td><input type="text" id="${key}-note-${esc(line.value)}" value="${esc(firstCellProp(data, line.value, 'Notes'))}"></td>
-            <td><button type="button" class="btn danger" onclick="deleteMatrixLine('${key}', '${esc(line.value)}')">刪除</button></td>
+            <td><input type="text" class="note-input wide" id="${key}-note-${esc(line.value)}" value="${esc(noteOf(line.value))}"
+              oninput="matrixDirty_('${key}')" placeholder="例：依業務部提供"></td>
+            <td class="row-actions"><button type="button" class="btn ghost sm" onclick="deleteMatrixLine('${key}', '${esc(line.value)}')" data-tip="刪除這個項目">✕</button></td>
           </tr>`).join('')}
+        ${(data.autoLines || []).length ? `<tr><td class="row-head" colspan="${data.vehicles.length + (cfg.hasCurrency ? 5 : 4)}"
+            style="background:var(--surface-3);font-size:12px;color:var(--text-2);">由公式或開發總投算出（唯讀，要改算法請到「科目與公式」）</td></tr>` : ''}
         ${(data.autoLines || []).map(line => `
           <tr class="auto-line" data-line="${esc(line.value)}">
-            <td class="row-head">${esc(matrixLineName(line))} <span class="auto-tag">自動</span></td>
+            <td class="row-head">${esc(matrixLineName(line))} <span class="ct-badge ct-${esc(line.calcType)}">${line.calcType === 'DEV_AMORT' ? '攤提' : '公式'}</span></td>
             ${cfg.hasCurrency ? '<td></td>' : ''}
-            ${data.vehicles.map(v => autoLineCellHtml(data, line.value, v.VehicleID)).join('')}
-            <td class="calc muted">—</td><td colspan="2" class="muted">系統自動算出，不能編輯</td>
+            ${data.vehicles.map(v => autoLineCellHtml(data, line.value, v.VehicleID, codeNameMap)).join('')}
+            <td class="calc muted">—</td><td class="muted" style="text-align:left;">${line.formula ? `<code style="font-size:11px;">${esc(humanizeFormula_(line.formula, codeNameMap))}</code>` : ''}</td><td></td>
           </tr>`).join('')}
       </tbody>
       <tfoot><tr>
@@ -971,7 +1286,7 @@ function drawMatrix(key) {
         <td class="calc" id="${key}-grandsum"></td><td colspan="2"></td>
       </tr>
       ${(data.autoLines || []).length ? `<tr>
-        <td class="row-head">合計(含自動科目)</td>
+        <td class="row-head">合計(含公式/攤提)</td>
         ${cfg.hasCurrency ? '<td></td>' : ''}
         ${data.vehicles.map(v => `<td class="calc" id="${key}-colsum-withauto-${esc(v.VehicleID)}"></td>`).join('')}
         <td colspan="3"></td>
@@ -980,28 +1295,37 @@ function drawMatrix(key) {
     </div>
     <p class="muted">加權平均 = 依各車系銷售構成比加權，跟儀表板同口徑。</p>`;
   updateMatrixTotals(key);
-}
 
-/** 自動計算科目的格子：唯讀，貨物稅(b13)滑鼠移過去可以看到完整計算過程 */
-function autoLineCellHtml(data, lineCode, vehicleId) {
+  makeSortable(document.getElementById(key + '-vorder'), {
+    items: '.chip', horizontal: true,
+    onEnd: ids => {
+      google.script.run
+        .withSuccessHandler(safeHandler(() => {
+          Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+          toast('已調整車系順序', 'ok', 1400);
+          if (!isDirty_()) renderMatrixPanel(key);
+          else {
+            const byId = {};
+            data.vehicles.forEach(v => { byId[v.VehicleID] = v; });
+            toast('畫面上還有未儲存的金額，儲存後欄位會照新順序排列', 'warn');
+          }
+        }))
+        .withFailureHandler(err => toast(err.message, 'err'))
+        .setVehicleOrder(currentVehicleTypeId, ids);
+    }
+  });
+}
+function matrixDirty_(key) { markDirty(key, () => saveMatrix(key), () => { clearDirty(); renderMatrixPanel(key); }); }
+
+/** 公式/攤提科目的格子：唯讀，滑鼠移過去看計算過程 */
+function autoLineCellHtml(data, lineCode, vehicleId, codeNameMap) {
   const amt = (data.autoValues[lineCode] || {})[vehicleId];
   if (amt === undefined) return '<td class="calc muted">—</td>';
-  const detail = data.commodityTaxDetail && data.commodityTaxDetail[vehicleId];
-  // 跟儀表板一樣用 data-tip 提示(原生 title 在會橫向捲動的表格裡常被裁掉)
-  const tip = (lineCode === 'b13' && detail) ? ` tabindex="0" data-tip="${esc('貨物稅計算過程\n' + commodityTaxDetailText(detail))}"` : '';
-  return `<td class="calc"${tip}>${fmt(amt)}</td>`;
-}
-/** 把貨物稅的計算過程攤開成文字，滑鼠移到金額上就看得到每一步是怎麼來的 */
-function commodityTaxDetailText(d) {
-  const pct = n => (n * 100).toFixed(1) + '%';
-  return [
-    `廠價(未稅) ${fmt(d.exFactoryPrice)}`,
-    `− 水平配件外移調降廠價 ${fmt(d.horizontalPartsAdj)}`,
-    `− 廣宣+促銷+批標售+季Margin ${fmt(d.deductTotal)}`,
-    `= 完稅價格基礎 ${fmt(d.dutiableBase / (d.calcRate || 1))}`,
-    `× 完稅價格計算率 ${pct(d.calcRate)} = ${fmt(d.dutiableBase)}`,
-    `÷ (1+貨物稅率${pct(d.taxRate)}) × 貨物稅率 = 貨物稅 ${fmt(d.tax)}`
-  ].join('\n');
+  const trace = ((data.autoTraces || {})[lineCode] || {})[vehicleId];
+  const err = ((data.autoErrors || {})[lineCode] || {})[vehicleId];
+  const tipText = (err ? '⚠ 公式錯誤：' + err + '\n' : '') + traceText_(trace, codeNameMap || {});
+  const tip = tipText ? ` tabindex="0" data-tip="${esc(tipText)}"` : '';
+  return `<td class="calc${err ? ' negative' : ''}"${tip}>${err ? '⚠ ' : ''}${fmt(amt)}</td>`;
 }
 
 /** 同一列(科目)的幣別/備註是列層級設定，讀取時取該列第一個有值的格子 */
@@ -1012,8 +1336,7 @@ function firstCellProp(data, lineCode, prop) {
 }
 
 /**
- * 右邊那一欄是「加權平均」而不是合計：一列是同一個成本項目在各車系的單台金額，
- * 把它們相加只會得到一個沒有意義的數字。改成用銷售構成比加權，跟儀表板的加權平均欄位一致。
+ * 右邊那一欄是「加權平均」而不是合計：一列是同一個成本項目在各車系的單台金額，相加沒有意義。
  * 表尾則是各車系自己的科目合計（同一車系各科目相加是有意義的）。
  */
 function updateMatrixTotals(key) {
@@ -1057,7 +1380,7 @@ function updateMatrixTotals(key) {
 
 function saveMatrix(key) {
   const cfg = MATRIX_CONFIG[key];
-  const cells = [];
+  const cells = [], lineNotes = {};
   document.querySelectorAll(`#grid-${key} input[data-line]`).forEach(inp => {
     const line = inp.dataset.line;
     const cell = {
@@ -1065,55 +1388,48 @@ function saveMatrix(key) {
       VehicleID: inp.dataset.vehicle,
       LineCode: line,
       Amount: inp.value === '' ? '' : num(inp.value),
-      Notes: val(`${key}-note-${line}`)
+      Notes: ''
     };
     if (cfg.hasCurrency) cell.Currency = val(`${key}-cur-${line}`) || 'TWD';
     cells.push(cell);
+    lineNotes[line] = val(`${key}-note-${line}`);
   });
 
   setStatus(key, '儲存中...');
   google.script.run
-    .withSuccessHandler(() => { setStatus(key, '已儲存', 'ok'); renderMatrixPanel(key); })
+    .withSuccessHandler(() => { clearDirty(); setStatus(key, '已儲存', 'ok'); renderMatrixPanel(key); })
     .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
-    [cfg.saveFn](currentScenarioId, cells);
+    [cfg.saveFn](currentScenarioId, cells, lineNotes);
 }
 
 function addMatrixLine(key) {
   const cfg = MATRIX_CONFIG[key];
-  const name = val(`${key}-new-name`);
-  if (!name) { setStatus(key, '請先輸入項目名稱', 'err'); return; }
+  const name = val(`${key}-new-name`).trim();
+  if (!name) { toast('請先輸入項目名稱', 'warn'); return; }
   const parent = cfg.parentOptions ? val(`${key}-new-parent`) : cfg.parentLine;
-  setStatus(key, '新增中...');
-  google.script.run
-    .withSuccessHandler(() => { setStatus(key, '已新增項目', 'ok'); renderMatrixPanel(key); })
-    .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
-    .addLineItemInline(parent, name);
+  const go = () => {
+    setStatus(key, '新增中...');
+    google.script.run
+      .withSuccessHandler(() => { clearDirty(); delete panelDataCache_[panelCacheKey_('lineitems', 'vehicleType')]; setStatus(key, `已在 ${currentVehicleTypeId} 新增項目「${name}」`, 'ok'); renderMatrixPanel(key); })
+      .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
+      .addLineItemInline(parent, name, currentVehicleTypeId);
+  };
+  if (isDirty_()) { toast('先儲存目前的修改再新增項目', 'warn'); return; }
+  go();
 }
 
 function deleteMatrixLine(key, lineCode) {
-  if (!confirm('科目表是全域共用的：刪除這個項目會一併清掉它在「所有情境」各車系已輸入的金額，確定嗎？')) return;
-  setStatus(key, '刪除中...');
-  google.script.run
-    .withSuccessHandler(() => { setStatus(key, '已刪除項目', 'ok'); renderMatrixPanel(key); })
-    .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
-    .deleteLineItemInline(lineCode);
-}
-
-/**
- * 車系欄位順序：直接在矩陣頁面用左右移動鈕調整，不必切去「車系設定」頁。
- * 車系順序是全車型共用的設定（跟儀表板、車系設定頁看到的是同一份），
- * 立即存檔生效，其他頁面的快取要一併清掉，不然切分頁時會先看到還沒更新的舊順序。
- */
-function reorderMatrixVehicle(key, vehicleId, direction) {
-  setStatus(key, '調整車系順序中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(() => {
-      Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
-      setStatus(key, '已調整車系順序', 'ok');
-      renderMatrixPanel(key);
-    }))
-    .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
-    .reorderVehicle(currentVehicleTypeId, vehicleId, direction);
+  const line = (matrixData[key].lines || []).find(l => l.value === lineCode);
+  confirmModal('刪除項目「' + (line ? matrixLineName(line) : lineCode) + '」？',
+    `只會影響車型 <b>${esc(currentVehicleTypeId)}</b>：這個科目會從 ${esc(currentVehicleTypeId)} 的科目表移除，並清掉它在 ${esc(currentVehicleTypeId)} 所有情境已輸入的金額。其他車型不受影響。`,
+    '刪除', true).then(ok => {
+    if (!ok) return;
+    setStatus(key, '刪除中...');
+    google.script.run
+      .withSuccessHandler(() => { clearDirty(); setStatus(key, '已刪除項目', 'ok'); renderMatrixPanel(key); })
+      .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
+      .deleteLineItemInline(lineCode, currentVehicleTypeId);
+  });
 }
 
 /* ================= 開發總投 ================= */
@@ -1122,7 +1438,9 @@ let devSummary = null;
 
 function renderDevInvestmentPanel() {
   if (!requireScope('devinvestment', true)) return;
-  document.getElementById('panel-devinvestment').innerHTML = gridShell('devinvestment', '開發總投');
+  document.getElementById('panel-devinvestment').innerHTML = gridShell('devinvestment', '開發總投',
+    '每一列：部門 → 大類(設備/模具/費用) → 攤提落點科目。低減後金額 ÷ 攤提台數 = 單台攤提。' +
+    '<b>「分攤車系」</b>可以讓某筆投資只攤給部分車系（例如中低規式樣、TNCAP 只有部分車系要），其他車系不分攤。拖曳 ⠿ 調整列的順序。');
 
   const cacheKey = panelCacheKey_('devinvestment', 'scenario');
   if (panelDataCache_[cacheKey]) {
@@ -1133,6 +1451,7 @@ function renderDevInvestmentPanel() {
   google.script.run
     .withSuccessHandler(safeHandler(summary => {
       panelDataCache_[cacheKey] = summary;
+      if (isDirty_()) return;
       devSummary = summary;
       devRows = summary.rows.map(r => Object.assign({}, r));
       drawDevGrid();
@@ -1141,54 +1460,62 @@ function renderDevInvestmentPanel() {
     .getDevInvestmentSummary(currentScenarioId);
 }
 
+function devDirty_() { markDirty('devinvestment', saveDevGrid, () => { clearDirty(); renderDevInvestmentPanel(); }); }
+
+function vehicleScopeLabel_(scope) {
+  const ids = String(scope || '').split(',').map(x => x.trim()).filter(x => x);
+  if (!ids.length) return '全車系';
+  const names = ids.map(id => { const v = (devSummary.vehicles || []).find(x => x.VehicleID === id); return v ? (v.VehicleCode || id) : id; });
+  return names.join('、');
+}
+
 function drawDevGrid() {
   const isTarget = !devSummary.isBaseline;
   const others = scenarioCache.filter(s => s.ScenarioID !== currentScenarioId);
+  const toolbar = document.getElementById('toolbar-devinvestment');
+  if (!toolbar) return;
 
-  document.getElementById('toolbar-devinvestment').innerHTML = `
-    <button type="button" class="btn" onclick="saveDevGrid()">儲存</button>
-    <button type="button" class="btn secondary" onclick="addDevRow()">新增一列</button>
+  toolbar.innerHTML = `
+    <button type="button" class="btn" onclick="addDevRow()">＋ 新增一列</button>
     <span class="toolbar-sep"></span>
-    <label style="display:flex;align-items:center;gap:6px;">攤提基準：
-      <input id="dev-amort-vol" type="number" step="any" style="width:80px;" value="${esc(devSummary.amortMonthlyVolume)}" placeholder="台/月"> 台/月 × 12 ×
-      <input id="dev-amort-years" type="number" step="any" style="width:60px;" value="${esc(devSummary.amortLifeCycleYears)}" placeholder="年"> 年
+    <label>攤提基準(台/月 × 12 × 年)
+      <span style="display:flex;gap:6px;align-items:center;">
+        <input id="dev-amort-vol" type="number" step="any" style="width:90px;" value="${esc(devSummary.amortMonthlyVolume)}" placeholder="台/月">
+        ×12×<input id="dev-amort-years" type="number" step="any" style="width:70px;" value="${esc(devSummary.amortLifeCycleYears)}" placeholder="年">
+        <button type="button" class="btn secondary sm" onclick="saveAmortBasis()">套用</button>
+      </span>
     </label>
-    <button type="button" class="btn secondary" onclick="saveAmortBasis()">套用攤提基準</button>
     ${isTarget ? `
-      <span class="toolbar-sep"></span>
-      <label style="display:flex;align-items:center;gap:6px;">從其他情境帶入：
+      <label>從其他情境帶入
+        <span style="display:flex;gap:6px;">
         <select id="dev-copy-source">
           <option value="">-- 選擇來源情境 --</option>
           ${others.map(s => `<option value="${esc(s.ScenarioID)}">${esc(scenarioLabel(s))}</option>`).join('')}
         </select>
-      </label>
-      <button type="button" class="btn secondary" onclick="copyFromScenario()">帶入</button>` : ''}
-    <span class="toolbar-sep"></span>
-    <select id="dev-new-target-category">${DEV_AMORT_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
-    <input id="dev-new-target-name" type="text" placeholder="新增攤提科目名稱" style="width:160px;">
-    <button type="button" class="btn secondary" onclick="addDevAmortTarget()">新增攤提科目</button>
+        <button type="button" class="btn secondary sm" onclick="copyFromScenario()">帶入</button></span>
+      </label>` : ''}
+    <span class="spacer"></span>
+    <button type="button" class="btn ghost" onclick="addDevAmortTarget()">＋ 新增攤提落點科目</button>
+    <button type="button" class="btn secondary" onclick="saveDevGrid()">儲存</button>
   `;
 
   document.getElementById('grid-devinvestment').innerHTML = `
     <div class="grid-scroll">
     <table class="grid-table">
       <thead><tr>
-        <th></th><th>部門</th><th>大類</th><th>攤提落點</th><th>金額</th><th>幣別</th>
+        <th style="width:36px;"></th><th>部門</th><th>大類</th><th>攤提落點</th><th>分攤車系</th><th>金額</th><th>幣別</th>
         ${isTarget ? '<th>挑戰低減目標%</th><th>低減後金額</th>' : ''}
         <th>備註</th><th></th>
       </tr></thead>
-      <tbody>
+      <tbody id="dev-body">
+        ${devRows.length ? '' : `<tr><td colspan="${isTarget ? 11 : 9}" class="muted" style="text-align:center;padding:18px;">尚無開發總投資料，按「新增一列」開始</td></tr>`}
         ${devRows.map((r, i) => {
           const category = r.__category || devTargetCategoryOf(r.TargetLineCode);
           const targetOptions = (devSummary.targetOptions || []).filter(o => !category || o.category === category);
+          const blank = !r.Department && (r.Amount === '' || r.Amount === undefined || r.Amount === null) && r.RowID;
           return `
-          <tr>
-            <td class="row-actions">
-              <button type="button" class="btn secondary row-move" title="往上移" ${i === 0 ? 'disabled' : ''}
-                onclick="moveDevRow(${i}, -1)">▲</button>
-              <button type="button" class="btn secondary row-move" title="往下移" ${i === devRows.length - 1 ? 'disabled' : ''}
-                onclick="moveDevRow(${i}, 1)">▼</button>
-            </td>
+          <tr data-key="${i}"${blank ? ' style="display:none;"' : ''}>
+            <td class="row-actions">${dragHandleHtml()}</td>
             <td><input type="text" list="dev-departments" value="${esc(r.Department)}" oninput="onDevField(${i}, 'Department', this.value)"></td>
             <td><select onchange="onDevCategoryChange(${i}, this.value)">
               <option value="">(請選擇)</option>
@@ -1199,6 +1526,7 @@ function drawDevGrid() {
               ${targetOptions.map(o =>
                 `<option value="${esc(o.value)}"${r.TargetLineCode === o.value ? ' selected' : ''}>${esc(shortLineName(o.label))}</option>`).join('')}
             </select></td>
+            <td><button type="button" class="btn ghost sm" onclick="editDevScope(${i})" data-tip="點一下選擇這筆投資要攤給哪些車系">${esc(vehicleScopeLabel_(r.VehicleScope))} ▾</button></td>
             <td><input type="number" step="any" value="${esc(r.Amount)}" oninput="onDevField(${i}, 'Amount', this.value)"></td>
             <td><select onchange="onDevField(${i}, 'Currency', this.value)">
               ${(devSummary.currencies || ['TWD']).map(c => `<option value="${c}"${(r.Currency || 'TWD') === c ? ' selected' : ''}>${c}</option>`).join('')}
@@ -1206,8 +1534,8 @@ function drawDevGrid() {
             ${isTarget ? `
               <td><input type="number" step="any" id="dev-pct-${i}" value="${esc(r.ChallengeReductionPct)}" oninput="onDevPctInput(${i}, this.value)"></td>
               <td><input type="number" step="any" id="dev-reduced-${i}" value="${esc(devReducedAmount(r))}" oninput="onDevReducedInput(${i}, this.value)"></td>` : ''}
-            <td><input type="text" value="${esc(r.Notes)}" oninput="onDevField(${i}, 'Notes', this.value)"></td>
-            <td><button type="button" class="btn danger" onclick="removeDevRow(${i})">刪除</button></td>
+            <td><input type="text" class="note-input" value="${esc(r.Notes)}" oninput="onDevField(${i}, 'Notes', this.value)"></td>
+            <td class="row-actions"><button type="button" class="btn ghost sm" onclick="removeDevRow(${i})" data-tip="刪除這一列">✕</button></td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -1218,8 +1546,20 @@ function drawDevGrid() {
       <div><span class="muted">攤提用 LIFE CYCLE 總台數</span><strong>${fmt(devSummary.lifeCycleUnits)}</strong></div>
       <div><span class="muted">銷售構成推算台數</span><strong>${fmt(devSummary.salesMixLifeCycleUnits)}</strong></div>
     </div>
-    <p class="muted">下表隨畫面上的金額/低減%即時試算（含尚未儲存的變更）；損益表與儀表板要按上方「儲存」後才會套用新數字。</p>
-    <div id="dev-targets-box">${devTargetsTableHtml()}</div>`;
+    <div class="card">
+      <div class="card-head"><h4>攤提落點 → 單台攤提</h4><span class="muted">隨畫面上的金額/低減%即時試算（含尚未儲存的變更）；損益表要儲存後才套用。</span></div>
+      <div id="dev-targets-box">${devTargetsTableHtml()}</div>
+    </div>`;
+
+  makeSortable(document.getElementById('dev-body'), {
+    items: 'tr[data-key]',
+    onEnd: keys => {
+      const old = devRows;
+      devRows = keys.map(k => old[Number(k)]);
+      drawDevGrid();
+      devDirty_();
+    }
+  });
 
   google.script.run.withSuccessHandler(safeHandler(list => {
     const dl = document.getElementById('dev-departments');
@@ -1227,28 +1567,28 @@ function drawDevGrid() {
   })).getKnownDepartments();
 }
 
-/** 「攤提落點 → 投資總額(低減後)/單台攤提」彙總表，抽成獨立函式方便即時試算時單獨重畫這一小塊 */
+/** 「攤提落點 → 投資總額(低減後)/單台攤提(各車系)」彙總表 */
 function devTargetsTableHtml() {
+  const vehicles = devSummary.vehicles || [];
+  const rows = (devSummary.targets || []).filter(t => t.Total);
+  if (!rows.length) return '<p class="muted">還沒有攤提金額。</p>';
   return `
-    <table class="grid-table" style="max-width:640px;">
-      <thead><tr><th>攤提落點</th><th>投資總額(低減後)</th><th>單台攤提</th></tr></thead>
+    <div class="grid-scroll"><table class="grid-table">
+      <thead><tr><th>攤提落點</th><th>投資總額(低減後)</th><th>單台攤提(加權)</th>
+        ${vehicles.map(v => `<th>${esc(v.VehicleCode || v.VehicleID)}</th>`).join('')}</tr></thead>
       <tbody>
-        ${(devSummary.targets || []).filter(t => t.Total).map(t => `
+        ${rows.map(t => `
           <tr>
             <td class="row-head">${esc(shortLineName(t.LineName))}</td>
             <td class="calc">${fmt(t.Total)}</td>
             <td class="calc">${fmt(t.PerUnit)}</td>
+            ${vehicles.map(v => `<td class="calc">${fmt((t.PerVehicle || {})[v.VehicleID] || 0)}</td>`).join('')}
           </tr>`).join('')}
       </tbody>
-    </table>`;
+    </table></div>`;
 }
 
-/**
- * 金額/低減%/攤提落點改變時，不必等按「儲存」才知道下面的彙總表會變成怎樣：
- * debounce 一下(避免每打一個字元就打一次伺服器)，拿目前畫面上(含未存檔)的 devRows 直接試算。
- * 這是唯讀試算(previewDevInvestmentSummary 不寫入任何資料)，失敗也不用打擾使用者，
- * 反正真正的錯誤檢查在按「儲存」時後端還是會擋下來。
- */
+/** 金額/低減%/攤提落點改變時 debounce 一下，拿畫面上(含未存檔)的資料試算彙總表(唯讀) */
 let devPreviewTimer_ = null;
 function scheduleDevTargetsPreview_() {
   if (!currentScenarioId || !devSummary) return;
@@ -1271,30 +1611,24 @@ function onDevField(i, field, value) {
   devRows[i][field] = value;
   syncDevReduced_(i);
   scheduleDevTargetsPreview_();
+  devDirty_();
 }
 
 /** 低減後金額 = 金額 × (1 - 低減目標%/100)，四捨五入到整數方便對數字 */
 function devReducedAmount(r) {
   return Math.round(num(r.Amount) * (1 - num(r.ChallengeReductionPct) / 100));
 }
-
-/** 金額或低減目標%改變時，重算低減後金額欄位(輸入框直接改值，不必整個重畫表格) */
 function syncDevReduced_(i) {
   const cell = document.getElementById('dev-reduced-' + i);
   if (cell) cell.value = devReducedAmount(devRows[i]);
 }
-
-/** 直接改低減目標%：正常方向，順著改低減後金額 */
 function onDevPctInput(i, value) {
   devRows[i].ChallengeReductionPct = value;
   syncDevReduced_(i);
   scheduleDevTargetsPreview_();
+  devDirty_();
 }
-
-/**
- * 雙向試算：直接輸入「低減後金額」時反推低減目標%（金額固定不動），
- * 這樣使用者不管是先想好目標低減成多少金額、還是先想好要砍幾%，都可以直接填那一欄。
- */
+/** 雙向試算：直接輸入「低減後金額」時反推低減目標% */
 function onDevReducedInput(i, value) {
   const amount = num(devRows[i].Amount);
   const reduced = num(value);
@@ -1302,70 +1636,89 @@ function onDevReducedInput(i, value) {
   const pctInput = document.getElementById('dev-pct-' + i);
   if (pctInput) pctInput.value = devRows[i].ChallengeReductionPct;
   scheduleDevTargetsPreview_();
+  devDirty_();
 }
 function addDevRow() {
-  devRows.push({ RowID: '', Department: '', TargetLineCode: '', Amount: '', Currency: 'TWD', ChallengeReductionPct: '', Notes: '' });
+  devRows.push({ RowID: '', Department: '', TargetLineCode: '', Amount: '', Currency: 'TWD', ChallengeReductionPct: '', Notes: '', VehicleScope: '' });
   drawDevGrid();
+  devDirty_();
+}
+function editDevScope(i) {
+  const cur = String(devRows[i].VehicleScope || '').split(',').filter(x => x);
+  openModal({
+    title: '分攤車系',
+    body: '<p class="help">不勾 = 全車系分攤(÷ LC 總台數)。勾選部分車系 = 只攤給這些車系(÷ 這些車系的攤提台數合計)，其他車系這筆是 0。</p>',
+    fields: [{ name: 'ids', label: '只攤給這些車系', type: 'checks', value: cur,
+      options: (devSummary.vehicles || []).map(v => [v.VehicleID, v.VehicleCode || v.VehicleID]) }],
+    okText: '套用'
+  }).then(v => {
+    if (!v) return;
+    devRows[i].VehicleScope = v.ids.join(',');
+    drawDevGrid();
+    scheduleDevTargetsPreview_();
+    devDirty_();
+  });
 }
 
-/** 這個攤提落點科目屬於哪個大類(設備/模具/費用)，查 getDevInvestmentSummary 回傳的選項表 */
 function devTargetCategoryOf(targetLineCode) {
   const opt = (devSummary.targetOptions || []).find(o => o.value === targetLineCode);
   return opt ? opt.category : '';
 }
-/** 大類改變時，攤提落點要重新篩選成該大類底下的選項；先選過的落點如果不屬於新大類就清空 */
 function onDevCategoryChange(i, category) {
   devRows[i].__category = category;
   const target = devTargetCategoryOf(devRows[i].TargetLineCode);
   if (target !== category) devRows[i].TargetLineCode = '';
   drawDevGrid();
   scheduleDevTargetsPreview_();
+  devDirty_();
 }
 
-/** 在開發總投頁面直接新增攤提落點科目，之後就會出現在「攤提落點」下拉選單裡 */
 function addDevAmortTarget() {
-  const category = val('dev-new-target-category');
-  const name = val('dev-new-target-name');
-  if (!name) { setStatus('devinvestment', '請先輸入攤提科目名稱', 'err'); return; }
-  setStatus('devinvestment', '新增中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(() => { setStatus('devinvestment', '已新增攤提科目', 'ok'); renderDevInvestmentPanel(); }))
-    .withFailureHandler(err => setStatus('devinvestment', '錯誤：' + err.message, 'err'))
-    .addDevAmortLineItem(category, name);
+  if (isDirty_()) { toast('先儲存目前的修改再新增攤提落點', 'warn'); return; }
+  openModal({
+    title: '新增攤提落點科目',
+    body: `<p class="help">新增到車型 <b>${esc(currentVehicleTypeId)}</b> 的科目表。設備/模具會放在銷貨成本底下，費用放在產品貢獻前費用底下。</p>`,
+    fields: [
+      { name: 'category', label: '大類', type: 'select', options: DEV_AMORT_CATEGORIES, value: '模具' },
+      { name: 'name', label: '科目名稱', placeholder: '例：TNCAP 模具' }
+    ],
+    okText: '新增', validate: v => !v.name.trim() ? '請輸入科目名稱' : ''
+  }).then(v => {
+    if (!v) return;
+    google.script.run
+      .withSuccessHandler(safeHandler(() => { toast('已新增攤提落點科目', 'ok'); renderDevInvestmentPanel(); }))
+      .withFailureHandler(err => toast(err.message, 'err'))
+      .addDevAmortLineItem(v.category, v.name.trim(), currentVehicleTypeId);
+  });
 }
 
-/** 攤提基準台數：開發投資的攤提台數常與銷售構成的預估台數不同，可獨立設定；留空則沿用銷售構成 */
 function saveAmortBasis() {
   setStatus('devinvestment', '套用中...');
   google.script.run
     .withSuccessHandler(safeHandler(summary => {
       panelDataCache_[panelCacheKey_('devinvestment', 'scenario')] = summary;
       devSummary = summary;
-      devRows = summary.rows.map(r => Object.assign({}, r));
+      if (!isDirty_()) devRows = summary.rows.map(r => Object.assign({}, r));
       drawDevGrid();
       setStatus('devinvestment', '已套用攤提基準', 'ok');
     }))
     .withFailureHandler(err => setStatus('devinvestment', '錯誤：' + err.message, 'err'))
     .saveAmortBasis(currentScenarioId, val('dev-amort-vol'), val('dev-amort-years'));
 }
-/** 上下移動部門列：只搬陣列順序，實際的 SortOrder 由後端在儲存時依送出順序重新編號 */
-function moveDevRow(i, dir) {
-  const j = i + dir;
-  if (j < 0 || j >= devRows.length) return;
-  const tmp = devRows[i]; devRows[i] = devRows[j]; devRows[j] = tmp;
-  drawDevGrid();
-}
 function removeDevRow(i) {
-  // 清空欄位即可：儲存時後端會把空白列(含既有 RowID)刪掉
-  devRows[i] = { RowID: devRows[i].RowID, Department: '', TargetLineCode: '', Amount: '', Currency: 'TWD', ChallengeReductionPct: '', Notes: '' };
+  // 清空欄位即可：儲存時後端會把空白列(含既有 RowID)刪掉；還沒存過的列直接拿掉
+  if (!devRows[i].RowID) devRows.splice(i, 1);
+  else devRows[i] = { RowID: devRows[i].RowID, Department: '', TargetLineCode: '', Amount: '', Currency: 'TWD', ChallengeReductionPct: '', Notes: '', VehicleScope: '' };
   drawDevGrid();
   scheduleDevTargetsPreview_();
+  devDirty_();
 }
 
 function saveDevGrid() {
   setStatus('devinvestment', '儲存中...');
   google.script.run
     .withSuccessHandler(safeHandler(summary => {
+      clearDirty();
       panelDataCache_[panelCacheKey_('devinvestment', 'scenario')] = summary;
       devSummary = summary;
       devRows = summary.rows.map(r => Object.assign({}, r));
@@ -1378,64 +1731,77 @@ function saveDevGrid() {
 
 function copyFromScenario() {
   const source = val('dev-copy-source');
-  if (!source) { setStatus('devinvestment', '請先選擇來源情境', 'err'); return; }
-  if (!confirm('帶入會覆蓋目前情境的銷售構成、銷貨成本、開發總投、營業費用與費率設定，確定嗎？')) return;
-  setStatus('devinvestment', '帶入中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(() => {
-      setStatus('devinvestment', '已帶入來源情境資料，挑戰低減目標已清空，請重新填寫', 'ok');
-      renderDevInvestmentPanel();
-    }))
-    .withFailureHandler(err => setStatus('devinvestment', '錯誤：' + err.message, 'err'))
-    .copyScenarioData(source, currentScenarioId, ['salesmix', 'costofsales', 'devinvestment', 'operatingexpense', 'parameters']);
+  if (!source) { toast('請先選擇來源情境', 'warn'); return; }
+  confirmModal('從其他情境帶入？', '會覆蓋目前情境的銷售構成、銷貨成本、開發總投、營業費用、費率與科目說明（挑戰低減目標會清空，請重新填寫）。', '帶入', true).then(ok => {
+    if (!ok) return;
+    setStatus('devinvestment', '帶入中...');
+    google.script.run
+      .withSuccessHandler(safeHandler(() => {
+        clearDirty();
+        Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+        setStatus('devinvestment', '已帶入來源情境資料，挑戰低減目標已清空，請重新填寫', 'ok');
+        renderDevInvestmentPanel();
+      }))
+      .withFailureHandler(err => setStatus('devinvestment', '錯誤：' + err.message, 'err'))
+      .copyScenarioData(source, currentScenarioId, ['salesmix', 'costofsales', 'devinvestment', 'operatingexpense', 'parameters', 'linenotes']);
+  });
 }
 
-/* ================= 稅務費用比率 ================= */
+/* ================= 參數與比率(內建稅率 + 自訂參數) ================= */
 let rateData = null;
 
 function renderRatePanel() {
   if (!requireScope('paramrates', true)) return;
-  document.getElementById('panel-paramrates').innerHTML = gridShell('paramrates', '稅務費用比率');
+  document.getElementById('panel-paramrates').innerHTML = gridShell('paramrates', '參數與比率',
+    '公式裡用 <b>[參數名稱]</b> 取用（例：<code>[營業稅率]</code>、<code>[關稅率]</code>）。單位是 % 的參數以百分比輸入(5 = 5%)，公式取出來自動變成小數。' +
+    '「全車系」是這個情境的預設值，個別車系不同時才填車系欄位（留白 = 沿用）。可以自己新增參數，例如關稅率、KD件報價、倍率。');
   const cacheKey = panelCacheKey_('paramrates');
   if (panelDataCache_[cacheKey]) { rateData = panelDataCache_[cacheKey]; drawRateGrid(); }
   google.script.run
-    .withSuccessHandler(safeHandler(data => { panelDataCache_[cacheKey] = data; rateData = data; drawRateGrid(); }))
+    .withSuccessHandler(safeHandler(data => { panelDataCache_[cacheKey] = data; if (isDirty_()) return; rateData = data; drawRateGrid(); }))
     .withFailureHandler(showGlobalError)
     .getRateGrid(currentScenarioId, currentVehicleTypeId);
 }
 
 function drawRateGrid() {
-  document.getElementById('toolbar-paramrates').innerHTML =
-    '<button type="button" class="btn" onclick="saveRateGrid()">儲存</button>';
+  const toolbar = document.getElementById('toolbar-paramrates');
+  if (!toolbar) return;
+  toolbar.innerHTML = `<button type="button" class="btn" onclick="addParamDialog()">＋ 新增參數</button>
+    <span class="spacer"></span><button type="button" class="btn secondary" onclick="saveRateGrid()">儲存</button>`;
+  const dirty = () => "markDirty('paramrates', saveRateGrid, () => { clearDirty(); renderRatePanel(); })";
 
   document.getElementById('grid-paramrates').innerHTML = `
     <div class="grid-scroll">
     <table class="grid-table sticky-head-col">
       <thead><tr>
-        <th>比率項目</th><th>全車系適用</th>
+        <th>參數</th><th>單位</th><th>全車系</th>
         ${rateData.vehicles.map(v => `<th>${esc(v.VehicleCode || v.VehicleID)}</th>`).join('')}
+        <th>說明</th><th></th>
       </tr></thead>
       <tbody>
         ${rateData.rates.map(rate => `
           <tr>
-            <td class="row-head">${esc(rate.ParamName)}${rate.isDefault ? ' <span class="auto-tag">預設值</span>' : ''}</td>
+            <td class="row-head">${esc(rate.ParamName)}${rate.isDefault ? ' <span class="auto-tag" data-tip="這個情境還沒設定，目前用預設值">預設</span>' : ''}</td>
+            <td class="calc" style="text-align:center;">${esc(rate.unit || '%')}</td>
             <td><input type="number" step="any" class="rate-global" data-name="${esc(rate.ParamName)}"
               data-paramid="${esc(rate.globalParamID)}" value="${esc(rate.globalValue)}"
-              oninput="updateRatePlaceholders('${esc(rate.ParamName)}')"></td>
+              oninput="updateRatePlaceholders('${esc(rate.ParamName)}'); ${dirty()}"></td>
             ${rateData.vehicles.map(v => {
               const o = rate.overrides[v.VehicleID] || {};
               return `<td><input type="number" step="any" class="rate-override" data-name="${esc(rate.ParamName)}"
                 data-vehicle="${esc(v.VehicleID)}" data-paramid="${esc(o.ParamID)}" value="${esc(o.Value)}"
-                placeholder="${esc(rate.globalValue)}"></td>`;
+                placeholder="${esc(rate.globalValue)}" oninput="${dirty()}"></td>`;
             }).join('')}
+            <td class="muted" style="text-align:left;max-width:260px;white-space:normal;">${esc(rate.description || '')}</td>
+            <td class="row-actions">${rate.isBuiltIn ? '<span class="muted">內建</span>' :
+              `<button type="button" class="btn ghost sm" onclick="editParamDialog('${esc(rate.ParamName)}')">編輯</button><button type="button" class="btn ghost sm" onclick="deleteParam('${esc(rate.ParamName)}')">✕</button>`}</td>
           </tr>`).join('')}
       </tbody>
     </table>
     </div>
-    <p class="muted">車系欄位留白 = 沿用全車系適用的值（灰字為目前沿用的數值）。</p>`;
+    <p class="muted">車系欄位留白 = 沿用全車系的值（灰字為目前沿用的數值）。</p>`;
 }
 
-/** 改全車系值時，同步更新各車系欄位的提示值，一眼看得出沿用的是多少 */
 function updateRatePlaceholders(paramName) {
   const globalInput = document.querySelector(`.rate-global[data-name="${paramName}"]`);
   document.querySelectorAll(`.rate-override[data-name="${paramName}"]`)
@@ -1452,9 +1818,48 @@ function saveRateGrid() {
   });
   setStatus('paramrates', '儲存中...');
   google.script.run
-    .withSuccessHandler(() => { setStatus('paramrates', '已儲存', 'ok'); renderRatePanel(); })
+    .withSuccessHandler(() => { clearDirty(); setStatus('paramrates', '已儲存', 'ok'); renderRatePanel(); })
     .withFailureHandler(err => setStatus('paramrates', '錯誤：' + err.message, 'err'))
     .saveRateGrid(currentScenarioId, rows);
+}
+
+function paramDialog_(title, def, isNew) {
+  return openModal({
+    title,
+    body: '<p class="help">參數是全系統共用的定義(名稱/單位/預設值)；每個情境、每個車系的實際數值在這張表上填。</p>',
+    fields: [
+      { name: 'ParamName', label: '參數名稱', value: def.ParamName || '', placeholder: '例：關稅率', help: isNew ? '' : '名稱建立後不能修改' },
+      { name: 'Unit', label: '單位', type: 'select', value: def.Unit || '%', options: [['%', '%（以百分比輸入，公式取出時 ÷100）'], ['數值', '數值（原值取用，如倍率、金額）']] },
+      { name: 'DefaultValue', label: '預設值', type: 'number', value: def.DefaultValue === undefined ? '' : def.DefaultValue, help: '情境沒有填這個參數時用這個值' },
+      { name: 'Description', label: '說明', value: def.Description || '', placeholder: '選填，例：KD件平均關稅率' }
+    ],
+    okText: isNew ? '新增' : '儲存',
+    validate: v => !v.ParamName.trim() ? '請輸入參數名稱' : ''
+  });
+}
+function addParamDialog() {
+  if (isDirty_()) { toast('先儲存目前的修改再新增參數', 'warn'); return; }
+  paramDialog_('新增參數', {}, true).then(v => {
+    if (!v) return;
+    google.script.run.withSuccessHandler(safeHandler(() => { toast('已新增參數「' + v.ParamName.trim() + '」', 'ok'); renderRatePanel(); }))
+      .withFailureHandler(err => toast(err.message, 'err')).saveParamDef(v);
+  });
+}
+function editParamDialog(name) {
+  const rate = rateData.rates.find(r => r.ParamName === name) || {};
+  paramDialog_('編輯參數', { ParamName: name, Unit: rate.unit, DefaultValue: '', Description: rate.description }, false).then(v => {
+    if (!v) return;
+    v.ParamName = name;
+    google.script.run.withSuccessHandler(safeHandler(() => { toast('已更新參數', 'ok'); renderRatePanel(); }))
+      .withFailureHandler(err => toast(err.message, 'err')).saveParamDef(v);
+  });
+}
+function deleteParam(name) {
+  confirmModal('刪除參數「' + name + '」？', '所有情境填過的數值會一起刪除。有公式還在使用這個參數時會被擋下來。', '刪除', true).then(ok => {
+    if (!ok) return;
+    google.script.run.withSuccessHandler(safeHandler(() => { toast('已刪除參數', 'ok'); renderRatePanel(); }))
+      .withFailureHandler(err => toast(err.message, 'err')).deleteParamDef(name);
+  });
 }
 
 /* ================= 匯率設定 ================= */
@@ -1462,7 +1867,8 @@ let fxData = null;
 
 function renderFxPanel() {
   if (!requireScope('paramfx', true)) return;
-  document.getElementById('panel-paramfx').innerHTML = gridShell('paramfx', '匯率設定');
+  document.getElementById('panel-paramfx').innerHTML = gridShell('paramfx', '匯率設定',
+    '1 外幣 = ? 台幣。銷貨成本與開發總投以外幣登打時用這個匯率換算；公式裡也可以用 <b>[CNY匯率]</b> 這種寫法取用。');
   const cacheKey = panelCacheKey_('paramfx', 'scenario');
   if (panelDataCache_[cacheKey]) { fxData = panelDataCache_[cacheKey]; drawFxGrid(); }
   google.script.run
@@ -1473,10 +1879,10 @@ function renderFxPanel() {
 
 function drawFxGrid() {
   document.getElementById('toolbar-paramfx').innerHTML = `
-    <button type="button" class="btn" onclick="saveFxGrid()">儲存</button>
-    <span class="toolbar-sep"></span>
-    <input id="fx-new-currency" type="text" placeholder="新增幣別代碼" style="width:130px;">
-    <button type="button" class="btn secondary" onclick="addFxCurrency()">新增幣別</button>
+    <input id="fx-new-currency" type="text" placeholder="幣別代碼，如 KRW" style="width:150px;">
+    <button type="button" class="btn secondary" onclick="addFxCurrency()">＋ 新增幣別</button>
+    <span class="spacer"></span>
+    <button type="button" class="btn secondary" onclick="saveFxGrid()">儲存</button>
   `;
 
   document.getElementById('grid-paramfx').innerHTML = `
@@ -1493,7 +1899,8 @@ function drawFxGrid() {
             ${fxData.paramNames.map(name => {
               const cell = row.cells[name] || {};
               return `<td><input type="number" step="any" class="fx-cell" data-currency="${esc(row.Currency)}"
-                data-name="${esc(name)}" data-paramid="${esc(cell.ParamID)}" value="${esc(cell.Value)}"></td>`;
+                data-name="${esc(name)}" data-paramid="${esc(cell.ParamID)}" value="${esc(cell.Value)}"
+                oninput="markDirty('paramfx', saveFxGrid, () => { clearDirty(); renderFxPanel(); })"></td>`;
             }).join('')}
           </tr>`).join('')}
       </tbody>
@@ -1523,9 +1930,1048 @@ function saveFxGrid() {
   });
   setStatus('paramfx', '儲存中...');
   google.script.run
-    .withSuccessHandler(safeHandler(data => { fxData = data; drawFxGrid(); setStatus('paramfx', '已儲存', 'ok'); }))
+    .withSuccessHandler(safeHandler(data => { clearDirty(); fxData = data; drawFxGrid(); setStatus('paramfx', '已儲存', 'ok'); }))
     .withFailureHandler(err => setStatus('paramfx', '錯誤：' + err.message, 'err'))
     .saveFxGrid(currentScenarioId, cells);
+}
+
+/* ================= 科目與公式：每個車型各自的科目表 + 公式式計算來源 ================= */
+let chartEditor = null;      // getChartEditor 的結果
+let chartSelected = '';      // 目前選中的科目代碼('' = 沒選；'__new__' = 新增中)
+let chartDraft = null;       // 編輯中的科目(還沒存)
+let chartFilter = '';
+let chartPreview = null;     // previewLineFormula 的結果
+let chartPreviewTimer_ = null;
+
+const CALC_TYPE_INFO = {
+  INPUT: ['手動輸入', '在「銷貨成本」或「營業費用」頁，每個車系各填單台金額'],
+  FORMULA: ['公式', '用其他科目、參數、系統變數計算，例如 P8 × [季Margin率]'],
+  DEV_AMORT: ['開發總投攤提', '開發總投選這個科目當攤提落點的金額 ÷ 攤提台數']
+};
+const FORMULA_FUNCTIONS_UI = [
+  ['CHILDREN()', '子科目合計（小計用）'], ['TAXDEDUCT()', '可扣除貨物稅的科目合計'], ['ROUND(x)', '四捨五入到整數'],
+  ['ROUND(x, 2)', '四捨五入到小數 2 位'], ['SUM(a, b)', '加總'], ['MAX(a, b)', '取大'], ['MIN(a, b)', '取小'],
+  ['IF(條件, 成立, 不成立)', '條件判斷，例 IF([月銷量] > 100, 1, 2)'], ['ABS(x)', '絕對值']
+];
+
+function renderChartPanel() {
+  const panel = document.getElementById('panel-lineitems');
+  if (!requireScope('lineitems', false)) return;
+  panel.innerHTML = `<p class="page-intro">車型 <b>${esc(currentVehicleTypeId)}</b> 自己的科目表：增刪改都只影響這個車型。` +
+    `每個科目選一種<b>計算來源</b>（手動輸入 / 公式 / 開發總投攤提）；內建的售價結構、貨物稅、季Margin、各段小計也都只是預設公式，可以直接改。` +
+    `左邊拖曳 ⠿ 調整順序，放開立即生效。</p><div id="chart-root"><p class="muted">載入中...</p></div>`;
+  loadChartEditor_();
+}
+
+function loadChartEditor_(keepSelection) {
+  const cacheKey = panelCacheKey_('lineitems', 'both');
+  const apply = data => {
+    chartEditor = data;
+    if (!keepSelection || (chartSelected && chartSelected !== '__new__' && !data.lines.some(l => l.LineCode === chartSelected))) {
+      if (!keepSelection) { chartSelected = chartSelected && data.lines.some(l => l.LineCode === chartSelected) ? chartSelected : ''; }
+    }
+    if (chartSelected && chartSelected !== '__new__') {
+      const line = data.lines.find(l => l.LineCode === chartSelected);
+      chartDraft = line ? JSON.parse(JSON.stringify(line)) : null;
+      if (!line) chartSelected = '';
+    }
+    drawChartEditor_();
+  };
+  if (panelDataCache_[cacheKey] && !isDirty_()) apply(panelDataCache_[cacheKey]);
+  google.script.run
+    .withSuccessHandler(safeHandler(data => {
+      panelDataCache_[cacheKey] = data;
+      if (isDirty_() && chartEditor) { chartEditor.problems = data.problems; chartEditor.preview = data.preview; return; }
+      apply(data);
+    }))
+    .withFailureHandler(showGlobalError)
+    .getChartEditor(currentVehicleTypeId, currentScenarioId);
+}
+
+function chartLineByCode_(code) { return chartEditor ? chartEditor.lines.find(l => l.LineCode === code) : null; }
+function chartCodeNameMap_() {
+  const map = {};
+  (chartEditor ? chartEditor.lines : []).forEach(l => { map[l.LineCode] = l.LineName; });
+  return map;
+}
+
+function drawChartEditor_() {
+  const root = document.getElementById('chart-root');
+  if (!root || !chartEditor) return;
+  const errs = chartEditor.problems.filter(p => p.level === 'error');
+  const warns = chartEditor.problems.filter(p => p.level === 'warning');
+  const others = chartEditor.otherTypes || [];
+  root.innerHTML = `
+    <div class="toolbar">
+      <button type="button" class="btn" onclick="startNewChartLine()">＋ 新增科目</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" onclick="copyChartDialog()" ${others.length ? '' : 'disabled'} data-tip="把這個車型的科目表換成標準範本或其他車型的版本">從其他車型/範本複製…</button>
+      <button type="button" class="btn ghost" onclick="saveChartAsTemplateUi()" data-tip="之後新建的車型預設用這一份科目表">存成標準範本</button>
+      <button type="button" class="btn ghost" onclick="restoreChartDefaults()" data-tip="內建科目的名稱、公式、位置回復成系統預設；自己新增的科目不受影響">恢復內建預設</button>
+    </div>
+    ${errs.length ? `<div class="callout err"><div><b>公式有錯誤（這些科目暫時以 0 計算）：</b><ul class="problem-list">${errs.map(p => `<li class="error"><a href="#" onclick="selectChartLine('${esc(p.code)}');return false;">${esc(p.message)}</a></li>`).join('')}</ul></div></div>` : ''}
+    ${warns.length ? `<div class="callout warn"><div><b>提醒：</b><ul class="problem-list">${warns.map(p => `<li class="warning"><a href="#" onclick="selectChartLine('${esc(p.code)}');return false;">${esc(p.message)}</a></li>`).join('')}</ul></div></div>` : ''}
+    <div class="chart-layout">
+      <div class="chart-tree">
+        <div class="chart-tree-head">
+          <input type="search" placeholder="搜尋科目名稱或代碼…" value="${esc(chartFilter)}" oninput="chartFilter=this.value;drawChartTreeBody_()">
+        </div>
+        <div class="chart-tree-body" id="chart-tree-body"></div>
+      </div>
+      <div id="chart-editor-pane">${chartEditorPaneHtml_()}</div>
+    </div>`;
+  drawChartTreeBody_();
+  afterChartEditorRender_();
+}
+
+/** 科目樹：售價結構一段、損益一段；父科目底下的子科目縮排，可以各自在同一層拖曳排序 */
+function drawChartTreeBody_() {
+  const body = document.getElementById('chart-tree-body');
+  if (!body) return;
+  const lines = chartEditor.lines;
+  const kids = {};
+  const codes = {};
+  lines.forEach(l => { codes[l.LineCode] = true; });
+  lines.forEach(l => { const p = l.ParentLine && codes[l.ParentLine] ? l.ParentLine : ''; (kids[p] = kids[p] || []).push(l); });
+  const problemsOf = {};
+  chartEditor.problems.forEach(p => { (problemsOf[p.code] = problemsOf[p.code] || []).push(p); });
+  const q = chartFilter.trim().toLowerCase();
+  const matches = l => !q || l.LineName.toLowerCase().indexOf(q) !== -1 || l.LineCode.toLowerCase() === q;
+  const subtreeMatches = l => matches(l) || (kids[l.LineCode] || []).some(subtreeMatches);
+
+  const rowHtml = (l, depth) => {
+    const probs = problemsOf[l.LineCode] || [];
+    const hasErr = probs.some(p => p.level === 'error'), hasWarn = probs.some(p => p.level === 'warning');
+    const isGroup = (kids[l.LineCode] || []).length > 0;
+    const cls = ['tree-row', isGroup ? 'group' : '', l.isProtected ? 'subtotal-row' : '', chartSelected === l.LineCode ? 'selected' : '', q && !matches(l) ? 'dimmed' : ''].filter(c => c).join(' ');
+    const tag = l.CalcType === 'INPUT' ? '輸入' : l.CalcType === 'DEV_AMORT' ? '攤提' : (l.isDefaultFormula ? '公式' : '公式*');
+    return `<div class="${cls}" style="padding-left:${8 + depth * 18}px;" onclick="selectChartLine('${esc(l.LineCode)}')">
+      ${q ? '<span style="width:22px;"></span>' : dragHandleHtml('拖曳調整「' + l.LineName + '」的順序')}
+      <span class="tree-name" title="${esc(l.LineName)}">${esc(l.LineName)}</span>
+      ${hasErr ? '<span class="tree-err" data-tip="公式有錯誤">!</span>' : hasWarn ? '<span class="tree-warn" data-tip="沒有被算進營業淨利">?</span>' : ''}
+      <span class="ct-badge ct-${esc(l.CalcType)}" data-tip="${esc(CALC_TYPE_INFO[l.CalcType][0] + (l.CalcType === 'FORMULA' ? '：' + l.Formula : '') + (l.CalcType === 'FORMULA' && !l.isDefaultFormula && DEFAULT_FORMULA_HINT_[l.LineCode] ? '\n（已改過預設公式）' : ''))}">${tag}</span>
+      <span class="tree-code">${esc(l.LineCode)}</span>
+    </div>`;
+  };
+  const blockHtml = (l, depth) => {
+    if (q && !subtreeMatches(l)) return '';
+    const children = kids[l.LineCode] || [];
+    return `<div class="tree-block" data-key="${esc(l.LineCode)}">${rowHtml(l, depth)}${children.length ? `<div class="tree-children" data-parent="${esc(l.LineCode)}">${children.map(c => blockHtml(c, depth + 1)).join('')}</div>` : ''}</div>`;
+  };
+  const top = kids[''] || [];
+  const price = top.filter(l => l.Category === '售價結構');
+  const pl = top.filter(l => l.Category !== '售價結構');
+  body.innerHTML = `
+    ${price.length ? `<div class="tree-section">售價結構</div><div class="tree-top" data-parent="" data-section="price">${price.map(l => blockHtml(l, 0)).join('')}</div>` : ''}
+    <div class="tree-section">損益</div><div class="tree-top" data-parent="" data-section="pl">${pl.map(l => blockHtml(l, 0)).join('')}</div>`;
+  if (q) return;
+  body.querySelectorAll('.tree-top, .tree-children').forEach(container => {
+    makeSortable(container, { items: '.tree-block', direct: true, onEnd: () => saveChartOrderFromDom_() });
+  });
+}
+const DEFAULT_FORMULA_HINT_ = { P1: 1, P2: 1, P3: 1, P4: 1, P5: 1, P6: 1, P7: 1, P8: 1, P9: 1, A: 1, B: 1, C: 1, E: 1, G: 1, I: 1, K: 1, b13: 1, d4: 1 };
+
+/** 拖曳放開後：依畫面上的樹狀順序組出完整順序(含父科目)一次送後端 */
+function saveChartOrderFromDom_() {
+  const items = [];
+  const walk = (container, parent) => {
+    Array.from(container.children).forEach(block => {
+      if (!block.classList.contains('tree-block')) return;
+      items.push({ LineCode: block.getAttribute('data-key'), ParentLine: parent });
+      const childBox = block.querySelector(':scope > .tree-children');
+      if (childBox) walk(childBox, block.getAttribute('data-key'));
+    });
+  };
+  document.querySelectorAll('#chart-tree-body .tree-top').forEach(top => walk(top, ''));
+  google.script.run
+    .withSuccessHandler(safeHandler(() => {
+      Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+      toast('已更新科目順序', 'ok', 1400);
+      loadChartEditor_(true);
+    }))
+    .withFailureHandler(err => { toast(err.message, 'err'); loadChartEditor_(true); })
+    .setLineOrder(currentVehicleTypeId, items);
+}
+
+function selectChartLine(code) {
+  if (code === chartSelected) return;
+  const go = () => {
+    clearDirty();
+    chartSelected = code;
+    const line = chartLineByCode_(code);
+    chartDraft = line ? JSON.parse(JSON.stringify(line)) : null;
+    chartPreview = null;
+    drawChartTreeBody_();
+    const pane = document.getElementById('chart-editor-pane');
+    if (pane) pane.innerHTML = chartEditorPaneHtml_();
+    afterChartEditorRender_();
+  };
+  if (isDirty_()) confirmLeave_().then(ok => { if (ok) go(); }); else go();
+}
+
+function startNewChartLine() {
+  const go = () => {
+    clearDirty();
+    chartSelected = '__new__';
+    chartDraft = { LineCode: '', LineName: '', ParentLine: 'B', CalcType: 'INPUT', Formula: '', VehicleFormulas: {}, CommodityTaxDeduct: '', DevAmortCategory: '', Description: '', isProtected: false };
+    chartPreview = null;
+    drawChartTreeBody_();
+    document.getElementById('chart-editor-pane').innerHTML = chartEditorPaneHtml_();
+    afterChartEditorRender_();
+    const name = document.getElementById('ce-name');
+    if (name) name.focus();
+  };
+  if (isDirty_()) confirmLeave_().then(ok => { if (ok) go(); }); else go();
+}
+
+/** 父科目選項：公式裡有 CHILDREN() 的科目(會把子科目加總起來的才適合當父科目)，或目前已經有子科目的科目 */
+function chartParentOptions_(selfCode) {
+  const lines = chartEditor.lines;
+  const descendants = {};
+  const mark = code => lines.filter(l => l.ParentLine === code).forEach(l => { descendants[l.LineCode] = true; mark(l.LineCode); });
+  if (selfCode) mark(selfCode);
+  const opts = lines.filter(l => l.LineCode !== selfCode && !descendants[l.LineCode] &&
+    ((l.CalcType === 'FORMULA' && /CHILDREN\s*\(/i.test(l.Formula || '')) || lines.some(x => x.ParentLine === l.LineCode)));
+  return [['', '（頂層，不屬於任何小計）']].concat(opts.map(l => [l.LineCode, l.LineName + '（' + l.LineCode + '）']));
+}
+
+function chartEditorPaneHtml_() {
+  if (!chartDraft) {
+    return `<div class="card editor-empty"><div style="font-size:30px;opacity:.5;">ƒx</div>
+      <h4 style="color:var(--text);margin:8px 0 4px;">選一個科目來編輯</h4>
+      <p>點左邊的科目，就可以改名稱、計算來源與公式，<br>邊打公式邊看各車系算出來的結果。</p></div>`;
+  }
+  const d = chartDraft;
+  const isNew = chartSelected === '__new__';
+  const vehicles = chartEditor.vehicles || [];
+  const overrides = d.VehicleFormulas || {};
+  const hasOverrides = Object.keys(overrides).some(k => String(overrides[k] || '').trim());
+  const calcCards = Object.keys(CALC_TYPE_INFO).map(t => `
+    <button type="button" class="calc-type-card${d.CalcType === t ? ' active' : ''}" onclick="setChartCalcType('${t}')">
+      <b>${esc(CALC_TYPE_INFO[t][0])}</b><span>${esc(CALC_TYPE_INFO[t][1])}</span></button>`).join('');
+  const parentOpts = chartParentOptions_(d.LineCode);
+  return `
+    <div class="card">
+      <div class="card-head">
+        <h3>${isNew ? '新增科目' : esc(d.LineName || '(未命名)')}</h3>
+        ${isNew ? '' : `<span class="tree-code" style="font-size:12px;">${esc(d.LineCode)}</span>`}
+        ${d.isProtected ? '<span class="type-badge" data-tip="小計/毛利/淨利科目，儀表板與報告會用到，不能刪除；公式可以改">結構科目</span>' : ''}
+        <span class="spacer"></span>
+        ${!isNew && d.usage ? `<span class="muted">${d.usage} 筆輸入金額</span>` : ''}
+      </div>
+      <div class="field-row" style="margin-bottom:14px;">
+        <label class="field" style="flex:2;min-width:220px;"><span>科目名稱</span>
+          <input id="ce-name" type="text" value="${esc(d.LineName)}" oninput="chartDraft.LineName=this.value;chartDirty_()"></label>
+        <label class="field" style="flex:2;min-width:220px;"><span>計入哪個小計(父科目)</span>
+          <select ${d.isProtected ? 'disabled' : ''} onchange="chartDraft.ParentLine=this.value;chartDirty_();schedulePreview_()">
+            ${parentOpts.map(o => `<option value="${esc(o[0])}"${String(d.ParentLine || '') === o[0] ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}
+          </select></label>
+      </div>
+      <div class="field" style="margin-bottom:10px;"><span>計算來源</span></div>
+      <div class="calc-type-cards" style="margin-bottom:14px;">${calcCards}</div>
+      <div id="ce-calc-body">${chartCalcBodyHtml_()}</div>
+      <div class="field-row" style="margin-top:14px;">
+        <label class="chk" data-tip="貨物稅的完稅價格要扣除這個科目(內建：廣宣、促銷、批標售、季Margin)。公式裡的 TAXDEDUCT() 就是這些科目的合計。">
+          <input type="checkbox" ${String(d.CommodityTaxDeduct).toUpperCase() === 'Y' ? 'checked' : ''}
+            onchange="chartDraft.CommodityTaxDeduct=this.checked?'Y':'';chartDirty_();schedulePreview_()"> 貨物稅完稅價格可扣除</label>
+      </div>
+      <label class="field" style="margin-top:14px;"><span>科目說明（算法依據、資料來源…）</span>
+        <textarea rows="2" oninput="chartDraft.Description=this.value;chartDirty_()" placeholder="例：依生技部工時 × 24~26 年平均費率">${esc(d.Description || '')}</textarea></label>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h4>車系個別公式</h4>
+        <span class="muted">同一個車型裡，個別車系算法不同時才需要填（例：3人貨車的一般材料 = DE × 1.2）。留白 = 照上面的計算來源。</span></div>
+      ${vehicles.length ? `<div class="grid-scroll"><table class="grid-table override-table">
+        <thead><tr><th style="width:180px;">車系</th><th>個別公式</th></tr></thead>
+        <tbody>${vehicles.map(v => `<tr>
+          <td class="row-head">${esc(v.VehicleCode || v.VehicleID)}</td>
+          <td><input type="text" value="${esc(overrides[v.VehicleID] || '')}" placeholder="（同上）"
+            oninput="setChartOverride('${esc(v.VehicleID)}', this.value)"></td></tr>`).join('')}</tbody>
+      </table></div>` : '<p class="muted">這個車型還沒有車系。</p>'}
+      ${hasOverrides ? '<p class="help" style="margin-top:6px;">有填個別公式的車系，不論上面選什麼計算來源，一律用個別公式。</p>' : ''}
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h4>試算（目前情境：${esc(currentScenario ? scenarioLabel(currentScenario) : '未選擇')}）</h4>
+        <span class="muted">改公式時即時試算，還沒儲存不影響其他頁面</span></div>
+      <div id="ce-preview">${chartPreviewHtml_()}</div>
+    </div>
+
+    <div class="toolbar" style="justify-content:flex-end;">
+      ${!isNew && !d.isProtected ? `<button type="button" class="btn danger" onclick="deleteChartLine()">刪除科目</button>` : ''}
+      <span class="spacer"></span>
+      <button type="button" class="btn secondary" onclick="cancelChartEdit()">${isNew ? '取消' : '還原'}</button>
+      <button type="button" class="btn" onclick="saveChartLineUi()">${isNew ? '新增科目' : '儲存科目'}</button>
+    </div>`;
+}
+
+function chartCalcBodyHtml_() {
+  const d = chartDraft;
+  if (d.CalcType === 'INPUT') {
+    const isCost = chartIsCostSection_(d);
+    return `<div class="callout info">金額在「${isCost ? '銷貨成本' : '營業費用'}」頁每個車系各填。
+      <button type="button" class="link-btn" onclick="switchTab('${isCost ? 'costofsales' : 'operatingexpense'}')">前往${isCost ? '銷貨成本' : '營業費用'} →</button></div>`;
+  }
+  if (d.CalcType === 'DEV_AMORT') {
+    return `<div class="field-row"><label class="field"><span>開發總投大類</span>
+        <select onchange="chartDraft.DevAmortCategory=this.value;chartDirty_()">${(chartEditor.devCategories || ['設備', '模具', '費用']).map(c =>
+          `<option value="${c}"${d.DevAmortCategory === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label></div>
+      <div class="callout info" style="margin-top:10px;">在「開發總投」頁把投資列的攤提落點選成這個科目，金額 ÷ 攤提台數就會出現在這裡（可以只攤給部分車系）。
+        <button type="button" class="link-btn" onclick="switchTab('devinvestment')">前往開發總投 →</button></div>`;
+  }
+  return `
+    <div class="formula-box">
+      <textarea id="ce-formula" rows="2" spellcheck="false" oninput="chartDraft.Formula=this.value;chartDirty_();updateFormulaReadable_();schedulePreview_()"
+        placeholder="例：P8 * [季Margin率]　或　[材料成本-KD] * [關稅率]">${esc(d.Formula || '')}</textarea>
+      <div class="formula-readable" id="ce-readable">${formulaReadableHtml_(d.Formula)}</div>
+    </div>
+    <div class="formula-status" id="ce-status"></div>
+    <div class="palette">
+      <div class="palette-row"><span class="muted">科目</span>
+        <input type="search" class="palette-search" placeholder="搜尋科目…" oninput="drawPaletteLines_(this.value)">
+        <span id="ce-pal-lines" style="display:contents;"></span></div>
+      <div class="palette-row"><span class="muted">變數</span>${(chartEditor.variables || []).map(v =>
+        `<button type="button" class="ins-chip var" data-tip="${esc(v.desc)}" onclick="insertFormulaText('[${esc(v.name)}]')">${esc(v.name)}</button>`).join('')}</div>
+      <div class="palette-row"><span class="muted">參數</span>${(chartEditor.params || []).map(p =>
+        `<button type="button" class="ins-chip var" data-tip="${esc((p.Description || '') + '（單位 ' + p.Unit + (p.Unit === '%' ? '，取出為小數' : '') + '）')}" onclick="insertFormulaText('[${esc(p.ParamName)}]')">${esc(p.ParamName)}</button>`).join('')}
+        <button type="button" class="link-btn" onclick="switchTab('paramrates')">＋ 新增參數</button></div>
+      <div class="palette-row"><span class="muted">函式</span>${FORMULA_FUNCTIONS_UI.map(f =>
+        `<button type="button" class="ins-chip fn" data-tip="${esc(f[1])}" onclick="insertFormulaText('${esc(f[0])}')">${esc(f[0])}</button>`).join('')}</div>
+      <div class="palette-row"><span class="muted">跨情境</span>
+        <select id="ce-ref-sc" style="max-width:220px;">${(chartEditor.referenceScenarios || []).map(r => `<option value="${esc(r.ScenarioID)}">${esc(r.label)}</option>`).join('')}</select>
+        <input id="ce-ref-code" type="text" placeholder="科目代碼，如 b4" style="width:130px;">
+        <button type="button" class="ins-chip fn" onclick="insertRefFormula_()" data-tip="引用另一個情境(可以是別的車型)的科目金額，例：以 DE 為 BASE × 1.2">插入 REF</button>
+      </div>
+    </div>`;
+}
+
+function chartIsCostSection_(d) {
+  let cur = d, guard = 0;
+  while (cur && cur.ParentLine && guard++ < 20) {
+    if (cur.ParentLine === 'B') return true;
+    cur = chartLineByCode_(cur.ParentLine);
+  }
+  return false;
+}
+
+function afterChartEditorRender_() {
+  drawPaletteLines_('');
+  updateFormulaReadable_();
+  if (chartDraft) schedulePreview_(true);
+}
+
+function drawPaletteLines_(q) {
+  const box = document.getElementById('ce-pal-lines');
+  if (!box) return;
+  q = String(q || '').trim().toLowerCase();
+  const lines = chartEditor.lines.filter(l => l.LineCode !== (chartDraft && chartDraft.LineCode) &&
+    (!q || l.LineName.toLowerCase().indexOf(q) !== -1 || l.LineCode.toLowerCase().indexOf(q) === 0));
+  const shown = q ? lines.slice(0, 24) : lines.filter(l => l.isProtected || l.Category === '售價結構').slice(0, 24);
+  box.innerHTML = shown.map(l => `<button type="button" class="ins-chip code" data-tip="${esc(l.LineName)}" onclick="insertFormulaText('${esc(l.LineCode)}')">${esc(l.LineCode)} ${esc(shortLineName(l.LineName))}</button>`).join('') +
+    (!q ? '<span class="muted" style="width:auto;font-weight:400;">（搜尋可找所有科目）</span>' : '');
+}
+
+function insertFormulaText(text) {
+  const ta = document.getElementById('ce-formula');
+  if (!ta) return;
+  const start = ta.selectionStart || 0, end = ta.selectionEnd || 0;
+  const v = ta.value;
+  const needSpace = start > 0 && /[\w\]\)]$/.test(v.slice(0, start)) && /^[\w\[]/.test(text);
+  const ins = (needSpace ? ' ' : '') + text;
+  ta.value = v.slice(0, start) + ins + v.slice(end);
+  const pos = start + ins.length;
+  ta.focus();
+  ta.setSelectionRange(pos, pos);
+  chartDraft.Formula = ta.value;
+  chartDirty_();
+  updateFormulaReadable_();
+  schedulePreview_();
+}
+function insertRefFormula_() {
+  const sc = val('ce-ref-sc'), code = val('ce-ref-code').trim();
+  if (!sc || !code) { toast('請選擇情境並填科目代碼', 'warn'); return; }
+  insertFormulaText(`REF("${sc}", "${code}")`);
+}
+
+/** 公式的可讀版本：代碼換成科目名稱、[名稱] 與函式上色，讓不熟代碼的人也看得懂 */
+function formulaReadableHtml_(formula) {
+  if (!formula || !String(formula).trim()) return '<span class="muted">（輸入公式後，這裡會用科目名稱顯示）</span>';
+  const map = chartCodeNameMap_();
+  const refLabels = {};
+  (chartEditor.referenceScenarios || []).forEach(r => { refLabels[r.ScenarioID] = r.label; });
+  const src = String(formula);
+  let out = '', i = 0;
+  while (i < src.length) {
+    const rest = src.slice(i);
+    let m;
+    if ((m = /^\[[^\]]*\]/.exec(rest))) { out += `<span class="fx-tok-name">${esc(m[0].slice(1, -1))}</span>`; i += m[0].length; continue; }
+    if ((m = /^"[^"]*"/.exec(rest))) { const inner = m[0].slice(1, -1); out += esc(refLabels[inner] ? '「' + refLabels[inner] + '」' : m[0]); i += m[0].length; continue; }
+    if ((m = /^[A-Za-z_][A-Za-z0-9_]*(?=\s*\()/.exec(rest))) {
+      const fnLabel = { CHILDREN: 'Σ子科目', TAXDEDUCT: 'Σ可扣除貨物稅科目' }[m[0].toUpperCase()];
+      out += `<span class="fx-tok-fn">${esc(fnLabel || m[0].toUpperCase())}</span>`;
+      i += m[0].length;
+      if (fnLabel) { const close = /^\s*\(\s*\)/.exec(src.slice(i)); if (close) i += close[0].length; }
+      continue;
+    }
+    if ((m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(rest))) {
+      out += map[m[0]] ? `<span class="fx-tok-code">${esc(map[m[0]])}</span>` : `<span class="negative">${esc(m[0])}</span>`;
+      i += m[0].length; continue;
+    }
+    out += esc(rest[0].replace('*', '×').replace('/', '÷'));
+    i++;
+  }
+  return '= ' + out;
+}
+function updateFormulaReadable_() {
+  const el = document.getElementById('ce-readable');
+  if (el && chartDraft) el.innerHTML = formulaReadableHtml_(chartDraft.Formula);
+}
+
+function setChartCalcType(t) {
+  if (!chartDraft || chartDraft.CalcType === t) return;
+  chartDraft.CalcType = t;
+  if (t === 'FORMULA' && !chartDraft.Formula) chartDraft.Formula = '';
+  if (t === 'DEV_AMORT' && !chartDraft.DevAmortCategory) chartDraft.DevAmortCategory = chartDraft.ParentLine === 'G' ? '費用' : '模具';
+  document.querySelectorAll('.calc-type-card').forEach(el => el.classList.toggle('active', el.getAttribute('onclick').indexOf("'" + t + "'") !== -1));
+  document.getElementById('ce-calc-body').innerHTML = chartCalcBodyHtml_();
+  afterChartEditorRender_();
+  chartDirty_();
+}
+function setChartOverride(vehicleId, formula) {
+  chartDraft.VehicleFormulas = chartDraft.VehicleFormulas || {};
+  chartDraft.VehicleFormulas[vehicleId] = formula;
+  chartDirty_();
+  schedulePreview_();
+}
+function chartDirty_() { markDirty('lineitems', saveChartLineUi, cancelChartEdit); }
+
+function chartDraftPayload_() {
+  const d = chartDraft;
+  return {
+    LineCode: chartSelected === '__new__' ? '' : d.LineCode,
+    LineName: d.LineName, ParentLine: d.ParentLine || '', CalcType: d.CalcType,
+    Formula: d.CalcType === 'FORMULA' ? d.Formula : '', VehicleFormulas: d.VehicleFormulas || {},
+    CommodityTaxDeduct: d.CommodityTaxDeduct || '', DevAmortCategory: d.DevAmortCategory || '', Description: d.Description || ''
+  };
+}
+
+/** 邊打公式邊試算：debounce 後送「還沒存的這一個科目」給後端算，不寫入任何資料 */
+function schedulePreview_(immediate) {
+  if (chartPreviewTimer_) clearTimeout(chartPreviewTimer_);
+  chartPreviewTimer_ = setTimeout(() => {
+    if (!chartDraft) return;
+    const payload = chartDraftPayload_();
+    if (chartSelected === '__new__') { renderChartPreview_(); return; }
+    google.script.run
+      .withSuccessHandler(res => { chartPreview = res; renderChartPreview_(); })
+      .withFailureHandler(err => { chartPreview = { problems: [{ message: err.message }] }; renderChartPreview_(); })
+      .previewLineFormula(currentVehicleTypeId, currentScenarioId, payload);
+  }, immediate ? 0 : 350);
+}
+function renderChartPreview_() {
+  const box = document.getElementById('ce-preview');
+  if (box) box.innerHTML = chartPreviewHtml_();
+  const st = document.getElementById('ce-status');
+  if (st && chartDraft && chartDraft.CalcType === 'FORMULA') {
+    const probs = chartPreview && chartPreview.problems || [];
+    if (!String(chartDraft.Formula || '').trim()) { st.className = 'formula-status'; st.textContent = ''; }
+    else if (probs.length) { st.className = 'formula-status err'; st.textContent = '✘ ' + probs.map(p => p.message).join('；'); }
+    else if (chartPreview) { st.className = 'formula-status ok'; st.textContent = '✔ 公式正確'; }
+  }
+}
+function chartPreviewHtml_() {
+  if (!currentScenarioId) return '<p class="muted">右上角選一個情境就能看到試算結果。</p>';
+  if (chartSelected === '__new__') return '<p class="muted">新增科目後就能試算。</p>';
+  const cur = chartEditor.preview;
+  const next = chartPreview && chartPreview.preview;
+  const probs = (chartPreview && chartPreview.problems) || [];
+  if (!cur && !next) return '<p class="muted">這個情境還沒有銷售構成資料，無法試算。</p>';
+  const vehicles = (chartEditor.vehicles || []).filter(v => (cur && cur.values[v.VehicleID]) || (next && next.values[v.VehicleID]));
+  if (!vehicles.length) return '<p class="muted">這個情境還沒有銷售構成資料，無法試算。</p>';
+  const code = chartDraft.LineCode;
+  const watch = [code, 'K'].filter((c, i, a) => a.indexOf(c) === i);
+  const map = chartCodeNameMap_();
+  return `${probs.length ? `<div class="callout err">${probs.map(p => esc(p.message)).join('<br>')}</div>` : ''}
+    <div class="grid-scroll"><table class="grid-table preview-table">
+      <thead><tr><th>車系</th>${watch.map(c => `<th>${esc(map[c] || c)}<div class="th-sub">目前</div></th><th>${esc(map[c] || c)}<div class="th-sub">修改後</div></th>`).join('')}<th>計算過程(修改後)</th></tr></thead>
+      <tbody>${vehicles.map(v => {
+        const a = cur && cur.values[v.VehicleID] || {}, b = next && next.values[v.VehicleID] || null;
+        const err = next && next.errors[v.VehicleID] && (next.errors[v.VehicleID][code] || next.errors[v.VehicleID]['*']);
+        const trace = next && next.traces[v.VehicleID] && next.traces[v.VehicleID][code];
+        return `<tr><td class="row-head">${esc(v.VehicleCode || v.VehicleID)}</td>
+          ${watch.map(c => {
+            const av = a[c], bv = b ? b[c] : undefined;
+            const changed = b && av !== undefined && bv !== undefined && Math.abs(av - bv) > 0.5;
+            return `<td class="calc">${av === undefined ? '—' : fmt(av)}</td><td class="calc${changed ? ' ' + ((c === 'K' ? bv > av : bv < av) ? 'good' : 'bad') : ''}" style="${changed ? 'font-weight:700;' : ''}">${bv === undefined ? '—' : fmt(bv)}</td>`;
+          }).join('')}
+          <td class="${err ? 'err' : 'muted'}" style="text-align:left;white-space:pre-line;font-size:11.5px;max-width:420px;">${err ? '⚠ ' + esc(err) : esc(traceText_(trace, map))}</td></tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+}
+
+function saveChartLineUi() {
+  if (!chartDraft) return;
+  const payload = chartDraftPayload_();
+  if (!String(payload.LineName || '').trim()) { toast('請輸入科目名稱', 'warn'); return; }
+  payload.__scenarioId = currentScenarioId;
+  google.script.run
+    .withSuccessHandler(safeHandler(res => {
+      clearDirty();
+      Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+      chartEditor = res.editor;
+      chartSelected = res.line.LineCode;
+      chartDraft = JSON.parse(JSON.stringify(chartEditor.lines.find(l => l.LineCode === chartSelected) || res.line));
+      chartPreview = null;
+      toast(payload.LineCode ? '已儲存「' + res.line.LineName + '」' : '已新增科目「' + res.line.LineName + '」（' + res.line.LineCode + '）', 'ok');
+      drawChartEditor_();
+    }))
+    .withFailureHandler(err => toast(err.message, 'err'))
+    .saveChartLine(currentVehicleTypeId, payload);
+}
+function cancelChartEdit() {
+  clearDirty();
+  if (chartSelected === '__new__') { chartSelected = ''; chartDraft = null; }
+  else { const l = chartLineByCode_(chartSelected); chartDraft = l ? JSON.parse(JSON.stringify(l)) : null; }
+  chartPreview = null;
+  drawChartEditor_();
+}
+function deleteChartLine() {
+  const d = chartDraft;
+  confirmModal('刪除科目「' + d.LineName + '」？',
+    `只影響車型 <b>${esc(currentVehicleTypeId)}</b>。${d.usage ? `這個科目在 ${esc(currentVehicleTypeId)} 的情境裡有 <b>${d.usage}</b> 筆輸入金額，會一起清掉。` : ''}被其他公式引用、或底下還有子科目時會被擋下來。`,
+    '刪除', true).then(ok => {
+    if (!ok) return;
+    google.script.run
+      .withSuccessHandler(safeHandler(() => {
+        clearDirty();
+        Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+        toast('已刪除科目', 'ok');
+        chartSelected = ''; chartDraft = null;
+        loadChartEditor_();
+      }))
+      .withFailureHandler(err => toast(err.message, 'err'))
+      .deletePLLineItem(d.LineCode, currentVehicleTypeId);
+  });
+}
+function copyChartDialog() {
+  const others = chartEditor.otherTypes || [];
+  openModal({
+    title: '複製科目表到 ' + currentVehicleTypeId,
+    body: `<div class="callout warn">${esc(currentVehicleTypeId)} 目前的科目表會整份換掉。代碼相同的科目，已輸入的金額照樣對得到；新科目表沒有的科目，金額會留著但不再計入。</div>`,
+    fields: [{ name: 'source', label: '複製來源', type: 'select', value: '', options: [['', '標準範本']].concat(others.map(t => [t, '車型 ' + t])) }],
+    okText: '整份換掉', danger: true
+  }).then(v => {
+    if (!v) return;
+    google.script.run
+      .withSuccessHandler(safeHandler(editor => {
+        clearDirty();
+        Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+        chartEditor = editor; chartSelected = ''; chartDraft = null;
+        toast('已複製科目表', 'ok');
+        loadChartEditor_();
+      }))
+      .withFailureHandler(err => toast(err.message, 'err'))
+      .copyChartFromType(currentVehicleTypeId, v.source);
+  });
+}
+function saveChartAsTemplateUi() {
+  confirmModal('把 ' + currentVehicleTypeId + ' 的科目表存成標準範本？', '之後新建車型時選「標準範本」就會複製這一份。已經存在的車型不受影響。', '存成範本').then(ok => {
+    if (!ok) return;
+    google.script.run.withSuccessHandler(n => toast('已存成標準範本（' + n + ' 個科目）', 'ok'))
+      .withFailureHandler(err => toast(err.message, 'err')).saveChartAsTemplate(currentVehicleTypeId);
+  });
+}
+function restoreChartDefaults() {
+  confirmModal('恢復內建科目預設值？', '內建科目的名稱、公式、父科目與排序會回復成系統預設；你自己新增的科目與車系個別公式不受影響。', '恢復', true).then(ok => {
+    if (!ok) return;
+    google.script.run.withSuccessHandler(safeHandler(() => {
+      clearDirty();
+      Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+      toast('已恢復內建科目預設值', 'ok');
+      loadChartEditor_(true);
+    })).withFailureHandler(err => toast(err.message, 'err')).restoreBuiltInLineItems(currentVehicleTypeId);
+  });
+}
+
+/* ================= GATE 審議報告(簡報)：現況與目標的差距、作法、說明 ================= */
+let reportData = null;
+let reportSel = { target: '', base: '', prev: '' };
+let reportUnit = 1;              // 1 元 / 1000 千元
+let reportActions = [];          // 編輯中的作法(目標情境)
+let reportNoteEdits = {};        // { scenarioId: { LineCode: 說明 } } 還沒存的說明
+let reportShowPrice = false;
+const REPORT_PREFS_KEY_ = 'plReport.prefs.v1';
+
+function loadReportPrefs_() {
+  try {
+    const p = JSON.parse(localStorage.getItem(REPORT_PREFS_KEY_) || 'null') || {};
+    if (p.sel && p.sel[currentVehicleTypeId]) reportSel = Object.assign({ target: '', base: '', prev: '' }, p.sel[currentVehicleTypeId]);
+    else reportSel = { target: '', base: '', prev: '' };
+    if (p.unit === 1000 || p.unit === 1) reportUnit = p.unit;
+    if (typeof p.showPrice === 'boolean') reportShowPrice = p.showPrice;
+  } catch (e) { /* 沒有就用預設 */ }
+}
+function saveReportPrefs_() {
+  try {
+    const p = JSON.parse(localStorage.getItem(REPORT_PREFS_KEY_) || 'null') || {};
+    p.sel = p.sel || {};
+    p.sel[currentVehicleTypeId] = reportSel;
+    p.unit = reportUnit; p.showPrice = reportShowPrice;
+    localStorage.setItem(REPORT_PREFS_KEY_, JSON.stringify(p));
+  } catch (e) { /* 存不了就算了 */ }
+}
+
+/** 沒選過時的預設：目標 = 目前情境(若是目標情境)或最後一個目標情境；現況 = 同一個 GATE 的現況情境 */
+function defaultReportSel_() {
+  const scs = scenarioCache;
+  const ids = scs.map(s => s.ScenarioID);
+  const valid = id => id && ids.indexOf(id) !== -1;
+  if (!valid(reportSel.target)) {
+    const cur = scs.find(s => s.ScenarioID === currentScenarioId);
+    const targets = scs.filter(s => s.ScenarioType === '目標');
+    reportSel.target = cur && cur.ScenarioType === '目標' ? cur.ScenarioID : (targets.length ? targets[targets.length - 1].ScenarioID : (cur ? cur.ScenarioID : (ids[0] || '')));
+  }
+  if (reportSel.base && !valid(reportSel.base)) reportSel.base = '';
+  if (reportSel.prev && !valid(reportSel.prev)) reportSel.prev = '';
+  if (!reportSel.base) {
+    const t = scs.find(s => s.ScenarioID === reportSel.target);
+    const base = scs.find(s => s.ScenarioType !== '目標' && t && s.Gate === t.Gate && s.ScenarioID !== t.ScenarioID) ||
+      scs.find(s => s.ScenarioType !== '目標' && s.ScenarioID !== reportSel.target);
+    reportSel.base = base ? base.ScenarioID : '';
+  }
+}
+
+function renderReportPanel() {
+  const panel = document.getElementById('panel-report');
+  if (!requireScope('report', false)) return;
+  if (!scenarioCache.length) {
+    panel.innerHTML = emptyStateHtml('🗂', '這個車型還沒有情境', '報告比較「現況」與「目標」兩個情境，請先建立情境。', `<button class="btn" onclick="switchTab('scenarios')">前往情境設定</button>`);
+    return;
+  }
+  loadReportPrefs_();
+  defaultReportSel_();
+  const opt = (id, allowEmpty, emptyText) => (allowEmpty ? `<option value="">${emptyText}</option>` : '') +
+    scenarioCache.map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === id ? ' selected' : ''}>${esc(scenarioLabel(s))}（${esc(s.ScenarioType || '現況')}）</option>`).join('');
+  panel.innerHTML = `
+    <div class="card no-print">
+      <div class="report-controls">
+        <label class="field"><span>目標 / 本回</span><select onchange="setReportSel('target', this.value)">${opt(reportSel.target)}</select></label>
+        <label class="field"><span>現況（差距的比較基準）</span><select onchange="setReportSel('base', this.value)">${opt(reportSel.base, true, '（不比較）')}</select></label>
+        <label class="field"><span>前回（選填）</span><select onchange="setReportSel('prev', this.value)">${opt(reportSel.prev, true, '（不比較）')}</select></label>
+        <label class="field"><span>金額單位</span><div class="seg">
+          <button type="button" class="seg-btn${reportUnit === 1 ? ' active' : ''}" onclick="setReportUnit(1)">元/台</button>
+          <button type="button" class="seg-btn${reportUnit === 1000 ? ' active' : ''}" onclick="setReportUnit(1000)">千元/台</button></div></label>
+        <label class="chk" style="align-self:center;"><input type="checkbox" ${reportShowPrice ? 'checked' : ''} onchange="reportShowPrice=this.checked;saveReportPrefs_();drawReport_()"> 顯示售價結構</label>
+        <span style="flex:1"></span>
+        <button type="button" class="btn secondary" onclick="loadReport_()">重新計算</button>
+        <button type="button" class="btn" onclick="printReport_()">列印 / 存成 PDF</button>
+      </div>
+      <p class="help" style="margin:10px 0 0;">每一張卡片是一頁 16:9 投影片，列印時每頁一張。「說明」欄可以直接點進去改（會存回該情境的科目說明，銷貨成本頁的說明欄也是同一份）；作法清單可以拖曳 ⠿ 排序。每張右上角的「複製」可以把表格貼進 PowerPoint / Excel。</p>
+    </div>
+    <div id="report-body"><p class="muted">計算中...</p></div>`;
+  loadReport_();
+}
+
+function setReportSel(field, value) {
+  const go = () => {
+    reportSel[field] = value;
+    saveReportPrefs_();
+    loadReport_();
+  };
+  if (isDirty_()) confirmLeave_().then(ok => { if (ok) go(); }); else go();
+}
+function setReportUnit(u) {
+  reportUnit = u;
+  saveReportPrefs_();
+  document.querySelectorAll('#panel-report .report-controls .seg-btn').forEach((b, i) => b.classList.toggle('active', (i === 0 && u === 1) || (i === 1 && u === 1000)));
+  drawReport_();
+}
+
+function loadReport_() {
+  const body = document.getElementById('report-body');
+  if (!reportSel.target) { if (body) body.innerHTML = '<p class="muted">請選擇目標情境。</p>'; return; }
+  if (body && !reportData) body.innerHTML = '<p class="muted">計算中...</p>';
+  google.script.run
+    .withSuccessHandler(safeHandler(data => {
+      clearDirty();
+      reportData = data;
+      reportActions = (data.actions || []).map(a => Object.assign({}, a));
+      reportNoteEdits = {};
+      drawReport_();
+    }))
+    .withFailureHandler(err => { if (body) body.innerHTML = `<div class="callout err">報告計算失敗：${esc(err.message)}</div>`; })
+    .getGateReport(reportSel.target === reportSel.base ? '' : reportSel.base, reportSel.target, reportSel.prev === reportSel.target ? '' : reportSel.prev);
+}
+
+/* ---- 報告用的小工具 ---- */
+function rAmt_(v) { return v === undefined || v === null ? '' : fmt(Number(v) / reportUnit, reportUnit === 1000 ? 1 : 0); }
+function rSigned_(v) { return v === undefined || v === null ? '' : signed_(Number(v) / reportUnit, reportUnit === 1000 ? 1 : 0); }
+function rUnit_() { return reportUnit === 1000 ? '千元/台' : '元/台'; }
+function rPct_(v, base) { return base ? (Number(v) / base * 100).toFixed(1) + '%' : ''; }
+function reportLineName_(code) { const l = reportData.lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : code; }
+function reportCodeNameMap_() { const m = {}; reportData.lines.forEach(l => { m[l.LineCode] = shortLineName(l.LineName); }); return m; }
+function noteFor_(block, code) {
+  const sid = block.meta.ScenarioID;
+  if (reportNoteEdits[sid] && reportNoteEdits[sid][code] !== undefined) return reportNoteEdits[sid][code];
+  return (block.notes || {})[code] || '';
+}
+function noteCellHtml_(block, code) {
+  const sid = block.meta.ScenarioID;
+  const dirty = reportNoteEdits[sid] && reportNoteEdits[sid][code] !== undefined;
+  return `<td class="note${dirty ? ' dirty' : ''}" contenteditable="true" data-sc="${esc(sid)}" data-code="${esc(code)}" oninput="onReportNote(this)">${esc(noteFor_(block, code))}</td>`;
+}
+function onReportNote(el) {
+  const sid = el.getAttribute('data-sc'), code = el.getAttribute('data-code');
+  reportNoteEdits[sid] = reportNoteEdits[sid] || {};
+  reportNoteEdits[sid][code] = el.innerText.replace(/\n+$/, '');
+  el.classList.add('dirty');
+  markDirty('report', saveReport_, () => { clearDirty(); loadReport_(); });
+}
+/** 科目對營業淨利的方向：收入類(A 底下或 A 本身) +1；成本/費用類 -1；小計與售價結構不算 */
+function profitSign_(line) {
+  if (line.isPriceStructure) return 0;
+  if (line.LineCode === 'A') return 1;
+  if (line.isSubtotal) return 0;
+  let cur = line, guard = 0;
+  while (cur && cur.ParentLine && guard++ < 20) {
+    if (cur.ParentLine === 'A') return 1;
+    cur = reportData.lines.find(l => l.LineCode === cur.ParentLine);
+  }
+  return -1;
+}
+function slideHtml_(no, title, sub, inner, copyId) {
+  const t = reportData.target.meta;
+  return `<section class="slide">
+    <div class="slide-actions no-print">${copyId ? `<button type="button" class="btn secondary sm" onclick="copyReportTable('${copyId}')">複製表格</button>` : ''}</div>
+    <div class="slide-head"><span class="slide-no">${esc(no)}</span><h2>${esc(title)}</h2><div class="slide-sub">${sub || ''}</div></div>
+    ${inner}
+    <div class="slide-foot"><span>${esc(reportData.vehicleTypeId)} 車型 ${esc(t.Gate)} 審議 · F/S 試算與目標成本作法說明</span><span>機密 · 單位：${esc(rUnit_())}</span></div>
+  </section>`;
+}
+
+function drawReport_() {
+  const body = document.getElementById('report-body');
+  if (!body || !reportData) return;
+  const R = reportData, T = R.target, B = R.base, P = R.prev;
+  const slides = [];
+  let n = 0;
+  const no = () => String(++n).padStart(2, '0');
+  slides.push(slideHtml_(no(), '損益目標與差距摘要', `${esc(R.vehicleTypeId)}　${esc(T.meta.label)}${B ? ' vs ' + esc(B.meta.label) : ''}`, reportSummaryHtml_()));
+  if (B) slides.push(slideHtml_(no(), '現況 → 目標：營業淨利差距拆解', '每一根長條 = 該科目讓營業淨利增加(綠)或減少(紅)多少', reportBridgeHtml_()));
+  if (B) slides.push(slideHtml_(no(), '現況與目標對照（加權平均）', '差距 = 目標 − 現況；對淨利影響已依科目方向換算', reportCompareHtml_(), 'rpt-compare'));
+  slides.push(slideHtml_(no(), '目標成本作法', '差距由哪些作法補起來、擔當單位與進度', reportActionsHtml_(), 'rpt-actions'));
+  slides.push(slideHtml_(no(), `細車型 FS 損益狀況（${T.meta.label}）`, `${esc(T.meta.ScenarioType)}情境`, reportFsHtml_(T, 'rpt-fs-target'), 'rpt-fs-target'));
+  if (B) slides.push(slideHtml_(no(), `細車型 FS 損益狀況（${B.meta.label}）`, `${esc(B.meta.ScenarioType)}情境，供參`, reportFsHtml_(B, 'rpt-fs-base'), 'rpt-fs-base'));
+  if (P) slides.push(slideHtml_(no(), '前回 vs 本回', `${esc(P.meta.label)} → ${esc(T.meta.label)}`, reportPrevHtml_(), 'rpt-prev'));
+  slides.push(slideHtml_(no(), '開發總投（by 部門）', `攤提台數 ${fmt(T.dev.lifeCycleUnits)} 台`, reportDevHtml_(), 'rpt-dev'));
+  const errCodes = Object.keys(T.errors || {});
+  body.innerHTML = (errCodes.length ? `<div class="callout err no-print">目標情境有公式錯誤（以 0 計）：${errCodes.map(c => esc(reportLineName_(c)) + '：' + esc(T.errors[c])).join('；')}</div>` : '') + slides.join('');
+  makeSortable(document.getElementById('rpt-actions-body'), {
+    items: 'tr[data-key]',
+    onEnd: keys => {
+      const old = reportActions;
+      reportActions = keys.map(k => old[Number(k)]);
+      redrawReportActions_();
+      markDirty('report', saveReport_, () => { clearDirty(); loadReport_(); });
+    }
+  });
+}
+
+function reportSummaryHtml_() {
+  const R = reportData, T = R.target, B = R.base;
+  const tK = T.weighted.K || 0, bK = B ? (B.weighted.K || 0) : null;
+  const tRev = T.weighted.P8 || T.weighted.A || 0, bRev = B ? (B.weighted.P8 || B.weighted.A || 0) : 0;
+  const tVol = T.volume.monthlyVolume || 0;
+  const gap = B ? tK - bK : null;
+  const effect = reportActions.reduce((s, a) => s + num(a.Effect), 0);
+  const cover = gap && gap > 0 ? effect / gap : null;
+  const byStatus = {};
+  reportActions.forEach(a => { byStatus[a.Status] = (byStatus[a.Status] || 0) + num(a.Effect); });
+  const statusColors = { '已結案': '#6a3dbd', '已確認': '#1c8a59', '進行中': '#3157d5', '規劃中': '#a3acc0' };
+  const hero = (cls, label, numV, sub) => `<div class="hero ${cls}"><div class="hero-label">${label}</div><div class="hero-num${numV < 0 ? ' negative' : ''}">${rAmt_(numV)}</div><div class="hero-sub">${sub}</div></div>`;
+  const keyCodes = ['A', 'B', 'C', 'E', 'G', 'I', 'K'].filter(c => T.weighted[c] !== undefined);
+  return `
+    <div class="kpi-hero">
+      ${B ? hero('base', '現況 營業淨利/台', bK, `淨利率 ${rPct_(bK, bRev)}・月 ${fmt((B.volume.monthlyVolume || 0))} 台・月淨利 ${fmt(bK * (B.volume.monthlyVolume || 0) / 10000, 0)} 萬`) : ''}
+      ${hero('target', '目標 營業淨利/台', tK, `淨利率 ${rPct_(tK, tRev)}・月 ${fmt(tVol)} 台・月淨利 ${fmt(tK * tVol / 10000, 0)} 萬`)}
+      ${B ? `<div class="hero gap"><div class="hero-label">差距（目標 − 現況）</div><div class="hero-num${gap < 0 ? ' negative' : ''}">${rSigned_(gap)}</div>
+        <div class="hero-sub">月效益 ${signed_(gap * tVol / 10000, 0)} 萬・LC ${fmt(T.lifeCycleUnits)} 台合計 ${signed_(gap * T.lifeCycleUnits / 1e8, 2)} 億</div></div>` : ''}
+      <div class="hero cover"><div class="hero-label">作法覆蓋率</div>
+        <div class="hero-num">${cover === null ? '—' : (cover * 100).toFixed(0) + '%'}</div>
+        <div class="hero-sub">作法效果合計 ${rAmt_(effect)}${gap ? `・尚待補足 ${rAmt_(Math.max(0, gap - effect))}` : ''}</div>
+        ${gap > 0 ? `<div class="cover-bar">${Object.keys(statusColors).map(st => byStatus[st] ? `<i style="width:${Math.min(100, byStatus[st] / gap * 100)}%;background:${statusColors[st]};" data-tip="${esc(st)} ${fmt(byStatus[st])}"></i>` : '').join('')}</div>` : ''}
+      </div>
+    </div>
+    <div class="grid-scroll"><table class="rpt-table">
+      <thead><tr><th style="text-align:left;">重點科目（加權平均）</th>${B ? '<th>現況</th><th>%</th>' : ''}<th>目標</th><th>%</th>${B ? '<th>差距</th>' : ''}<th style="text-align:left;">說明</th></tr></thead>
+      <tbody>${keyCodes.map(c => {
+        const line = R.lines.find(l => l.LineCode === c) || { LineCode: c };
+        const d = B ? (T.weighted[c] || 0) - (B.weighted[c] || 0) : 0;
+        const good = (c === 'B' ? -d : d) > 0.5, bad = (c === 'B' ? -d : d) < -0.5;
+        return `<tr class="${c === 'K' ? 'key' : 'subtotal'}"><td class="name">${esc(reportLineName_(c))}</td>
+          ${B ? `<td>${rAmt_(B.weighted[c])}</td><td class="pct">${rPct_(B.weighted[c], bRev)}</td>` : ''}
+          <td>${rAmt_(T.weighted[c])}</td><td class="pct">${rPct_(T.weighted[c], tRev)}</td>
+          ${B ? `<td class="${good ? 'gap-good' : bad ? 'gap-bad' : ''}">${rSigned_(d)}</td>` : ''}
+          ${noteCellHtml_(T, c)}</tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    <p class="help">月銷 ${fmt(tVol)} 台・LC ${esc(String(T.volume.lifeCycleYears || ''))} 年・攤提台數 ${fmt(T.lifeCycleUnits)} 台；車系構成：${(T.vehicles || []).map(v => `${esc(v.VehicleCode)} ${fmt(v.salesMixPct, 1)}%`).join('・')}</p>`;
+}
+
+/** 差距拆解(瀑布圖)：現況營業淨利 → 各科目的影響 → 目標營業淨利。影響最大的 10 個科目單獨列，其他合併 */
+function reportBridgeHtml_() {
+  const R = reportData, T = R.target, B = R.base;
+  const contribs = R.lines.map(l => {
+    const sign = profitSign_(l);
+    if (!sign) return null;
+    if (R.lines.some(x => x.ParentLine === l.LineCode)) return null;   // 有子科目的群組不重複算
+    const d = ((T.weighted[l.LineCode] || 0) - (B.weighted[l.LineCode] || 0)) * sign;
+    return Math.abs(d) >= 0.5 ? { code: l.LineCode, label: shortLineName(l.LineName), value: d } : null;
+  }).filter(x => x).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  const start = B.weighted.K || 0, end = T.weighted.K || 0;
+  const top = contribs.slice(0, 10);
+  const rest = contribs.slice(10).reduce((s, c) => s + c.value, 0);
+  const explained = top.reduce((s, c) => s + c.value, 0) + rest;
+  const other = (end - start) - explained;
+  const steps = top.slice();
+  if (Math.abs(rest) >= 0.5) steps.push({ label: `其他 ${contribs.length - 10} 個科目`, value: rest });
+  if (Math.abs(other) >= 1) steps.push({ label: '公式/取整差異', value: other });
+  const actionsByCode = {};
+  reportActions.forEach(a => { if (a.LineCode) (actionsByCode[a.LineCode] = actionsByCode[a.LineCode] || []).push(a); });
+  return `
+    <div class="bridge-legend"><span><i style="display:inline-block;width:10px;height:10px;background:#3157d5;border-radius:2px;"></i> 營業淨利</span>
+      <span><i style="display:inline-block;width:10px;height:10px;background:#1c8a59;border-radius:2px;"></i> 改善</span>
+      <span><i style="display:inline-block;width:10px;height:10px;background:#d23c3c;border-radius:2px;"></i> 惡化</span></div>
+    ${bridgeSvg_(start, steps, end)}
+    <div class="two-col" style="margin-top:10px;">
+      <div><b style="font-size:13px;">改善最多</b><ul class="problem-list">${contribs.filter(c => c.value > 0).slice(0, 5).map(c =>
+        `<li>${esc(c.label)} <b class="good">${rSigned_(c.value)}</b>${actionsByCode[c.code] ? ` — 作法：${actionsByCode[c.code].map(a => esc(a.Title)).join('、')}` : ''}</li>`).join('') || '<li class="muted">（無）</li>'}</ul></div>
+      <div><b style="font-size:13px;">惡化最多</b><ul class="problem-list">${contribs.filter(c => c.value < 0).slice(0, 5).map(c =>
+        `<li>${esc(c.label)} <b class="bad">${rSigned_(c.value)}</b></li>`).join('') || '<li class="muted">（無）</li>'}</ul></div>
+    </div>`;
+}
+function bridgeSvg_(start, steps, end) {
+  const bars = [{ label: '現況 營業淨利', y0: 0, y1: start, kind: 'total' }];
+  let acc = start;
+  steps.forEach(s => { bars.push({ label: s.label, y0: acc, y1: acc + s.value, kind: s.value >= 0 ? 'up' : 'down', value: s.value }); acc += s.value; });
+  bars.push({ label: '目標 營業淨利', y0: 0, y1: end, kind: 'total' });
+  const vals = [0];
+  bars.forEach(b => { vals.push(b.y0, b.y1); });
+  const nt = niceTicks_(Math.min.apply(null, vals), Math.max.apply(null, vals), 5);
+  const min = nt.lo, max = nt.hi, ticks = nt.ticks;
+  const W = 1180, H = 380, padL = 70, padR = 10, padT = 24, padB = 92;
+  const span = (max - min) || 1;
+  const y = v => padT + (max - v) / span * (H - padT - padB);
+  const bw = (W - padL - padR) / bars.length;
+  const color = { total: '#3157d5', up: '#1c8a59', down: '#d23c3c' };
+  return `<svg class="chart-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="營業淨利差距瀑布圖">
+    ${ticks.map(t => `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" stroke="${t === 0 ? '#8a93a8' : '#e3e7ef'}" stroke-width="${t === 0 ? 1.2 : 1}"/>
+      <text x="${padL - 8}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="#8a93a8">${esc(shortAmount_(t / reportUnit))}</text>`).join('')}
+    ${bars.map((b, i) => {
+      const x = padL + i * bw + bw * 0.16, w = bw * 0.68;
+      const top = y(Math.max(b.y0, b.y1)), h = Math.max(1.5, Math.abs(y(b.y0) - y(b.y1)));
+      const v = b.kind === 'total' ? b.y1 : b.value;
+      const labelY = b.kind === 'down' ? top + h + 13 : top - 6;
+      const next = bars[i + 1];
+      const conn = next ? `<line x1="${x + w}" x2="${x + bw}" y1="${y(b.y1)}" y2="${y(b.y1)}" stroke="#a3acc0" stroke-dasharray="3,3"/>` : '';
+      return `<g><rect class="bar" x="${x}" y="${top}" width="${w}" height="${h}" rx="3" fill="${color[b.kind]}"
+          data-tip="${esc(b.label + '\n' + (b.kind === 'total' ? fmt(v) : signed_(v)) + ' 元/台')}"/>
+        ${conn}
+        <text x="${x + w / 2}" y="${labelY}" text-anchor="middle" font-size="11.5" font-weight="700" fill="${color[b.kind]}">${esc(b.kind === 'total' ? shortAmount_(v / reportUnit) : (v >= 0 ? '+' : '') + shortAmount_(v / reportUnit))}</text>
+        ${wrapLabel_(b.label, bw - 6, 11, 3).map((ln, k) => `<text x="${x + w / 2}" y="${H - padB + 18 + k * 14}" text-anchor="middle" font-size="11" fill="#475069">${esc(ln)}</text>`).join('')}
+      </g>`;
+    }).join('')}
+  </svg>`;
+}
+
+function reportCompareHtml_() {
+  const R = reportData, T = R.target, B = R.base;
+  const tRev = T.weighted.P8 || 0, bRev = B.weighted.P8 || 0;
+  const actionsByCode = {};
+  reportActions.forEach(a => { if (a.LineCode) (actionsByCode[a.LineCode] = actionsByCode[a.LineCode] || []).push(a); });
+  const rows = R.lines.filter(l => reportShowPrice || !l.isPriceStructure);
+  let section = '';
+  return `<div class="grid-scroll"><table class="rpt-table" id="rpt-compare">
+    <thead><tr><th style="text-align:left;">科目</th><th>現況</th><th>%</th><th>目標</th><th>%</th><th>差距</th><th>對淨利影響</th><th style="text-align:left;">對應作法</th><th style="text-align:left;">說明（目標）</th></tr></thead>
+    <tbody>${rows.map(l => {
+      let head = '';
+      const sec = l.isPriceStructure ? '售價結構' : '損益';
+      if (sec !== section) { section = sec; head = `<tr class="section"><td colspan="9">${sec}</td></tr>`; }
+      const tv = T.weighted[l.LineCode], bv = B.weighted[l.LineCode];
+      const d = (tv || 0) - (bv || 0);
+      const sign = l.isSubtotal ? (l.LineCode === 'B' ? -1 : 1) : profitSign_(l);
+      const eff = d * sign;
+      const cls = !sign || Math.abs(eff) < 0.5 ? '' : eff > 0 ? 'gap-good' : 'gap-bad';
+      const acts = actionsByCode[l.LineCode] || [];
+      return head + `<tr class="${l.LineCode === 'K' ? 'key' : l.isSubtotal ? 'subtotal' : ''}">
+        <td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
+        <td>${rAmt_(bv)}</td><td class="pct">${l.isPriceStructure ? '' : rPct_(bv, bRev)}</td>
+        <td>${rAmt_(tv)}</td><td class="pct">${l.isPriceStructure ? '' : rPct_(tv, tRev)}</td>
+        <td class="${cls}">${Math.abs(d) < 0.5 ? '' : rSigned_(d)}</td>
+        <td class="${cls}">${!sign || Math.abs(eff) < 0.5 ? '' : rSigned_(eff)}</td>
+        <td class="actions-cell">${acts.map(a => `• ${esc(a.Title)}`).join('<br>')}</td>
+        ${noteCellHtml_(T, l.LineCode)}</tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+function reportFsHtml_(block, tableId) {
+  const R = reportData;
+  const vehicles = block.vehicles || [];
+  const rev = block.weighted.P8 || 0;
+  const rows = R.lines.filter(l => reportShowPrice || !l.isPriceStructure || ['P1'].indexOf(l.LineCode) !== -1);
+  return `<div class="grid-scroll"><table class="rpt-table" id="${tableId}">
+    <thead><tr><th style="text-align:left;">車型</th>${vehicles.map(v => `<th>${esc(v.VehicleCode)}</th>`).join('')}<th>${esc(R.vehicleTypeId)} 加權平均</th><th>%</th><th style="text-align:left;">說明</th></tr>
+      <tr class="sub"><th style="text-align:left;">銷售構成比</th>${vehicles.map(v => `<th>${fmt(v.salesMixPct, 1)}%</th>`).join('')}<th>100%</th><th></th><th></th></tr>
+      <tr class="sub"><th style="text-align:left;">預估銷售台數(月)</th>${vehicles.map(v => `<th>${fmt(v.monthlyVolume)}</th>`).join('')}<th>${fmt(block.volume.monthlyVolume)}</th><th></th><th style="text-align:left;">L/C ${esc(String(block.volume.lifeCycleYears || ''))} 年，合計 ${fmt(block.volume.units)} 台</th></tr></thead>
+    <tbody>${rows.map(l => `<tr class="${l.LineCode === 'K' ? 'key' : l.isSubtotal ? 'subtotal' : ''}">
+      <td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
+      ${vehicles.map(v => { const x = v.amounts[l.LineCode]; return `<td class="${x < 0 ? 'negative' : ''}">${x === undefined ? '' : rAmt_(x)}</td>`; }).join('')}
+      <td class="${block.weighted[l.LineCode] < 0 ? 'negative' : ''}" style="font-weight:700;">${rAmt_(block.weighted[l.LineCode])}</td>
+      <td class="pct">${l.isPriceStructure ? '' : rPct_(block.weighted[l.LineCode], rev)}</td>
+      ${noteCellHtml_(block, l.LineCode)}</tr>`).join('')}</tbody></table></div>`;
+}
+
+function reportActionsHtml_() {
+  return `<div id="rpt-actions-wrap">${reportActionsTableHtml_()}</div>
+    <div class="toolbar no-print" style="margin-top:10px;">
+      <button type="button" class="btn secondary" onclick="addReportAction()">＋ 新增作法</button>
+      <span class="spacer"></span>
+      <span class="muted">效果 = 對營業淨利的單台改善金額（正數 = 改善）</span>
+    </div>`;
+}
+function reportActionsTableHtml_() {
+  const R = reportData, T = R.target, B = R.base;
+  const gap = B ? (T.weighted.K || 0) - (B.weighted.K || 0) : null;
+  const vol = T.volume.monthlyVolume || 0;
+  const lineOpts = R.lines.filter(l => !l.isPriceStructure && !l.isSubtotal);
+  const total = reportActions.reduce((s, a) => s + num(a.Effect), 0);
+  const dirty = "markDirty('report', saveReport_, () => { clearDirty(); loadReport_(); })";
+  return `<div class="grid-scroll"><table class="grid-table rpt-table action-table" id="rpt-actions">
+    <thead><tr><th class="no-print" style="width:34px;"></th><th>項次</th><th style="text-align:left;">作法</th><th>科目</th><th>擔當</th><th>效果(元/台)</th><th>月效益(萬)</th><th>狀態</th><th>預計完成</th><th class="no-print"></th></tr></thead>
+    <tbody id="rpt-actions-body">${reportActions.length ? reportActions.map((a, i) => `<tr data-key="${i}">
+      <td class="row-actions no-print">${dragHandleHtml()}</td>
+      <td style="text-align:center;">${i + 1}</td>
+      <td style="text-align:left;"><input type="text" class="title-input" value="${esc(a.Title)}" placeholder="作法說明" oninput="reportActions[${i}].Title=this.value;${dirty}"></td>
+      <td><select onchange="reportActions[${i}].LineCode=this.value;${dirty}"><option value="">（不指定）</option>${lineOpts.map(l =>
+        `<option value="${esc(l.LineCode)}"${a.LineCode === l.LineCode ? ' selected' : ''}>${esc(shortLineName(l.LineName))}</option>`).join('')}</select></td>
+      <td><input type="text" value="${esc(a.Owner)}" style="width:90px;" placeholder="部門" oninput="reportActions[${i}].Owner=this.value;${dirty}"></td>
+      <td><input type="number" step="any" value="${esc(a.Effect)}" oninput="reportActions[${i}].Effect=this.value;updateReportActionTotals_();${dirty}"></td>
+      <td class="calc" id="rpt-act-month-${i}">${fmt(num(a.Effect) * vol / 10000, 1)}</td>
+      <td><select onchange="reportActions[${i}].Status=this.value;${dirty}">${(R.actionStatuses || []).map(st => `<option${a.Status === st ? ' selected' : ''}>${st}</option>`).join('')}</select></td>
+      <td><input type="date" value="${esc(a.DueDate)}" onchange="reportActions[${i}].DueDate=this.value;${dirty}"></td>
+      <td class="row-actions no-print"><button type="button" class="btn ghost sm" onclick="removeReportAction(${i})">✕</button></td>
+    </tr>`).join('') : `<tr><td colspan="10" class="muted" style="text-align:center;padding:16px;">還沒有作法。按「新增作法」說明差距要靠什麼補起來。</td></tr>`}</tbody>
+    <tfoot>
+      <tr class="total"><td class="no-print"></td><td colspan="4" style="text-align:left;">作法效果合計</td><td id="rpt-act-total">${fmt(total)}</td><td id="rpt-act-total-m">${fmt(total * vol / 10000, 1)}</td><td colspan="3"></td></tr>
+      ${gap !== null ? `<tr class="total"><td class="no-print"></td><td colspan="4" style="text-align:left;">現況 → 目標差距</td><td>${fmt(gap)}</td><td>${fmt(gap * vol / 10000, 1)}</td><td colspan="3"></td></tr>
+      <tr class="total"><td class="no-print"></td><td colspan="4" style="text-align:left;">尚待補足（差距 − 作法）</td><td id="rpt-act-remain" class="${gap - total > 0.5 ? 'negative' : 'good'}">${fmt(gap - total)}</td><td></td><td colspan="3"></td></tr>` : ''}
+    </tfoot></table></div>`;
+}
+function updateReportActionTotals_() {
+  const R = reportData, vol = R.target.volume.monthlyVolume || 0;
+  const total = reportActions.reduce((s, a) => s + num(a.Effect), 0);
+  reportActions.forEach((a, i) => { const el = document.getElementById('rpt-act-month-' + i); if (el) el.textContent = fmt(num(a.Effect) * vol / 10000, 1); });
+  const t = document.getElementById('rpt-act-total'); if (t) t.textContent = fmt(total);
+  const tm = document.getElementById('rpt-act-total-m'); if (tm) tm.textContent = fmt(total * vol / 10000, 1);
+  if (R.base) {
+    const gap = (R.target.weighted.K || 0) - (R.base.weighted.K || 0);
+    const r = document.getElementById('rpt-act-remain');
+    if (r) { r.textContent = fmt(gap - total); r.className = gap - total > 0.5 ? 'negative' : 'good'; }
+  }
+}
+function redrawReportActions_() {
+  const wrap = document.getElementById('rpt-actions-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = reportActionsTableHtml_();
+  makeSortable(document.getElementById('rpt-actions-body'), {
+    items: 'tr[data-key]',
+    onEnd: keys => { const old = reportActions; reportActions = keys.map(k => old[Number(k)]); redrawReportActions_(); markDirty('report', saveReport_, () => { clearDirty(); loadReport_(); }); }
+  });
+}
+function addReportAction() {
+  reportActions.push({ ActionID: '', Title: '', LineCode: '', Owner: '', Effect: '', Status: '規劃中', DueDate: '' });
+  redrawReportActions_();
+  markDirty('report', saveReport_, () => { clearDirty(); loadReport_(); });
+  const inputs = document.querySelectorAll('#rpt-actions-body .title-input');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+function removeReportAction(i) {
+  reportActions.splice(i, 1);
+  redrawReportActions_();
+  markDirty('report', saveReport_, () => { clearDirty(); loadReport_(); });
+}
+
+function reportPrevHtml_() {
+  const R = reportData, T = R.target, P = R.prev;
+  const rows = R.lines.filter(l => !l.isPriceStructure || l.LineCode === 'P1');
+  const vol = (b) => b.volume.monthlyVolume || 0;
+  return `<div class="grid-scroll"><table class="rpt-table" id="rpt-prev">
+    <thead><tr><th style="text-align:left;">項目（加權平均）</th><th>前回 ${esc(P.meta.label)}</th><th>本回 ${esc(T.meta.label)}</th><th>差異</th><th style="text-align:left;">說明（本回）</th></tr></thead>
+    <tbody>
+      <tr><td class="name">L/C 及月銷數</td><td>${esc(String(P.volume.lifeCycleYears || ''))} 年，每月 ${fmt(vol(P))} 台</td><td>${esc(String(T.volume.lifeCycleYears || ''))} 年，每月 ${fmt(vol(T))} 台</td><td>${signed_(vol(T) - vol(P))} 台</td><td class="note"></td></tr>
+      ${rows.map(l => {
+        const pv = P.weighted[l.LineCode], tv = T.weighted[l.LineCode];
+        const d = (tv || 0) - (pv || 0);
+        const sign = l.isSubtotal ? (l.LineCode === 'B' ? -1 : 1) : profitSign_(l);
+        const cls = !sign || Math.abs(d) < 0.5 ? '' : d * sign > 0 ? 'gap-good' : 'gap-bad';
+        return `<tr class="${l.LineCode === 'K' ? 'key' : l.isSubtotal ? 'subtotal' : ''}"><td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
+          <td>${rAmt_(pv)}</td><td>${rAmt_(tv)}</td><td class="${cls}">${Math.abs(d) < 0.5 ? '' : rSigned_(d)}</td>${noteCellHtml_(T, l.LineCode)}</tr>`;
+      }).join('')}
+      <tr class="key"><td class="name">營業淨利(每月)</td><td>${fmt((P.weighted.K || 0) * vol(P) / 10000, 0)} 萬</td><td>${fmt((T.weighted.K || 0) * vol(T) / 10000, 0)} 萬</td><td>${signed_(((T.weighted.K || 0) * vol(T) - (P.weighted.K || 0) * vol(P)) / 10000, 0)} 萬</td><td class="note"></td></tr>
+    </tbody></table></div>`;
+}
+
+function reportDevHtml_() {
+  const R = reportData, T = R.target.dev, B = R.base ? R.base.dev : null;
+  const yi = v => fmt(v / 1e8, 2);
+  return `<div class="grid-scroll"><table class="rpt-table" id="rpt-dev">
+    <thead><tr><th style="text-align:left;">部門別</th><th>模具</th><th>設備</th><th>費用類</th>${T.total.other ? '<th>其他</th>' : ''}<th>小計</th><th>挑戰低減%</th><th>低減後小計</th><th style="text-align:left;">說明</th></tr></thead>
+    <tbody>${T.rows.map(r => `<tr><td class="name">${esc(r.Department)}</td><td>${fmt(r.mold)}</td><td>${fmt(r.equip)}</td><td>${fmt(r.expense)}</td>${T.total.other ? `<td>${fmt(r.other)}</td>` : ''}
+      <td style="font-weight:700;">${fmt(r.total)}</td><td>${r.pct ? r.pct.toFixed(0) + '%' : ''}</td><td>${fmt(r.reduced)}</td><td class="note">${esc(r.notes)}</td></tr>`).join('') ||
+      '<tr><td colspan="9" class="muted" style="text-align:center;">沒有開發總投資料</td></tr>'}</tbody>
+    <tfoot><tr class="subtotal"><td class="name">總計</td><td>${fmt(T.total.mold)}</td><td>${fmt(T.total.equip)}</td><td>${fmt(T.total.expense)}</td>${T.total.other ? `<td>${fmt(T.total.other)}</td>` : ''}
+      <td>${fmt(T.total.total)}</td><td>${T.total.total ? ((1 - T.total.reduced / T.total.total) * 100).toFixed(0) + '%' : ''}</td><td>${fmt(T.total.reduced)}</td><td class="note"></td></tr></tfoot>
+  </table></div>
+  <p class="help">總額 ${yi(T.total.total)} 億元（模具 ${yi(T.total.mold)}、設備 ${yi(T.total.equip)}、費用 ${yi(T.total.expense)}），低減後 ${yi(T.total.reduced)} 億元，
+    以攤提台數 ${fmt(T.lifeCycleUnits)} 台分攤，單台 ${fmt(T.lifeCycleUnits ? T.total.reduced / T.lifeCycleUnits : 0)} 元/台。
+    ${B ? `現況總額 ${yi(B.total.total)} 億元，差異 ${signed_((T.total.reduced - B.total.reduced) / 1e8, 2)} 億元。` : ''}</p>`;
+}
+
+/** 說明與作法一起存：說明逐情境存回科目說明，作法存到目標情境 */
+function saveReport_() {
+  const jobs = [];
+  Object.keys(reportNoteEdits).forEach(sid => {
+    jobs.push(new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail).saveLineNotes(sid, reportNoteEdits[sid])));
+  });
+  jobs.push(new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail).saveActions(reportSel.target, reportActions)));
+  Promise.all(jobs).then(() => {
+    clearDirty();
+    Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+    toast('已儲存說明與作法', 'ok');
+    loadReport_();
+  }, err => toast(err.message || String(err), 'err'));
+}
+
+function printReport_() {
+  if (isDirty_()) toast('提醒：還有未儲存的修改，列印內容以畫面為準', 'warn');
+  window.print();
+}
+/** 把表格轉成 Tab 分隔文字放進剪貼簿，貼進 PowerPoint/Excel 會自動變成表格 */
+function copyReportTable(id) {
+  const table = document.getElementById(id);
+  if (!table) return;
+  const rows = Array.from(table.querySelectorAll('tr')).map(tr => Array.from(tr.children)
+    .filter(td => !td.classList.contains('no-print'))
+    .map(td => {
+      const inp = td.querySelector('input,select');
+      const text = inp ? (inp.tagName === 'SELECT' ? (inp.options[inp.selectedIndex] || {}).text || '' : inp.value) : td.innerText;
+      return String(text).replace(/\s*\n\s*/g, ' ').trim();
+    }).join('\t'));
+  const tsv = rows.join('\n');
+  const done = ok => toast(ok ? '已複製表格，可以直接貼進 PowerPoint 或 Excel' : '無法自動複製，請改用列印存成 PDF', ok ? 'ok' : 'err');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(tsv).then(() => done(true), () => done(false));
+  else done(false);
 }
 
 /* ================= 儀表板：多車型 / 多情境比較 ================= */
@@ -1550,6 +2996,8 @@ function loadComparisonPicker() {
       // 只要目前選的情境還沒被加進來，就補一欄「加權平均」；只新增不刪除，不會把使用者原本
       // 排好的比較欄位洗掉，也不會重複加(已經有這個情境的欄位就不動)。
       if (currentScenarioId && !comparisonSelections.some(s => s.ScenarioID === currentScenarioId)) {
+        // 原本一欄都沒有(第一次用、或剛載入資料)時自動補上的這一欄，直接給使用者看損益表
+        if (!comparisonSelections.length && dashView === 'columns') dashView = 'table';
         comparisonSelections.push({ ScenarioID: currentScenarioId, VehicleID: '' });
       }
       if (!comparisonSelections.length) dashView = 'columns';   // 還沒有任何比較欄位時，直接停在「比較欄位」頁面
@@ -1588,8 +3036,8 @@ function comparisonBuilderHtml_() {
 
   const rows = comparisonSelections.map((sel, i) => builderRowHtml_(sel, i)).join('');
   return `
-    <p class="muted">每一列是一個比較欄位（車型 × 情境 × 車系）。改下拉選單直接換這一欄要比的資料，
-      用箭頭或拖曳調整順序；最後一列選好之後按「加入」新增一欄。</p>
+    <p class="page-intro">每一列是一個比較欄位（車型 × 情境 × 車系）。改下拉選單直接換這一欄要比的資料，
+      拖曳 ⠿ 調整欄位順序；最後一列選好之後按「加入」新增一欄。可以把不同車型放在一起比。</p>
     <div class="grid-scroll"><table class="grid-table builder-table">
       <thead><tr><th></th><th>車型</th><th>情境</th><th>車系</th><th></th></tr></thead>
       <tbody id="builder-rows">
@@ -1606,16 +3054,8 @@ function builderRowHtml_(sel, i) {
   const typeId = type ? type.VehicleTypeID : '';
   const scenarios = type ? type.scenarios : [];
   const vehicles = type ? type.vehicles : [];
-  return `<tr draggable="true" data-idx="${i}"
-      ondragstart="onRowDragStart_(event, ${i})" ondragover="onRowDragOver_(event)"
-      ondrop="onRowDrop_(event, ${i})" ondragend="onRowDragEnd_(event)">
-    <td class="row-actions">
-      <span class="chip-handle" data-tip="拖曳調整順序">⠿</span>
-      <button type="button" class="row-move" data-tip="往上移" ${i === 0 ? 'disabled' : ''}
-        onclick="moveComparisonColumn(${i}, -1)">▲</button>
-      <button type="button" class="row-move" data-tip="往下移" ${i === comparisonSelections.length - 1 ? 'disabled' : ''}
-        onclick="moveComparisonColumn(${i}, 1)">▼</button>
-    </td>
+  return `<tr data-key="${i}" data-idx="${i}">
+    <td class="row-actions">${dragHandleHtml('拖曳調整比較欄位順序')}</td>
     <td><select onchange="onBuilderRowTypeChange_(${i}, this.value)">
       ${comparisonOptions.map(t => `<option value="${esc(t.VehicleTypeID)}"${t.VehicleTypeID === typeId ? ' selected' : ''}>${esc(t.VehicleTypeID)}</option>`).join('')}
     </select></td>
@@ -1626,7 +3066,7 @@ function builderRowHtml_(sel, i) {
       <option value=""${!sel.VehicleID ? ' selected' : ''}>加權平均</option>
       ${vehicles.map(v => `<option value="${esc(v.VehicleID)}"${v.VehicleID === sel.VehicleID ? ' selected' : ''}>${esc(v.VehicleCode || v.VehicleID)}</option>`).join('')}
     </select></td>
-    <td class="row-actions"><button type="button" class="btn danger" onclick="removeComparisonColumn(${i})">✕</button></td>
+    <td class="row-actions"><button type="button" class="btn ghost sm" onclick="removeComparisonColumn(${i})" data-tip="移除這一欄">✕</button></td>
   </tr>`;
 }
 
@@ -1724,31 +3164,6 @@ function moveComparisonColumn(idx, dir) {
   comparisonSelections[idx] = comparisonSelections[target];
   comparisonSelections[target] = tmp;
   refreshDashboard();
-}
-
-/* ---- 比較欄位可直接拖曳整列調整順序，比只能按上下箭頭一次一步更直覺 ---- */
-let dragRowFrom_ = null;
-function onRowDragStart_(e, i) {
-  dragRowFrom_ = i;
-  e.dataTransfer.effectAllowed = 'move';
-  e.currentTarget.classList.add('dragging');
-}
-function onRowDragOver_(e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-}
-function onRowDrop_(e, i) {
-  e.preventDefault();
-  if (dragRowFrom_ === null || dragRowFrom_ === i) return;
-  const [moved] = comparisonSelections.splice(dragRowFrom_, 1);
-  comparisonSelections.splice(i, 0, moved);
-  dragRowFrom_ = null;
-  refreshDashboard();
-}
-function onRowDragEnd_() {
-  dragRowFrom_ = null;
-  const box = document.getElementById('builder-rows');
-  if (box) box.querySelectorAll('tr.dragging').forEach(el => el.classList.remove('dragging'));
 }
 
 /* ---- 儀表板顯示選項（切換時只重畫，不重算；全部記在瀏覽器裡，下次打開還在） ---- */
@@ -1954,6 +3369,19 @@ function renderDashboard(result) {
   const scroller = content.querySelector('.grid-scroll');
   if (scroller && scrollLeft) scroller.scrollLeft = scrollLeft;
   installTableCrosshair_(content);
+  installBuilderSortable_();
+}
+
+/** 比較欄位表：拖曳放開就照新順序重排(不打後端，已算好的欄位直接重排) */
+function installBuilderSortable_() {
+  makeSortable(document.getElementById('builder-rows'), {
+    items: 'tr[data-key]',
+    onEnd: keys => {
+      const old = comparisonSelections;
+      comparisonSelections = keys.map(k => old[Number(k)]);
+      refreshDashboard();
+    }
+  });
 }
 
 /** 沒有 lastComparison(還沒算過、或選過又清空)時也能安全重畫目前這一頁 */
@@ -2072,8 +3500,9 @@ function tableMetaText_(cols) {
  */
 function lineBetter_(line) {
   if (!line || line.isPriceStructure) return null;
-  if (line.ParentLine || line.LineCode === 'B' || line.LineCode === 'J') return 'low';
   if (['A', 'C', 'E', 'G', 'I', 'K'].indexOf(line.LineCode) !== -1) return 'high';
+  if (line.ParentLine === 'A') return 'high';
+  if (line.ParentLine || line.LineCode === 'B' || line.LineCode === 'J') return 'low';
   return null;
 }
 /** 差異是好是壞：'good' / 'bad' / ''（沒有方向或沒有差異） */
@@ -2696,9 +4125,9 @@ function setChartLines(codes) {
 
 /** 勾選框標籤用短名稱：科目名稱後面那串公式(如「營業淨利(=I-J)」)在這裡只會佔空間 */
 function shortLineName(name) {
-  const s = String(name || '');
-  const cut = s.indexOf('(');
-  return cut > 1 ? s.slice(0, cut) : s;
+  // v2 的科目名稱不再夾帶公式；只去掉舊資料殘留的「(=P5-P6-P7)」「(開發總投/LC總台數)」這類寫公式的括號，
+  // 「營業淨利(未扣前瞻)」「收入(未稅,含強配)」這種本來就是名稱一部分的括號要留著
+  return String(name || '').replace(/\s*\((?=[^()]*[=×÷\/])[^()]*\)\s*$/, '');
 }
 
 /**
@@ -2735,9 +4164,9 @@ function subtotalCheckHtml(cols) {
  * 公式本身是用科目代碼寫的(A/B/P8/P9...)，一般人看不懂「I-J」是什麼，
  * 所以顯示前先用 codeNameMap 把代碼換成看得懂的科目名稱(如「營業淨利(未扣前瞻) − 前瞻費用」)。
  */
-function nameWithFormulaHint(name, codeNameMap) {
+function nameWithFormulaHint(name, codeNameMap, formulaText, ownerCode) {
   const parts = splitFormula(name);
-  const formula = humanizeFormula_(parts.formula, codeNameMap);
+  const formula = formulaText ? '= ' + humanizeFormula_(formulaText, codeNameMap, ownerCode) : humanizeFormula_(parts.formula, codeNameMap);
   return esc(parts.base) + (formula
     ? ` <span class="formula-hint" tabindex="0" data-tip="${esc(formula)}">ƒ</span>` : '');
 }
@@ -2754,17 +4183,31 @@ function buildCodeNameMap_(lines) {
   return map;
 }
 /** 把公式字串裡的科目代碼(P1~P9、單一大寫字母如 A/B/I/J)換成對照表裡的名稱；查不到就照原樣顯示 */
-function humanizeFormula_(formula, codeNameMap) {
+function humanizeFormula_(formula, codeNameMap, ownerCode) {
   if (!formula || !codeNameMap) return formula;
   const sumNames = { d: SUM_GROUP_NAMES_.E, f: SUM_GROUP_NAMES_.G, h: SUM_GROUP_NAMES_.I };
-  return formula
-    .replace(/Σ([dfh])\b/g, (m, k) => 'Σ' + sumNames[k])            // Σd → Σ銷售費用
-    .replace(/\bP[1-9]\b|\b[A-Z]\b/g, code => codeNameMap[code] || code)
-    .replace(/^\(=\s*/, '= ').replace(/\)\s*$/, '');
+  if (/^\(=/.test(formula)) {
+    // 舊版寫在名稱裡的公式，如「(=I-J)」
+    return formula
+      .replace(/Σ([dfh])\b/g, (m, k) => 'Σ' + sumNames[k])
+      .replace(/\bP[1-9]\b|\b[A-Z]\b/g, code => codeNameMap[code] || code)
+      .replace(/^\(=\s*/, '= ').replace(/\)\s*$/, '');
+  }
+  // v2 公式：CHILDREN()/TAXDEDUCT() 換成文字、代碼換成名稱、[名稱] 拿掉中括號、* / 換成 × ÷
+  return String(formula)
+    .replace(/CHILDREN\s*\(\s*\)/gi, 'Σ' + (SUM_GROUP_NAMES_[ownerCode] || '子科目'))
+    .replace(/TAXDEDUCT\s*\(\s*\)/gi, 'Σ可扣除貨物稅科目')
+    .replace(/"[^"]*"|\[[^\]]*\]|\b[A-Za-z_][A-Za-z0-9_]*\b(?!\s*\()/g, tok => {
+      if (tok[0] === '"') return tok;
+      if (tok[0] === '[') return tok.slice(1, -1);
+      return codeNameMap[tok] || tok;
+    })
+    .replace(/\*/g, '×').replace(/\//g, '÷');
 }
 
 /** 自動計算科目(AutoSource)的圓點提示：滑鼠移過去看它是怎麼算出來的 */
 const AUTO_SOURCE_HINTS = {
+  FORMULA: '依「科目與公式」設定的公式計算\n滑鼠移到金額上可看這一欄實際算出來的每一步',
   PRICE: '由「銷售構成」的售價欄位與稅務費用比率推算',
   DEV_MOLD: '開發總投「模具」攤提落點 ÷ LIFE CYCLE 總台數',
   DEV_EQUIP: '開發總投「設備」攤提落點 ÷ LIFE CYCLE 總台數',
@@ -2777,7 +4220,8 @@ const AUTO_SOURCE_HINTS = {
 function autoSourceDot(autoSource) {
   if (!autoSource) return '';
   const hint = AUTO_SOURCE_HINTS[autoSource] || '自動計算';
-  return ` <span class="auto-dot" tabindex="0" data-tip="自動計算\n${esc(hint)}"></span>`;
+  const dev = /^DEV/.test(autoSource);
+  return ` <span class="auto-dot${dev ? ' dev' : ''}" tabindex="0" data-tip="${dev ? '開發總投攤提' : '公式計算'}\n${esc(hint)}"></span>`;
 }
 
 function plTableHtml(cols, lines) {
@@ -2785,8 +4229,11 @@ function plTableHtml(cols, lines) {
   const span = cols.length * (showSecond ? 2 : 1) + 1;
   const priceLines = lines.filter(l => l.isPriceStructure);
   const plLines = lines.filter(l => !l.isPriceStructure);
-  // B/E/G/I 底下有明細的大項才給收合箭頭
-  const groupParents = ['B', 'E', 'G', 'I'].filter(p => lines.some(l => l.ParentLine === p));
+  // 底下有明細的科目(小計群組)才給收合箭頭；任何一層祖先收合，這一列就藏起來
+  const groupParents = lines.filter(p => lines.some(l => l.ParentLine === p.LineCode)).map(p => p.LineCode);
+  const parentOf = {};
+  lines.forEach(l => { parentOf[l.LineCode] = l.ParentLine || ''; });
+  const isHiddenByCollapse = code => { let p = parentOf[code], g = 0; while (p && g++ < 20) { if (collapsedGroups.has(p)) return true; p = parentOf[p]; } return false; };
   const codeNameMap = buildCodeNameMap_(lines);
   const base = baselineCol_(cols);
 
@@ -2825,9 +4272,13 @@ function plTableHtml(cols, lines) {
            onclick="toggleGroupCollapse('${esc(line.LineCode)}')" data-tip="${collapsedGroups.has(line.LineCode) ? '展開明細' : '收合明細'}">
            <svg viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 7l3-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
          </button>` : '';
-    const hidden = (line.ParentLine && collapsedGroups.has(line.ParentLine)) ? ' hidden' : '';
+    const hidden = (line.ParentLine && isHiddenByCollapse(line.LineCode)) ? ' hidden' : '';
     const cls = [line.isSubtotal ? 'subtotal' : '', line.ParentLine ? 'detail' : ''].filter(c => c).join(' ');
-    return `<tr class="${cls}"${hidden}><td class="row-head" data-l="${esc(line.LineCode)}" data-tipfn="line">${toggleBtn}${nameWithFormulaHint(line.LineName, codeNameMap)}${autoTag}</td>${cells}</tr>`;
+    const depth = Number(line.Depth) || (line.ParentLine ? 1 : 0);
+    const errCols = cols.filter(c => c.errors && c.errors[line.LineCode]);
+    const errTag = errCols.length ? ` <span class="err-dot" tabindex="0" data-tip="${esc('公式錯誤（以 0 計）：' + errCols[0].errors[line.LineCode])}">⚠</span>` : '';
+    const showFormula = line.Formula && !line.isSubtotal ? line.Formula : (line.isSubtotal && line.Formula ? line.Formula : '');
+    return `<tr class="${cls}"${hidden}><td class="row-head" data-l="${esc(line.LineCode)}" data-tipfn="line" style="padding-left:${10 + depth * 16}px;">${toggleBtn}${nameWithFormulaHint(line.LineName, codeNameMap, showFormula, line.LineCode)}${autoTag}${errTag}</td>${cells}</tr>`;
   };
 
   const secondHead = pctBase === 'revenue' ? '對收入%' : pctBase === 'exfactory' ? '對廠價%'
@@ -2870,7 +4321,8 @@ function toggleGroupCollapse(code) {
 /** 全部收合/展開：目前有任何一個大項是展開的就全部收合，否則全部展開 */
 function toggleAllGroups() {
   if (!lastComparison) return;
-  const parents = ['B', 'E', 'G', 'I'].filter(p => (lastComparison.lines || []).some(l => l.ParentLine === p));
+  const all = lastComparison.lines || [];
+  const parents = all.filter(p => all.some(l => l.ParentLine === p.LineCode)).map(p => p.LineCode);
   const anyExpanded = parents.some(p => !collapsedGroups.has(p));
   collapsedGroups = new Set(anyExpanded ? parents : []);
   saveDashPrefs_();
@@ -2940,10 +4392,10 @@ function cellTipText_(el) {
       parts.push(`vs 基準（${base.vehicleLabel || base.label}）${signed_(delta)}${bd ? `（${signed_(delta / Math.abs(bd) * 100, 1)}%）` : ''}${tone === 'good' ? ' ✔' : tone === 'bad' ? ' ✘' : ''}`);
     }
   }
-  if (line.LineCode === 'b13') {
-    if (col.commodityTaxDetail) parts.push('計算過程：\n' + commodityTaxDetailText(col.commodityTaxDetail));
-    else if (col.isWeighted) parts.push('加權平均是多個車系混出來的，沒有單一計算過程；請看各車系欄位的貨物稅');
-  }
+  const trace = col.traces && col.traces[line.LineCode];
+  if (col.errors && col.errors[line.LineCode]) parts.push('⚠ 公式錯誤（以 0 計）：' + col.errors[line.LineCode]);
+  if (trace && !line.isSubtotal) parts.push('計算過程：\n' + traceText_(trace, buildCodeNameMap_(lastComparison.lines)));
+  else if (col.isWeighted && line.Formula && !line.isSubtotal) parts.push('加權平均是多個車系混出來的，沒有單一計算過程；請看各車系欄位');
   return parts.join('\n');
 }
 /** 欄位標題/重點指標卡片：這一欄的情境性質、台數基礎、加權平均的組成 */
@@ -2999,9 +4451,10 @@ function lineTipText_(el) {
   if (!line || !lastComparison) return '';
   const codeNameMap = buildCodeNameMap_(lastComparison.lines);
   const parts = [shortLineName(line.LineName)];
-  const formula = humanizeFormula_(splitFormula(line.LineName).formula, codeNameMap);
+  const formula = line.Formula ? '= ' + humanizeFormula_(line.Formula, codeNameMap, line.LineCode) : humanizeFormula_(splitFormula(line.LineName).formula, codeNameMap);
   if (formula) parts.push(formula);
-  if (line.AutoSource) parts.push('自動計算：' + (AUTO_SOURCE_HINTS[line.AutoSource] || '').split('\n')[0]);
+  if (line.CalcType === 'INPUT') parts.push('手動輸入');
+  else if (line.AutoSource) parts.push((AUTO_SOURCE_HINTS[line.AutoSource] || '').split('\n')[0]);
   if (line.ParentLine) parts.push(`計入：${codeNameMap[line.ParentLine] || line.ParentLine}`);
   else if (line.isPriceStructure) parts.push('售價結構，不計入損益加總');
   else if (line.isSubtotal) parts.push('小計/毛利/淨利列');
@@ -3177,6 +4630,7 @@ function installTooltipEngine_() {
 /* ---------------- 初始化 ---------------- */
 window.addEventListener('DOMContentLoaded', () => {
   installTooltipEngine_();
+  installSaveBar_();
   const saved = loadAppState_();
   // 先把上次的車型/情境放回全域變數，再切分頁：switchTab() 會順手 saveAppState_()，
   // 這時後端資料還沒回來，全域若還是空字串就會把記住的選擇覆寫掉
@@ -3185,7 +4639,7 @@ window.addEventListener('DOMContentLoaded', () => {
   currentScenarioId = saved.scenarioId || '';
   // 開場先靜音：switchTab 只切畫面不渲染，等 getBootstrap 回來再渲染一次，避免同一個分頁畫兩遍
   silent = true;
-  switchTab(saved.tab && document.getElementById('panel-' + saved.tab) ? saved.tab : 'vehicletypes');
+  switchTab(saved.tab && document.getElementById('panel-' + saved.tab) ? saved.tab : 'dashboard', true);
   loadVehicleTypeSelector(saved.vehicleTypeId, saved.scenarioId);
 });
 </script>
