@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('style'); ?>
+</head>
+<body>
+  <header>
+    <h1>車型損益試算系統</h1>
+    <label style="color:#fff; font-size:13px; display:flex; align-items:center; gap:6px;">
+      車型：
+      <select id="vehicletype-selector" onchange="onVehicleTypeChange(this.value)"></select>
+    </label>
+    <label style="color:#fff; font-size:13px; display:flex; align-items:center; gap:6px;">
+      情境：
+      <select id="scenario-selector" onchange="onScenarioChange(this.value)"></select>
+      <span id="scenario-type-badge" class="type-badge" style="display:none;"></span>
+    </label>
+  </header>
+  <div id="global-error" style="display:none; background:#fed7d7; color:#822727; padding:10px 20px; font-size:13px;"></div>
+
+  <!--
+    導覽列依系統的三個主軸分組：先定義「拿什麼來比」(車型與情境)，再填「損益怎麼組成」
+    (各項輸入與計算參數)，最後看「結果長怎樣」(儀表板)。分組只是版面上的區隔，
+    每個分頁本身的行為沒有改變。
+  -->
+  <nav>
+    <div class="nav-group">
+      <span class="nav-group-label">車型與情境</span>
+      <div class="nav-group-tabs">
+        <button data-tab="vehicletypes" class="active" onclick="switchTab('vehicletypes')">車型主檔</button>
+        <button data-tab="vehicles" onclick="switchTab('vehicles')">車系設定</button>
+        <button data-tab="scenarios" onclick="switchTab('scenarios')">情境設定</button>
+      </div>
+    </div>
+    <div class="nav-group">
+      <span class="nav-group-label">損益項目與計算</span>
+      <div class="nav-group-tabs">
+        <button data-tab="salesmix" onclick="switchTab('salesmix')">銷售構成</button>
+        <button data-tab="costofsales" onclick="switchTab('costofsales')">銷貨成本</button>
+        <button data-tab="devinvestment" onclick="switchTab('devinvestment')">開發總投</button>
+        <button data-tab="operatingexpense" onclick="switchTab('operatingexpense')">營業費用</button>
+        <span class="nav-sep"></span>
+        <button data-tab="lineitems" onclick="switchTab('lineitems')">科目設定</button>
+        <button data-tab="paramrates" onclick="switchTab('paramrates')">稅務費用比率</button>
+        <button data-tab="paramfx" onclick="switchTab('paramfx')">匯率設定</button>
+      </div>
+    </div>
+    <div class="nav-group">
+      <span class="nav-group-label">結果呈現</span>
+      <div class="nav-group-tabs">
+        <button data-tab="dashboard" onclick="switchTab('dashboard')">損益儀表板</button>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <div id="panel-vehicletypes" class="panel active"></div>
+    <div id="panel-vehicles" class="panel"></div>
+    <div id="panel-scenarios" class="panel"></div>
+    <div id="panel-salesmix" class="panel"></div>
+    <div id="panel-costofsales" class="panel"></div>
+    <div id="panel-devinvestment" class="panel"></div>
+    <div id="panel-operatingexpense" class="panel"></div>
+    <div id="panel-lineitems" class="panel"></div>
+    <div id="panel-paramrates" class="panel"></div>
+    <div id="panel-paramfx" class="panel"></div>
+    <div id="panel-dashboard" class="panel">
+      <div class="dash-head"><h3>損益儀表板</h3></div>
+      <div id="dashboard-content"></div>
+    </div>
+  </main>
+
+  <?!= include('script'); ?>
+</body>
+</html>
