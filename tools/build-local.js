@@ -19,6 +19,7 @@ const REPO = path.join(__dirname, '..');
 const GAS_DIR = path.join(REPO, 'src');
 const LOCAL_DIR = path.join(REPO, 'local');
 const OUT_FILE = path.join(REPO, 'dist', 'FS-local.html');
+const EXCEL_OUT_FILE = path.join(REPO, 'dist', 'FS-excel-to-pack.html');
 
 // 後端檔案(依載入順序)
 const BACKEND_FILES = ['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs'];
@@ -125,12 +126,34 @@ function buildHtml() {
     html.replace(/^<!DOCTYPE html>\s*/i, '');
 }
 
+/**
+ * 「Excel 轉資料包」工具：另一個單一檔案，同樣雙擊就能用。
+ * 用的是同一份後端(.gs)與地端主機，資料只在記憶體裡建一次、驗算完就匯出成資料包，不碰系統的瀏覽器暫存。
+ */
+function buildExcelPackHtml() {
+  const scripts = [
+    read(path.join(LOCAL_DIR, 'gas-shim.js')),
+    read(path.join(LOCAL_DIR, 'pack.js')),
+    buildBackendSource(),
+    read(path.join(LOCAL_DIR, 'host.js')),
+    read(path.join(LOCAL_DIR, 'xlsx-reader.js')),
+    read(path.join(LOCAL_DIR, 'excel-pack.js')),
+    read(path.join(LOCAL_DIR, 'excel-pack-ui.js'))
+  ].map(inlineScript).join('\n');
+  const html = read(path.join(LOCAL_DIR, 'excel-pack.html'))
+    .replace('<!--XP-STYLE-->', () => `<style>\n${read(path.join(LOCAL_DIR, 'excel-pack.css'))}\n</style>`)
+    .replace('<!--XP-SCRIPTS-->', () => scripts);
+  return '<!DOCTYPE html>\n<!-- 由 tools/build-local.js 產生，請勿直接修改；原始檔在 local/excel-pack* 與 src/ -->\n' +
+    html.replace(/^<!DOCTYPE html>\s*/i, '');
+}
+
 function main() {
-  const html = buildHtml();
   fs.mkdirSync(path.dirname(OUT_FILE), { recursive: true });
-  fs.writeFileSync(OUT_FILE, html);
-  console.log(`已產生 ${path.relative(REPO, OUT_FILE)}（${(html.length / 1024).toFixed(0)} KB）`);
+  [[OUT_FILE, buildHtml()], [EXCEL_OUT_FILE, buildExcelPackHtml()]].forEach(([file, html]) => {
+    fs.writeFileSync(file, html);
+    console.log(`已產生 ${path.relative(REPO, file)}（${(html.length / 1024).toFixed(0)} KB）`);
+  });
 }
 
 if (require.main === module) main();
-module.exports = { buildBackendSource, loadBackendFactory, buildDemoPack, buildHtml, OUT_FILE };
+module.exports = { buildBackendSource, loadBackendFactory, buildDemoPack, buildHtml, buildExcelPackHtml, OUT_FILE, EXCEL_OUT_FILE };

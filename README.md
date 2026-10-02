@@ -6,6 +6,10 @@
 用**資料包**（JSON）備份與交換：工具列「匯出全部」是備份；每個人負責自己的車型，
 「匯出目前車型」交給同事「合併匯入」，就能在儀表板上跨車型並排比較。
 
+**已經有 Excel 損益試算表？** 用 `dist/FS-excel-to-pack.html`（一樣雙擊就能用）把 Excel 轉成資料包：
+選檔 → 自動判斷欄位與每一列（依 Excel 自己的小計公式找出銷貨成本、各段小計與明細）→ 確認/調整 →
+建立並**逐格跟 Excel 驗算** → 下載資料包。版面相同的多個分頁可以一次轉成同一個車型底下的多個情境。
+
 ## v2 重點
 
 - **全新介面**：左側導覽依工作流程分組、右上角固定顯示車型/情境、未儲存提醒與 Ctrl+S、對話框與提示訊息。
@@ -33,13 +37,14 @@
 src/     系統本體：後端 .gs(計算引擎、公式、資料存取、報告、假設分析) + 前端 index/style.html + ui/*.js(依頁面拆檔)
 local/   地端層：瀏覽器版模擬層、資料包、暫存、工具列
 dist/    FS-local.html —— 由 tools/build-local.js 產生的單一檔案，使用者拿這一個就好
+         FS-excel-to-pack.html —— Excel 轉資料包工具(同一份後端，也是單一檔案)
 tools/   build、驗算、本機預覽(只在開發時用 Node 執行)
 data/    整理好的資料包(可直接「匯入資料包…→合併匯入」)
 docs/    說明文件
 ```
 
-改了 `src/` 或 `local/` 之後，執行 `node tools/build-local.js` 重新產生 `dist/FS-local.html` 再提交
-（忘了也會被 `verify-local.js` 抓到）。
+改了 `src/` 或 `local/` 之後，執行 `node tools/build-local.js` 重新產生 `dist/` 底下兩個檔案再提交
+（忘了也會被 `verify-local.js`、`verify-excel-pack.js` 抓到）。
 
 ## 驗算
 
@@ -54,6 +59,9 @@ node tools/verify-ui.js                # 損益表版面、% 基準、小計警�
 node tools/verify-write-batching.js    # 整批寫入：跨情境隔離、新增/更新/刪除混合、呼叫次數不隨格數線性成長
 node tools/verify-local.js             # 地端版：數字與驗算層逐格相同、暫存、資料包、合併匯入、dist 為最新
 node tools/e2e-local.js                # 地端版瀏覽器測試（需要 Playwright，找不到時略過）
+node tools/verify-excel-pack.js        # Excel 轉資料包：讀 .xlsx、版面/小計判斷、逐格與 Excel 相同、資料包可匯入
+                                       #   後面可以加一個真實的 .xlsx 路徑，一起跑一次自動轉換並印出比對結果
+node tools/e2e-excel-pack.js           # Excel 轉資料包瀏覽器測試（需要 Playwright）
 ```
 
 `node tools/import-d5x-fs-cmc.js` 由「D5X 損益 FS_CMC」Excel 的 `D5X  FS_CMC` 分頁產生 `data/D5X_FS_CMC_資料包.json`，

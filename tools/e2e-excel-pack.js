@@ -1,0 +1,137 @@
+/**
+ * 「Excel 轉資料包」瀏覽器端對端測試：用真的 Chromium 以 file:// 打開 dist/FS-excel-to-pack.html。
+ *
+ *   node tools/e2e-excel-pack.js
+ *
+ * 需要 Playwright(找不到時略過)。驗證：
+ *   - 不連外部網路、沒有 JS 錯誤；用瀏覽器內建的解壓縮讀 .xlsx
+ *   - 選檔後自動判斷欄位與每一列；同版面的分頁標示「可一起轉」
+ *   - 故意把一列改成「略過」→ 驗算會抓到不相同；改回來 → 全部相同
+ *   - 下載資料包 → 在 dist/FS-local.html「合併匯入」→ 車型與兩個情境都在、數字跟 Excel 相同
+ *   - 對應設定會記住：重新選同一個檔案時沿用上次的調整
+ */
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const fixture = require('./excel-fixture');
+
+function loadPlaywright() {
+  const candidates = ['playwright', '/opt/node22/lib/node_modules/playwright', '/opt/node-tools/node_modules/playwright'];
+  for (const c of candidates) {
+    try { return require(c); } catch (e) { /* 試下一個 */ }
+  }
+  return null;
+}
+
+const DIST = path.join(__dirname, '..', 'dist');
+const failures = [];
+let checks = 0;
+function assert(cond, message) { checks++; if (!cond) failures.push(message); }
+
+async function main() {
+  const pw = loadPlaywright();
+  if (!pw) { console.log('找不到 Playwright，略過瀏覽器端對端測試（node tools/verify-excel-pack.js 已涵蓋核心邏輯）。'); return; }
+  const launchOpts = { headless: true, env: Object.assign({}, process.env, { LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }) };
+  if (fs.existsSync('/opt/pw-browsers/chromium')) {
+    try { await pw.chromium.launch(launchOpts).then(b => b.close()); } catch (e) { launchOpts.executablePath = '/opt/pw-browsers/chromium'; }
+  }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-excel-'));
+  const fx = fixture.fixtureWorkbook();
+  const xlsx = path.join(tmp, 'dq-fs.xlsx');
+  fs.writeFileSync(xlsx, fx.bytes);
+
+  const browser = await pw.chromium.launch(launchOpts);
+  const context = await browser.newContext({ acceptDownloads: true });
+  const external = [];
+  await context.route('**/*', route => {
+    const url = route.request().url();
+    if (/^(file|blob|data):/.test(url)) return route.continue();
+    external.push(url);
+    return route.abort();
+  });
+  const errors = [];
+  const page = await context.newPage();
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('dialog', d => { if (d.type() === 'alert') errors.push('alert: ' + d.message()); d.accept(); });
+
+  await page.goto('file://' + path.join(DIST, 'FS-excel-to-pack.html'));
+  await page.evaluate(() => { try { localStorage.clear(); } catch (e) { /* ignore */ } });
+  assert(await page.isHidden('#xp-card-rows'), '還沒選檔時不顯示對應表');
+  await page.setInputFiles('#xp-file', xlsx);
+  await page.waitForSelector('#xp-card-rows:not([hidden])');
+
+  const vehicleNames = await page.$$eval('[data-vname]:not([disabled])', els => els.map(e => e.value));
+  assert(vehicleNames.join() === '3人貨車,9人商用,9人接駁', '車系欄：' + vehicleNames.join());
+  assert(await page.$eval('#xp-wcol', s => s.value) === '7', '加權欄應為 G');
+  assert(await page.$eval('[data-role="13"]', s => s.value) === 'sub:B', '第 13 列應判斷為 B');
+  assert(await page.$eval('[data-parent="15"]', s => s.value) === 'r14', '第 15 列應掛在第 14 列群組底下');
+  const sheetRows = await page.$$eval('#xp-sheets tbody tr', trs => trs.map(tr => tr.textContent));
+  assert(sheetRows.some(t => /DQ FS_目標/.test(t) && /版面相同/.test(t)), '同版面的分頁要標示可一起轉');
+  assert(sheetRows.some(t => /參數/.test(t) && /隱藏/.test(t)), '隱藏分頁要標示');
+  await page.check('[data-inc="1"]');
+  await page.fill('#xp-type', 'DQ');
+  await page.dispatchEvent('#xp-type', 'change');
+
+  // 故意略過「貨物稅」→ 驗算要抓到
+  await page.selectOption('[data-role="20"]', 'skip');
+  await page.click('#xp-run');
+  await page.waitForSelector('#xp-result .xp-note');
+  assert(/跟 Excel 不一樣/.test(await page.textContent('#xp-result .xp-note')), '漏掉一列時驗算要抓到');
+  assert(await page.$$eval('#xp-result tr.bad', trs => trs.length) > 0, '不相同的列要標紅');
+
+  // 改回來
+  await page.selectOption('[data-role="20"]', 'detail');
+  await page.selectOption('[data-parent="20"]', 'B');
+  await page.click('#xp-run');
+  await page.waitForSelector('#xp-result .xp-note');
+  const note = await page.textContent('#xp-result .xp-note');
+  assert(/驗算通過/.test(note), '改回來之後應該全部相同：' + note);
+  const summaries = await page.$$eval('#xp-result summary', s => s.map(x => x.textContent));
+  assert(summaries.length === 2 && summaries.every(s => /✓/.test(s)), '兩個分頁都通過：' + summaries.join(' | '));
+
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#xp-download')]);
+  const packFile = path.join(tmp, 'pack.json');
+  await dl.saveAs(packFile);
+  assert(/^FS資料包_DQ_\d{8}-\d{4}\.json$/.test(dl.suggestedFilename()), '下載檔名：' + dl.suggestedFilename());
+  const pack = JSON.parse(fs.readFileSync(packFile, 'utf8'));
+  assert(pack.format === 'FS-損益試算資料包' && pack.tables.Scenarios.length === 2 && pack.tables.Vehicles.length === 3, '資料包內容');
+
+  // 重新選同一個檔：沿用剛才的對應(第 20 列改過的 parent 留著)
+  await page.setInputFiles('#xp-file', xlsx);
+  await page.waitForSelector('#xp-card-rows:not([hidden])');
+  assert(/已套用上次/.test(await page.textContent('#xp-rows')), '重新選同一個檔案時要沿用上次的對應');
+
+  // 在地端版合併匯入
+  const app = await context.newPage();
+  app.on('pageerror', e => errors.push('FS-local: ' + e.message));
+  await app.goto('file://' + path.join(DIST, 'FS-local.html'));
+  await app.waitForSelector('#fs-local-bar');
+  await app.setInputFiles('#fs-local-bar input[type=file]', packFile);
+  await app.waitForSelector('#fs-local-dialog[open]');
+  await app.click('#fs-local-dialog button:has-text("合併匯入")');
+  await app.waitForSelector('#fs-local-dialog >> text=確認合併內容');
+  await Promise.all([app.waitForNavigation(), app.click('#fs-local-dialog button:has-text("確定合併")')]);
+  await app.waitForFunction(() => [...document.querySelectorAll('#vehicletype-selector option')].some(o => o.value === 'DQ'));
+  const k = await app.evaluate(() => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail).getScenarios('DQ')))
+    .then(scs => app.evaluate(ids => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail)
+      .calculateComparison(ids.map(id => ({ ScenarioID: id, VehicleID: '' })))), scs.map(s => s.ScenarioID)));
+  [0, 1].forEach(i => {
+    const got = k.columns[i].amounts.K;
+    assert(Math.abs(got - fx.expected[i][31][3]) < 0.01, `匯入後第 ${i + 1} 個情境的加權營業淨利：${got}，Excel ${fx.expected[i][31][3]}`);
+  });
+
+  assert(errors.length === 0, '頁面有 JS 錯誤：' + errors.join(' | '));
+  assert(external.length === 0, '不該連外部網路，卻請求了：' + external.join(', '));
+  await browser.close();
+  fs.rmSync(tmp, { recursive: true, force: true });
+
+  if (failures.length) {
+    console.log(`Excel 轉資料包瀏覽器測試失敗：${failures.length} 項（共 ${checks} 項）`);
+    failures.forEach(f => console.log('  ✗ ' + f));
+    process.exit(1);
+  }
+  console.log(`Excel 轉資料包瀏覽器測試通過：${checks} 項全部符合（讀檔、自動判斷、驗算抓錯、下載、地端版合併匯入後數字相同、記住對應）。`);
+}
+
+main().catch(e => { console.error(e); process.exit(1); });

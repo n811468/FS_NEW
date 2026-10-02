@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Excel 轉資料包</title>
+<!--XP-STYLE-->
+</head>
+<body>
+<header class="xp-head">
+  <h1>Excel 轉資料包</h1>
+  <p>把 Excel 的損益試算表(FS)轉成車型損益試算系統的資料包。全部在這台電腦的瀏覽器裡處理，檔案不會上傳到任何地方。
+    轉好後在系統按「匯入資料包…」→「合併匯入」。</p>
+</header>
+<main>
+  <section class="xp-card" id="xp-card-file">
+    <h2><span class="xp-step">1</span>選擇 Excel 檔</h2>
+    <p class="xp-sub">支援 .xlsx(舊版 .xls 請先用 Excel 另存成 .xlsx)。讀的是 Excel 存檔時算好的數字，請先在 Excel 裡存檔一次。</p>
+    <div class="xp-drop" id="xp-drop">把 .xlsx 拖到這裡，或 <button class="xp-btn primary" type="button" id="xp-pick">選擇檔案…</button>
+      <input type="file" id="xp-file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>
+    <div id="xp-file-msg"></div>
+    <div id="xp-sheets" style="margin-top:12px"></div>
+  </section>
+  <section class="xp-card" id="xp-card-cols" hidden>
+    <h2><span class="xp-step">2</span>確認欄位</h2>
+    <div id="xp-cols"></div>
+  </section>
+  <section class="xp-card" id="xp-card-rows" hidden>
+    <h2><span class="xp-step">3</span>逐列對應</h2>
+    <p class="xp-sub">系統依 Excel 的小計公式自動判斷每一列是什麼，請逐列確認。明細會照 Excel 的金額帶入，小計由系統依科目樹計算，第 5 步會逐格跟 Excel 比對。</p>
+    <div id="xp-rows"></div>
+  </section>
+  <section class="xp-card" id="xp-card-sc" hidden>
+    <h2><span class="xp-step">4</span>車型與情境</h2>
+    <div id="xp-sc"></div>
+  </section>
+  <section class="xp-card" id="xp-card-run" hidden>
+    <h2><span class="xp-step">5</span>建立、驗算、下載</h2>
+    <div class="xp-row">
+      <button class="xp-btn primary" type="button" id="xp-run">建立並驗算</button>
+      <button class="xp-btn" type="button" id="xp-download" disabled>下載資料包</button>
+    </div>
+    <div id="xp-result"></div>
+  </section>
+</main>
+<!--XP-SCRIPTS-->
+</body>
+</html>
