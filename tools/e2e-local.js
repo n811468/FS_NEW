@@ -143,6 +143,22 @@ async function main() {
   const after = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getVehicles('DA')));
   assert(after[1].VehicleID === before[0].VehicleID, '用鍵盤把第一個車系往下移，應該立即存成新的順序');
 
+  // 科目樹拖曳(Alt+↓ 把「廣宣費用」往下移)之後，儀表板仍然是 Excel 的順序：明細在上、銷貨毛利在下，前瞻費用在營業淨利前
+  await page.click('nav button[data-tab="lineitems"]');
+  await page.waitForSelector('.tree-block[data-key="d1"] .drag-handle');
+  await page.focus('.tree-block[data-key="d1"] > .tree-row .drag-handle');
+  await page.keyboard.press('Alt+ArrowDown');
+  await page.waitForFunction(() => { const b = document.querySelector('.tree-block[data-key="d1"]'); return b && b.previousElementSibling && b.previousElementSibling.getAttribute('data-key') === 'd2'; }, null, { timeout: 10000 });
+  await page.waitForTimeout(500);
+  const treeOrder = await page.$$eval('#chart-tree-body .tree-row', rs => rs.map(r => r.closest('.tree-block').getAttribute('data-key')));
+  assert(treeOrder.indexOf('d5') < treeOrder.indexOf('E') && treeOrder.indexOf('E') < treeOrder.indexOf('f1'), '科目樹：銷貨毛利應該在明細下面：' + treeOrder.join(','));
+  await page.click('nav button[data-tab="dashboard"]');
+  await page.waitForFunction(() => /營業淨利/.test(document.getElementById('dashboard-content').textContent || ''), null, { timeout: 15000 });
+  const dashOrder = await page.$$eval('.pl-table tbody tr td.row-head', ts => ts.map(t => t.getAttribute('data-l')));
+  const at = c => dashOrder.indexOf(c);
+  assert(at('d2') < at('d1') && at('d1') < at('E') && at('d5') < at('E') && at('C') < at('d2'), '儀表板：明細要在銷貨毛利上面：' + dashOrder.join(','));
+  assert(at('h4') < at('I') && at('I') < at('J') && at('J') < at('K') && at('b13') < at('C'), '儀表板：I、J、K 跟 Excel 同順序：' + dashOrder.join(','));
+
   // 透過前端同一條路徑(google.script.run)改資料：新增車型 DQ
   await page.evaluate(() => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail)
     .saveVehicleTypeGrid([{ VehicleTypeID: 'DQ', Notes: '端對端測試' }])));

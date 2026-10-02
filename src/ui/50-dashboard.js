@@ -349,7 +349,7 @@ function setDashViewHtml_(html) {
   if (content) content.innerHTML = `${dashSubNavHtml((lastComparison && lastComparison.columns) || [])}<div id="dash-view">${html}</div>`;
 }
 
-/** 把後端新算回來的欄位併進手上的結果：同鍵值的欄位以新的為準，科目取聯集後照 SortOrder 排 */
+/** 把後端新算回來的欄位併進手上的結果：同鍵值的欄位以新的為準，科目取聯集後照呈現順序排(同 Excel：扣減型小計在明細下面) */
 function mergeComparison_(base, add) {
   if (!base) return add;
   const cols = (base.columns || []).slice();
@@ -359,8 +359,7 @@ function mergeComparison_(base, add) {
   });
   const lines = (base.lines || []).slice();
   (add.lines || []).forEach(l => { if (!lines.some(x => x.LineCode === l.LineCode)) lines.push(l); });
-  lines.sort((a, b) => (Number(a.SortOrder) || 0) - (Number(b.SortOrder) || 0));
-  return Object.assign({}, base, { columns: cols, lines: lines });
+  return Object.assign({}, base, { columns: cols, lines: displayOrderLines_(lines) });
 }
 
 /** 依目前的比較欄位順序挑出對應的欄位；沒有任何欄位有數字的科目不再列出(跟後端的規則一致) */

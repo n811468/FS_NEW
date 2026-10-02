@@ -114,9 +114,43 @@ function sortLineDefs_(rows) {
   return rows.slice().sort(function (a, b) { return toNumber_(a.SortOrder) - toNumber_(b.SortOrder); });
 }
 
+/** 「前一個小計 − 明細」型的小計(銷貨毛利 = 生產毛利 − Σ明細)：跟 Excel 一樣，明細列在上、小計列在下 */
+function isFooterGroupLine_(def) {
+  return !!def && lineCalcType_(def) === CALC_TYPES.FORMULA && /-\s*CHILDREN\s*\(\s*\)/i.test(String(def.Formula || ''));
+}
+
+/**
+ * 科目的呈現順序(儀表板、報告、科目樹、輸入頁共用)，照 Excel 損益表的讀法：
+ *   - 同一層依 SortOrder；
+ *   - 一般群組(例：銷貨成本合計 = Σ明細)：群組列在上、明細在下；
+ *   - 扣減型小計(例：銷貨毛利 = 生產毛利 − Σ明細)：明細在上、小計在下。
+ * 這樣就算 SortOrder 被舊版拖曳改成「父科目在前」，畫面仍然是 Excel 的順序。
+ */
+function displayOrderDefs_(defs) {
+  var sorted = sortLineDefs_(defs);
+  var codes = {};
+  sorted.forEach(function (d) { codes[d.LineCode] = true; });
+  var kids = {};
+  sorted.forEach(function (d) {
+    var p = d.ParentLine && d.ParentLine !== d.LineCode && codes[d.ParentLine] ? d.ParentLine : '';
+    (kids[p] = kids[p] || []).push(d);
+  });
+  var out = [], seen = {};
+  var emit = function (d) {
+    if (seen[d.LineCode]) return;
+    seen[d.LineCode] = true;
+    var children = kids[d.LineCode] || [];
+    if (children.length && isFooterGroupLine_(d)) { children.forEach(emit); out.push(d); }
+    else { out.push(d); children.forEach(emit); }
+  };
+  (kids[''] || []).forEach(emit);
+  sorted.forEach(function (d) { if (!seen[d.LineCode]) { seen[d.LineCode] = true; out.push(d); } });   // 父子循環的保險
+  return out;
+}
+
 /** 標準範本的科目 */
 function getTemplateLineItems_() {
-  return sortLineDefs_(allLineItemRows_().filter(function (r) { return !r.VehicleTypeID; }).map(normalizeLineDef_));
+  return displayOrderDefs_(allLineItemRows_().filter(function (r) { return !r.VehicleTypeID; }).map(normalizeLineDef_));
 }
 
 function hasOwnChart_(vehicleTypeId) {
@@ -130,7 +164,7 @@ function hasOwnChart_(vehicleTypeId) {
  */
 function getPLLineItems(vehicleTypeId) {
   if (vehicleTypeId && hasOwnChart_(vehicleTypeId)) {
-    return sortLineDefs_(allLineItemRows_().filter(function (r) { return r.VehicleTypeID === vehicleTypeId; })
+    return displayOrderDefs_(allLineItemRows_().filter(function (r) { return r.VehicleTypeID === vehicleTypeId; })
       .map(normalizeLineDef_));
   }
   return getTemplateLineItems_();
@@ -552,6 +586,10 @@ function setLineOrder(vehicleTypeId, items) {
       row.SortOrder = (++n) * 10;
       upserts.push(row);
     });
+    // 依呈現順序(扣減型小計排在明細後面)重新編號，讓存下來的 SortOrder 本身就是 Excel 的順序
+    var posOf = {};
+    displayOrderDefs_(upserts.map(normalizeLineDef_)).forEach(function (d, i) { posOf[d.LineCode] = i; });
+    upserts.forEach(function (row) { row.SortOrder = (posOf[row.LineCode] + 1) * 10; });
     var problems = chartProblems_(upserts.map(normalizeLineDef_), vehicleTypeId).filter(function (p) { return p.level === 'error'; });
     if (problems.length) throw new Error(problems.map(function (p) { return p.message; }).join('\n'));
     batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', upserts, []);

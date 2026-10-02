@@ -122,6 +122,29 @@ function panelCacheKey_(prefix, scope) {
 let silent = false;
 
 /* ---------------- 共用工具 ---------------- */
+/** 扣減型小計(公式「X − CHILDREN()」，例：銷貨毛利)：跟 Excel 一樣排在明細下面 */
+function isFooterGroupLine_(l) {
+  return !!l && /-\s*CHILDREN\s*\(\s*\)/i.test(String(l.Formula || ''));
+}
+/** 科目呈現順序(跟後端 displayOrderDefs_ 同一套規則)：同層依 SortOrder；一般群組列在明細上面，扣減型小計列在明細下面 */
+function displayOrderLines_(lines) {
+  const sorted = (lines || []).slice().sort((a, b) => (Number(a.SortOrder) || 0) - (Number(b.SortOrder) || 0));
+  const codes = {};
+  sorted.forEach(l => { codes[l.LineCode] = true; });
+  const kids = {};
+  sorted.forEach(l => { const p = l.ParentLine && l.ParentLine !== l.LineCode && codes[l.ParentLine] ? l.ParentLine : ''; (kids[p] = kids[p] || []).push(l); });
+  const out = [], seen = {};
+  const emit = l => {
+    if (seen[l.LineCode]) return;
+    seen[l.LineCode] = true;
+    const children = kids[l.LineCode] || [];
+    if (children.length && isFooterGroupLine_(l)) { children.forEach(emit); out.push(l); }
+    else { out.push(l); children.forEach(emit); }
+  };
+  (kids[''] || []).forEach(emit);
+  sorted.forEach(l => { if (!seen[l.LineCode]) { seen[l.LineCode] = true; out.push(l); } });
+  return out;
+}
 function num(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
 function fmt(v, digits) {
   if (v === '' || v === null || v === undefined) return '';
@@ -395,7 +418,8 @@ function makeSortable(container, opts) {
     opts.onEnd(keysNow(), key, true);
     // 重畫之後把焦點放回同一個把手，可以連續按 Alt+↑↓
     setTimeout(() => {
-      const again = document.querySelector(`[data-key="${CSS.escape(key)}"] ${handleSel}`);
+      const box = document.querySelector(`[data-key="${CSS.escape(key)}"]`);
+      const again = box && Array.from(box.querySelectorAll(handleSel)).find(h => h.closest(itemSel) === box);
       if (again) again.focus();
     }, 700);
   });

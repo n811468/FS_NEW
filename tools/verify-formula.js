@@ -173,6 +173,29 @@ check('拖曳排序：車系與科目一次送完整順序', () => {
   gs.setVehicleOrder('DA', ['V1', 'V2', 'V3']);
 });
 
+check('科目呈現順序跟 Excel 一樣：扣減型小計在明細下面，舊版「父科目在前」的排序也會自動修正', () => {
+  const EXCEL = ['A', 'B', 'b', 'C', 'd', 'E', 'f', 'G', 'h', 'I', 'J', 'K'];
+  const shape = codes => codes.filter(c => !/^P\d/.test(c)).map(c => /^[bdfh]\d/.test(c) ? c[0] : c)
+    .filter((c, i, a) => i === 0 || a[i - 1] !== c).join(',');
+  const cmpCodes = () => gs.calculateComparison([{ ScenarioID: sid, VehicleID: '' }]).lines.map(l => l.LineCode);
+  assert(shape(cmpCodes()) === EXCEL.join(), '儀表板順序：' + shape(cmpCodes()));
+  // 舊版拖曳會把父科目排在子科目前面(E、d1…d5、G、f…)：存成這樣也要照 Excel 呈現
+  const parentFirst = [];
+  const defs = gs.getPLLineItems('DA');
+  const walk = p => defs.filter(d => (d.ParentLine || '') === p).sort((a, b) => a.SortOrder - b.SortOrder)
+    .forEach(d => { parentFirst.push(d); walk(d.LineCode); });
+  walk('');
+  gs.savePLLineItemGrid(parentFirst.map((d, i) => ({ LineCode: d.LineCode, LineName: d.LineName, SortOrder: (i + 1) * 10 })), 'DA');
+  const rawSorted = gs.getPLLineItems('DA').slice().sort((a, b) => a.SortOrder - b.SortOrder).map(d => d.LineCode);
+  assert(rawSorted.indexOf('E') < rawSorted.indexOf('d1'), '測試前提：存的 SortOrder 是父科目在前');
+  assert(shape(cmpCodes()) === EXCEL.join(), '父科目在前的舊排序：' + shape(cmpCodes()));
+  assert(shape(gs.getGateReport(sid, sid, '').lines.map(l => l.LineCode)) === EXCEL.join(), '報告順序');
+  // 科目樹拖曳送出的是「父在前」的走訪順序，存回去的 SortOrder 本身就要是 Excel 順序
+  const saved = gs.setLineOrder('DA', parentFirst.map(d => ({ LineCode: d.LineCode, ParentLine: d.ParentLine || '' })));
+  const bySort = saved.slice().sort((a, b) => a.SortOrder - b.SortOrder).map(d => d.LineCode);
+  assert(shape(bySort) === EXCEL.join(), '存回的 SortOrder：' + shape(bySort));
+});
+
 check('GATE 報告：現況 vs 目標差距與作法、開發總投 by 部門', () => {
   const target = gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE F', ScenarioName: '目標', ScenarioType: '目標', VehicleTypeID: 'DA' }, sid, []);
   const dev = gs.getDevInvestmentSummary(target.ScenarioID);

@@ -212,7 +212,11 @@ function drawChartTreeBody_() {
     if (q && !subtreeMatches(l)) return '';
     const children = kids[l.LineCode] || [];
     const collapsed = !q && chartCollapsed.has(l.LineCode);
-    return `<div class="tree-block" data-key="${esc(l.LineCode)}">${rowHtml(l, depth)}${children.length ? `<div class="tree-children" data-parent="${esc(l.LineCode)}"${collapsed ? ' hidden' : ''}>${children.map(c => blockHtml(c, depth + 1)).join('')}</div>` : ''}</div>`;
+    const childBox = children.length ? `<div class="tree-children" data-parent="${esc(l.LineCode)}"${collapsed ? ' hidden' : ''}>${children.map(c => blockHtml(c, depth + 1)).join('')}</div>` : '';
+    // 扣減型小計(銷貨毛利 = 生產毛利 − Σ明細)跟 Excel 一樣：明細在上、小計列在下
+    return isFooterGroupLine_(l) && childBox
+      ? `<div class="tree-block footer-group" data-key="${esc(l.LineCode)}">${childBox}${rowHtml(l, depth)}</div>`
+      : `<div class="tree-block" data-key="${esc(l.LineCode)}">${rowHtml(l, depth)}${childBox}</div>`;
   };
   const top = kids[''] || [];
   const price = top.filter(l => l.Category === '售價結構');

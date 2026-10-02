@@ -312,6 +312,7 @@
     font-size: 11px; padding: 0; transition: transform .15s; flex: none; }
   .tree-toggle:hover { background: var(--surface-3); }
   .tree-toggle.collapsed { transform: rotate(-90deg); }
+  .footer-group > .tree-row .tree-toggle:not(.collapsed) { transform: rotate(180deg); }
   .tree-toggle-space, .tree-spacer { width: 18px; flex: none; }
   .tree-spacer { width: 22px; }
   .tree-add { appearance: none; border: 1px solid var(--primary-line); background: #fff; color: var(--primary); border-radius: 5px; width: 22px; height: 20px;
@@ -480,6 +481,8 @@
   .row-toggle:hover { background: var(--surface-3); }
   .row-toggle svg { width: 10px; height: 10px; transition: transform .15s; }
   .row-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }
+  /* 扣減型小計(明細在上面)：展開時箭頭朝上指向明細 */
+  .row-toggle.up[aria-expanded="true"] svg { transform: rotate(180deg); }
   .check-box { background: var(--warning-weak); border: 1px solid #f0d49a; border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; color: #7a4c02; margin: 10px 0; }
   .check-box ul { margin: 6px 0 0; padding-left: 20px; }
   [data-tip] { -webkit-tap-highlight-color: transparent; }

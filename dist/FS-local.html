@@ -348,6 +348,7 @@
     font-size: 11px; padding: 0; transition: transform .15s; flex: none; }
   .tree-toggle:hover { background: var(--surface-3); }
   .tree-toggle.collapsed { transform: rotate(-90deg); }
+  .footer-group > .tree-row .tree-toggle:not(.collapsed) { transform: rotate(180deg); }
   .tree-toggle-space, .tree-spacer { width: 18px; flex: none; }
   .tree-spacer { width: 22px; }
   .tree-add { appearance: none; border: 1px solid var(--primary-line); background: #fff; color: var(--primary); border-radius: 5px; width: 22px; height: 20px;
@@ -516,6 +517,8 @@
   .row-toggle:hover { background: var(--surface-3); }
   .row-toggle svg { width: 10px; height: 10px; transition: transform .15s; }
   .row-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }
+  /* 扣減型小計(明細在上面)：展開時箭頭朝上指向明細 */
+  .row-toggle.up[aria-expanded="true"] svg { transform: rotate(180deg); }
   .check-box { background: var(--warning-weak); border: 1px solid #f0d49a; border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; color: #7a4c02; margin: 10px 0; }
   .check-box ul { margin: 6px 0 0; padding-left: 20px; }
   [data-tip] { -webkit-tap-highlight-color: transparent; }
@@ -3150,9 +3153,43 @@ function sortLineDefs_(rows) {
   return rows.slice().sort(function (a, b) { return toNumber_(a.SortOrder) - toNumber_(b.SortOrder); });
 }
 
+/** 「前一個小計 − 明細」型的小計(銷貨毛利 = 生產毛利 − Σ明細)：跟 Excel 一樣，明細列在上、小計列在下 */
+function isFooterGroupLine_(def) {
+  return !!def && lineCalcType_(def) === CALC_TYPES.FORMULA && /-\s*CHILDREN\s*\(\s*\)/i.test(String(def.Formula || ''));
+}
+
+/**
+ * 科目的呈現順序(儀表板、報告、科目樹、輸入頁共用)，照 Excel 損益表的讀法：
+ *   - 同一層依 SortOrder；
+ *   - 一般群組(例：銷貨成本合計 = Σ明細)：群組列在上、明細在下；
+ *   - 扣減型小計(例：銷貨毛利 = 生產毛利 − Σ明細)：明細在上、小計在下。
+ * 這樣就算 SortOrder 被舊版拖曳改成「父科目在前」，畫面仍然是 Excel 的順序。
+ */
+function displayOrderDefs_(defs) {
+  var sorted = sortLineDefs_(defs);
+  var codes = {};
+  sorted.forEach(function (d) { codes[d.LineCode] = true; });
+  var kids = {};
+  sorted.forEach(function (d) {
+    var p = d.ParentLine && d.ParentLine !== d.LineCode && codes[d.ParentLine] ? d.ParentLine : '';
+    (kids[p] = kids[p] || []).push(d);
+  });
+  var out = [], seen = {};
+  var emit = function (d) {
+    if (seen[d.LineCode]) return;
+    seen[d.LineCode] = true;
+    var children = kids[d.LineCode] || [];
+    if (children.length && isFooterGroupLine_(d)) { children.forEach(emit); out.push(d); }
+    else { out.push(d); children.forEach(emit); }
+  };
+  (kids[''] || []).forEach(emit);
+  sorted.forEach(function (d) { if (!seen[d.LineCode]) { seen[d.LineCode] = true; out.push(d); } });   // 父子循環的保險
+  return out;
+}
+
 /** 標準範本的科目 */
 function getTemplateLineItems_() {
-  return sortLineDefs_(allLineItemRows_().filter(function (r) { return !r.VehicleTypeID; }).map(normalizeLineDef_));
+  return displayOrderDefs_(allLineItemRows_().filter(function (r) { return !r.VehicleTypeID; }).map(normalizeLineDef_));
 }
 
 function hasOwnChart_(vehicleTypeId) {
@@ -3166,7 +3203,7 @@ function hasOwnChart_(vehicleTypeId) {
  */
 function getPLLineItems(vehicleTypeId) {
   if (vehicleTypeId && hasOwnChart_(vehicleTypeId)) {
-    return sortLineDefs_(allLineItemRows_().filter(function (r) { return r.VehicleTypeID === vehicleTypeId; })
+    return displayOrderDefs_(allLineItemRows_().filter(function (r) { return r.VehicleTypeID === vehicleTypeId; })
       .map(normalizeLineDef_));
   }
   return getTemplateLineItems_();
@@ -3588,6 +3625,10 @@ function setLineOrder(vehicleTypeId, items) {
       row.SortOrder = (++n) * 10;
       upserts.push(row);
     });
+    // 依呈現順序(扣減型小計排在明細後面)重新編號，讓存下來的 SortOrder 本身就是 Excel 的順序
+    var posOf = {};
+    displayOrderDefs_(upserts.map(normalizeLineDef_)).forEach(function (d, i) { posOf[d.LineCode] = i; });
+    upserts.forEach(function (row) { row.SortOrder = (posOf[row.LineCode] + 1) * 10; });
     var problems = chartProblems_(upserts.map(normalizeLineDef_), vehicleTypeId).filter(function (p) { return p.level === 'error'; });
     if (problems.length) throw new Error(problems.map(function (p) { return p.message; }).join('\n'));
     batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', upserts, []);
@@ -4410,7 +4451,7 @@ function calculateScenarioWeighted(scenarioId) {
 
 /**
  * 多個科目表合併成一份(比較欄位可能來自不同車型，科目表不同)：
- * 依代碼取聯集，名稱/位置以先出現的車型為準，依排序值排列。
+ * 依代碼取聯集，名稱/位置以先出現的車型為準，依呈現順序(displayOrderDefs_，跟 Excel 一樣)排列。
  */
 function unionLineDefs_(defLists) {
   var seen = {}, out = [];
@@ -4421,14 +4462,14 @@ function unionLineDefs_(defLists) {
       out.push(d);
     });
   });
-  return sortLineDefs_(out);
+  return displayOrderDefs_(out);
 }
 
 /**
  * 多車型/多情境比較：儀表板的核心 API。
  * selections = [{ ScenarioID, VehicleID }]，VehicleID 留空代表該情境的「加權平均」。
  *
- * 回傳的 lines 是所有欄位實際出現過科目的聯集(依 SortOrder 排序)，並且帶上 ParentLine，
+ * 回傳的 lines 是所有欄位實際出現過科目的聯集(依呈現順序：扣減型小計排在明細後面，同 Excel)，並且帶上 ParentLine，
  * 讓前端可以把明細科目縮排在它的小計底下。某欄位沒有該科目時值為 null，前端顯示空白而不是 0。
  *
  * 每個欄位另外附 checks(小計驗算)、errors(公式錯誤)、traces(每個公式科目的計算過程，hover 用)。
@@ -5396,7 +5437,7 @@ function reportMaintenance_(message) {
 }
 
   return {
-    fns: { getSheet_: getSheet_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, saveParamDef: saveParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
+    fns: { getSheet_: getSheet_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, saveParamDef: saveParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
     consts: { SCHEMA: SCHEMA, TEXT_COLUMNS: TEXT_COLUMNS, PL_LINE_ITEMS: PL_LINE_ITEMS, LINE_CODE_PREFIX: LINE_CODE_PREFIX },
     // 模擬 Apps Script「每次 google.script.run 都是全新執行」：單次執行內的快取要清掉
     beginExecution: function () { SHEET_CACHE_ = {}; resetCalcMemo_(); LOCK_DEPTH_ = 0; }
@@ -5916,6 +5957,29 @@ function panelCacheKey_(prefix, scope) {
 let silent = false;
 
 /* ---------------- 共用工具 ---------------- */
+/** 扣減型小計(公式「X − CHILDREN()」，例：銷貨毛利)：跟 Excel 一樣排在明細下面 */
+function isFooterGroupLine_(l) {
+  return !!l && /-\s*CHILDREN\s*\(\s*\)/i.test(String(l.Formula || ''));
+}
+/** 科目呈現順序(跟後端 displayOrderDefs_ 同一套規則)：同層依 SortOrder；一般群組列在明細上面，扣減型小計列在明細下面 */
+function displayOrderLines_(lines) {
+  const sorted = (lines || []).slice().sort((a, b) => (Number(a.SortOrder) || 0) - (Number(b.SortOrder) || 0));
+  const codes = {};
+  sorted.forEach(l => { codes[l.LineCode] = true; });
+  const kids = {};
+  sorted.forEach(l => { const p = l.ParentLine && l.ParentLine !== l.LineCode && codes[l.ParentLine] ? l.ParentLine : ''; (kids[p] = kids[p] || []).push(l); });
+  const out = [], seen = {};
+  const emit = l => {
+    if (seen[l.LineCode]) return;
+    seen[l.LineCode] = true;
+    const children = kids[l.LineCode] || [];
+    if (children.length && isFooterGroupLine_(l)) { children.forEach(emit); out.push(l); }
+    else { out.push(l); children.forEach(emit); }
+  };
+  (kids[''] || []).forEach(emit);
+  sorted.forEach(l => { if (!seen[l.LineCode]) { seen[l.LineCode] = true; out.push(l); } });
+  return out;
+}
 function num(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
 function fmt(v, digits) {
   if (v === '' || v === null || v === undefined) return '';
@@ -6189,7 +6253,8 @@ function makeSortable(container, opts) {
     opts.onEnd(keysNow(), key, true);
     // 重畫之後把焦點放回同一個把手，可以連續按 Alt+↑↓
     setTimeout(() => {
-      const again = document.querySelector(`[data-key="${CSS.escape(key)}"] ${handleSel}`);
+      const box = document.querySelector(`[data-key="${CSS.escape(key)}"]`);
+      const again = box && Array.from(box.querySelectorAll(handleSel)).find(h => h.closest(itemSel) === box);
       if (again) again.focus();
     }, 700);
   });
@@ -8110,7 +8175,11 @@ function drawChartTreeBody_() {
     if (q && !subtreeMatches(l)) return '';
     const children = kids[l.LineCode] || [];
     const collapsed = !q && chartCollapsed.has(l.LineCode);
-    return `<div class="tree-block" data-key="${esc(l.LineCode)}">${rowHtml(l, depth)}${children.length ? `<div class="tree-children" data-parent="${esc(l.LineCode)}"${collapsed ? ' hidden' : ''}>${children.map(c => blockHtml(c, depth + 1)).join('')}</div>` : ''}</div>`;
+    const childBox = children.length ? `<div class="tree-children" data-parent="${esc(l.LineCode)}"${collapsed ? ' hidden' : ''}>${children.map(c => blockHtml(c, depth + 1)).join('')}</div>` : '';
+    // 扣減型小計(銷貨毛利 = 生產毛利 − Σ明細)跟 Excel 一樣：明細在上、小計列在下
+    return isFooterGroupLine_(l) && childBox
+      ? `<div class="tree-block footer-group" data-key="${esc(l.LineCode)}">${childBox}${rowHtml(l, depth)}</div>`
+      : `<div class="tree-block" data-key="${esc(l.LineCode)}">${rowHtml(l, depth)}${childBox}</div>`;
   };
   const top = kids[''] || [];
   const price = top.filter(l => l.Category === '售價結構');
@@ -9807,7 +9876,7 @@ function setDashViewHtml_(html) {
   if (content) content.innerHTML = `${dashSubNavHtml((lastComparison && lastComparison.columns) || [])}<div id="dash-view">${html}</div>`;
 }
 
-/** 把後端新算回來的欄位併進手上的結果：同鍵值的欄位以新的為準，科目取聯集後照 SortOrder 排 */
+/** 把後端新算回來的欄位併進手上的結果：同鍵值的欄位以新的為準，科目取聯集後照呈現順序排(同 Excel：扣減型小計在明細下面) */
 function mergeComparison_(base, add) {
   if (!base) return add;
   const cols = (base.columns || []).slice();
@@ -9817,8 +9886,7 @@ function mergeComparison_(base, add) {
   });
   const lines = (base.lines || []).slice();
   (add.lines || []).forEach(l => { if (!lines.some(x => x.LineCode === l.LineCode)) lines.push(l); });
-  lines.sort((a, b) => (Number(a.SortOrder) || 0) - (Number(b.SortOrder) || 0));
-  return Object.assign({}, base, { columns: cols, lines: lines });
+  return Object.assign({}, base, { columns: cols, lines: displayOrderLines_(lines) });
 }
 
 /** 依目前的比較欄位順序挑出對應的欄位；沒有任何欄位有數字的科目不再列出(跟後端的規則一致) */
@@ -10751,7 +10819,7 @@ function plTableHtml(cols, lines) {
     const autoTag = autoSourceDot(line.AutoSource);
     const isGroupHead = groupParents.indexOf(line.LineCode) !== -1;
     const toggleBtn = isGroupHead
-      ? `<button class="row-toggle" data-group="${esc(line.LineCode)}" aria-expanded="${!collapsedGroups.has(line.LineCode)}"
+      ? `<button class="row-toggle${isFooterGroupLine_(line) ? ' up' : ''}" data-group="${esc(line.LineCode)}" aria-expanded="${!collapsedGroups.has(line.LineCode)}"
            onclick="toggleGroupCollapse('${esc(line.LineCode)}')" data-tip="${collapsedGroups.has(line.LineCode) ? '展開明細' : '收合明細'}">
            <svg viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 7l3-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
          </button>` : '';

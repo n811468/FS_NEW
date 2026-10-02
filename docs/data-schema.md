@@ -194,7 +194,7 @@
 | LineName | 科目名稱（使用者擁有，不再夾帶公式） |
 | ParentLine | 計入哪個小計（父科目）。手動輸入的金額：父科目鏈上有 `B` 的存在銷貨成本頁，其他存在營業費用頁 |
 | Category | 分類（`售價結構` 決定顯示在售價結構段，其餘為說明用） |
-| SortOrder | 顯示順序（科目樹拖曳時整批重編） |
+| SortOrder | 同一層的順序（科目樹拖曳時依呈現順序整批重編；扣減型小計一律呈現在明細下面，跟 Excel 相同） |
 | **CalcType** | 計算來源：`INPUT` 手動輸入 / `FORMULA` 公式 / `DEV_AMORT` 開發總投攤提 |
 | **Formula** | 公式（`CalcType = FORMULA` 時），語法見 `usage.md`，解析/計算在 `src/FormulaEngine.gs` |
 | **VehicleFormulas** | 車系個別公式，JSON `{ "車系ID": "公式" }`；有值的車系不論 CalcType 一律用它 |

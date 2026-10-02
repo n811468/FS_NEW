@@ -341,7 +341,7 @@ function calculateScenarioWeighted(scenarioId) {
 
 /**
  * 多個科目表合併成一份(比較欄位可能來自不同車型，科目表不同)：
- * 依代碼取聯集，名稱/位置以先出現的車型為準，依排序值排列。
+ * 依代碼取聯集，名稱/位置以先出現的車型為準，依呈現順序(displayOrderDefs_，跟 Excel 一樣)排列。
  */
 function unionLineDefs_(defLists) {
   var seen = {}, out = [];
@@ -352,14 +352,14 @@ function unionLineDefs_(defLists) {
       out.push(d);
     });
   });
-  return sortLineDefs_(out);
+  return displayOrderDefs_(out);
 }
 
 /**
  * 多車型/多情境比較：儀表板的核心 API。
  * selections = [{ ScenarioID, VehicleID }]，VehicleID 留空代表該情境的「加權平均」。
  *
- * 回傳的 lines 是所有欄位實際出現過科目的聯集(依 SortOrder 排序)，並且帶上 ParentLine，
+ * 回傳的 lines 是所有欄位實際出現過科目的聯集(依呈現順序：扣減型小計排在明細後面，同 Excel)，並且帶上 ParentLine，
  * 讓前端可以把明細科目縮排在它的小計底下。某欄位沒有該科目時值為 null，前端顯示空白而不是 0。
  *
  * 每個欄位另外附 checks(小計驗算)、errors(公式錯誤)、traces(每個公式科目的計算過程，hover 用)。

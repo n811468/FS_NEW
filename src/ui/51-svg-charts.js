@@ -535,7 +535,7 @@ function plTableHtml(cols, lines) {
     const autoTag = autoSourceDot(line.AutoSource);
     const isGroupHead = groupParents.indexOf(line.LineCode) !== -1;
     const toggleBtn = isGroupHead
-      ? `<button class="row-toggle" data-group="${esc(line.LineCode)}" aria-expanded="${!collapsedGroups.has(line.LineCode)}"
+      ? `<button class="row-toggle${isFooterGroupLine_(line) ? ' up' : ''}" data-group="${esc(line.LineCode)}" aria-expanded="${!collapsedGroups.has(line.LineCode)}"
            onclick="toggleGroupCollapse('${esc(line.LineCode)}')" data-tip="${collapsedGroups.has(line.LineCode) ? '展開明細' : '收合明細'}">
            <svg viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 7l3-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
          </button>` : '';
