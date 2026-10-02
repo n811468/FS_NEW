@@ -27,7 +27,7 @@ function throws(fn, pattern, msg) {
   throw new Error(msg + '：應該要擋下來');
 }
 
-const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'SetupSheets.gs']);
+const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs']);
 const sid = gatef.buildScenario(gs);
 gs.getBootstrap('DA');   // 開頁：DA 會有自己的一份科目表
 const amt = (scenarioId, vid, code) => gs.calculatePLCore_(scenarioId, vid).lineValues[code];
@@ -198,6 +198,56 @@ check('科目表：複製其他車型 / 另存範本 / 恢復預設', () => {
   gs.restoreBuiltInLineItems('DX');
   const p8 = gs.getPLLineItems('DX').filter(d => d.LineCode === 'P8')[0];
   assert(p8.Formula === 'P5 - P6 - P7' && p8.LineName === '廠價(未稅)', '恢復預設公式與名稱');
+});
+
+check('公式用科目名稱寫，存成代碼；科目改名不會讓公式斷掉', () => {
+  gs.saveChartLine('DA', { LineCode: 'd4', LineName: '季Margin', CalcType: 'FORMULA', Formula: '[廠價(未稅)] * [季Margin率]' });
+  const d4 = () => gs.getPLLineItems('DA').filter(d => d.LineCode === 'd4')[0];
+  assert(d4().Formula === 'P8 * [季Margin率]', '名稱應存成代碼、參數維持名稱：' + d4().Formula);
+  // 舊資料：另一個科目直接用 [名稱] 寫在車系個別公式裡
+  const raw = gs.getPLLineItems('DA').filter(d => d.LineCode === 'b4')[0];
+  gs.upsertRow_('PLLineItems', 'LineID', Object.assign({}, raw, { VehicleFormulas: JSON.stringify({ V1: '[廠價(未稅)] * 0' }) }));
+  reset();
+  gs.saveChartLine('DA', { LineCode: 'P8', LineName: '廠價', CalcType: 'FORMULA', Formula: 'P5 - P6 - P7' });
+  reset();
+  const b4 = gs.getPLLineItems('DA').filter(d => d.LineCode === 'b4')[0];
+  assert(JSON.parse(b4.VehicleFormulas).V1 === 'P8 * 0', '改名時舊的 [名稱] 引用應改成代碼：' + b4.VehicleFormulas);
+  near(amt(sid, 'V1', 'b4'), 0, '改名後公式照樣算得出來');
+  gs.saveChartLine('DA', { LineCode: 'P8', LineName: '廠價(未稅)', CalcType: 'FORMULA', Formula: 'P5 - P6 - P7' });
+  gs.saveChartLine('DA', { LineCode: 'b4', LineName: '一般材料', CalcType: 'INPUT', VehicleFormulas: {} });
+  reset();
+});
+
+check('從 Excel 匯入整張表：名稱對應、新增缺少的科目、略過公式科目', () => {
+  const rep = gs.importMatrixRows(sid, 'DA', 'cost', [
+    { name: '材料成本 - LP', values: { V1: 433466, V2: 506850 } },
+    { name: '運費(海運)', values: { V1: 1200, V3: 1500 } },
+    { name: '貨物稅', values: { V1: 1 } }
+  ], true, '');
+  assert(rep.matched.length === 1 && rep.created.join() === '運費(海運)' && rep.skipped.length === 1, JSON.stringify(rep));
+  assert(rep.updated === 4, '應填入 4 格：' + rep.updated);
+  reset();
+  const freight = gs.getPLLineItems('DA').filter(d => d.LineName === '運費(海運)')[0];
+  near(amt(sid, 'V3', freight.LineCode), 1500, '新科目的金額');
+  gs.deletePLLineItem(freight.LineCode, 'DA');
+  reset();
+});
+
+check('目標反推與敏感度：解出來的值代回去會達到目標，且不改到存檔資料', () => {
+  reset();
+  const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
+  const r = gs.solveGoal(sid, { code: 'K', basis: 'unit' }, 0, { type: 'price' });
+  assert(r.feasible && r.value > r.base, '損益兩平售價應該高於目前售價：' + JSON.stringify(r));
+  near(r.achieved, 0, '代回去營業淨利應為 0', 1);
+  const m = gs.solveGoal(sid, { code: 'K', basis: 'unit' }, k0 + 10000, { type: 'line', code: 'b1' });
+  near(m.base - m.value, 10000, '材料成本-LP 少 1 萬，營業淨利就多 1 萬(LP 不影響貨物稅)', 1);
+  const v = gs.solveGoal(sid, { code: 'K', basis: 'unit' }, 0, { type: 'volume' });
+  assert(!v.feasible && /達不到/.test(v.message), '單台變動成本高於售價時，只靠台數不可能損益兩平');
+  const t = gs.sensitivityTable(sid, { code: 'K' }, { type: 'volume' }, [200, 400], { type: 'fx', currency: 'CNY' }, [4.5, 4.65]);
+  near(t.cells[1][1], k0, '敏感度表的「目前」那一格應等於目前的營業淨利', 1);
+  assert(t.cells[0][1] < t.cells[1][1], '台數減半，開發攤提變重，營業淨利應該變差');
+  reset();
+  near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '試算完存檔的數字不能變', 0.01);
 });
 
 check('預設公式下 Gate F 數字不變(回歸)', () => {

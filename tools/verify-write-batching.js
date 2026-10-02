@@ -18,7 +18,7 @@ const { loadAppsScript, resetApiCallCounts_, getApiCallCounts_, totalApiCalls_ }
 const failures = [];
 function assert(cond, message) { if (!cond) failures.push(message); }
 
-const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'SetupSheets.gs']);
+const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs']);
 gs.setupSpreadsheet();
 gs.saveVehicleType({ VehicleTypeID: 'DA' });
 gs.saveVehicle({ VehicleID: 'V1', VehicleTypeID: 'DA', VehicleCode: '3人貨車' });

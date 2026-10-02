@@ -251,7 +251,7 @@
   .order-strip > .muted { font-weight: 600; }
 
   /* ---------------- 科目設定：左邊科目樹、右邊明細編輯器 ---------------- */
-  .chart-layout { display: grid; grid-template-columns: minmax(360px, 460px) 1fr; gap: 16px; align-items: start; }
+  .chart-layout { display: grid; grid-template-columns: minmax(420px, 540px) 1fr; gap: 16px; align-items: start; }
   .chart-tree { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-1); overflow: hidden;
     position: sticky; top: 78px; max-height: calc(100vh - 100px); display: flex; flex-direction: column; }
   .chart-tree-head { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
@@ -282,6 +282,96 @@
   .calc-type-card b { display: block; font-size: 13.5px; margin-bottom: 3px; color: var(--text); }
   .calc-type-card span { font-size: 12px; color: var(--text-2); line-height: 1.5; }
   .calc-type-card:disabled { cursor: not-allowed; opacity: .5; }
+
+  /* v2.1 科目與公式：像損益表的科目樹 + 分步驟編輯器 */
+  .chart-topbar { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+  details.menu { position: relative; }
+  details.menu > summary { list-style: none; }
+  details.menu > summary::-webkit-details-marker { display: none; }
+  .menu-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: var(--shadow-2); padding: 6px; min-width: 280px; }
+  .menu-list button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; border: none; background: transparent; text-align: left;
+    padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text); }
+  .menu-list button span { font-size: 11.5px; color: var(--muted); font-weight: 400; }
+  .menu-list button:hover:not(:disabled) { background: var(--surface-2); }
+  .menu-list button:disabled { opacity: .45; cursor: not-allowed; }
+  .chart-tree-tools { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .problem-pill { border: none; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .problem-pill.err { background: var(--danger-weak); color: var(--danger); }
+  .problem-pill.warn { background: var(--warning-weak); color: var(--warning); }
+  .ok-pill { color: var(--success); font-weight: 600; }
+  .tree-problems { padding: 8px 14px 8px 30px; border-bottom: 1px solid var(--border); background: var(--surface-2); max-height: 160px; overflow: auto; }
+  .tree-legend { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--muted); flex-wrap: wrap; }
+  .ti { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 5px; font-size: 11px; font-style: normal; font-weight: 700; flex: none; }
+  .ti-INPUT { background: #eef1f7; color: #4a5470; }
+  .ti-FORMULA { background: #e9efff; color: #2a4cc4; font-family: Georgia, serif; font-style: italic; }
+  .ti-DEV_AMORT { background: #f1e9ff; color: #6a3dbd; }
+  .tree-val { font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--text-2); min-width: 78px; text-align: right; }
+  .tree-row.group .tree-val, .tree-row.subtotal-row .tree-val { color: var(--text); font-weight: 700; }
+  .tree-toggle { appearance: none; border: none; background: transparent; width: 18px; height: 18px; border-radius: 4px; cursor: pointer; color: var(--text-2);
+    font-size: 11px; padding: 0; transition: transform .15s; flex: none; }
+  .tree-toggle:hover { background: var(--surface-3); }
+  .tree-toggle.collapsed { transform: rotate(-90deg); }
+  .tree-toggle-space, .tree-spacer { width: 18px; flex: none; }
+  .tree-spacer { width: 22px; }
+  .tree-add { appearance: none; border: 1px solid var(--primary-line); background: #fff; color: var(--primary); border-radius: 5px; width: 22px; height: 20px;
+    font-size: 13px; line-height: 1; cursor: pointer; opacity: 0; flex: none; padding: 0; }
+  .tree-row:hover .tree-add, .tree-row.selected .tree-add { opacity: 1; }
+  .tree-add:hover { background: var(--primary); color: #fff; }
+  button.tree-section { appearance: none; border: none; background: transparent; width: 100%; text-align: left; cursor: pointer; font-family: inherit; }
+  button.tree-section:hover { color: var(--text); }
+  .editor { padding: 0; overflow: hidden; }
+  .ed-head { padding: 18px 22px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+  .ed-name { width: 100%; font-size: 20px !important; font-weight: 700; border: 1px solid transparent !important; background: transparent !important; padding: 4px 6px !important; margin-left: -6px; }
+  .ed-name:hover { border-color: var(--border-strong) !important; background: #fff !important; }
+  .ed-name:focus { border-color: var(--primary) !important; background: #fff !important; }
+  .ed-sub { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 6px; font-size: 12.5px; color: var(--text-2); }
+  .ed-sub label { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+  .ed-sub select { padding: 4px 8px; }
+  .ed-step { padding: 16px 22px; border-bottom: 1px solid var(--border); }
+  .ed-step-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; margin-bottom: 12px; }
+  .step-no { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 12px; align-items: center; justify-content: center; flex: none; }
+  .calc-type-card b { display: flex; align-items: center; gap: 6px; }
+  .tpl-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+  .tpl-btn { appearance: none; border: 1px dashed var(--primary-line); background: var(--primary-weak); color: var(--primary); border-radius: 999px; padding: 4px 11px;
+    font-size: 12px; font-weight: 600; cursor: pointer; }
+  .tpl-btn:hover { background: var(--primary); color: #fff; border-style: solid; }
+  .formula-box { position: relative; overflow: visible; }
+  .formula-box textarea { font-family: var(--font); font-size: 15px; border-radius: 10px; }
+  .ac-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 25; background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: var(--shadow-2); max-height: 280px; overflow: auto; padding: 4px; }
+  .ac-group { font-size: 11px; font-weight: 700; color: var(--muted); padding: 6px 10px 2px; letter-spacing: .05em; }
+  .ac-item { display: flex; justify-content: space-between; gap: 10px; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .ac-item:hover, .ac-item.active { background: var(--primary-weak); color: var(--primary); }
+  .formula-status { min-height: 22px; line-height: 1.6; }
+  .formula-tools { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 4px; font-size: 12px; }
+  .fx-help { width: 100%; }
+  .fx-help summary { list-style: none; display: inline; }
+  .fx-help table { margin-top: 8px; font-size: 12px; }
+  .fx-help td { text-align: left !important; }
+  .trace-box { margin-top: 10px; }
+  .trace-box summary { list-style: none; display: inline; }
+  .trace-item { margin-top: 8px; font-size: 12px; }
+  .trace-item pre { margin: 4px 0 0; white-space: pre-wrap; font-family: var(--font); color: var(--text-2); background: var(--surface-2); border-radius: 6px; padding: 8px 10px; }
+  .ed-adv { border-bottom: 1px solid var(--border); }
+  .ed-adv > summary { padding: 14px 22px; cursor: pointer; font-weight: 700; font-size: 13.5px; color: var(--text-2); }
+  .ed-adv > summary:hover { color: var(--text); }
+  .ed-adv-body { padding: 0 22px 18px; }
+  .ed-foot { display: flex; align-items: center; gap: 8px; padding: 14px 22px; background: var(--surface-2); position: sticky; bottom: 0; }
+  .ed-foot .spacer { flex: 1; }
+  .howto { text-align: left; max-width: 460px; margin: 10px auto 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-2); line-height: 1.6; }
+  .howto b { color: var(--text); }
+
+  /* 目標反推與敏感度 */
+  .goal-sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 14px; font-weight: 600; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .goal-sentence select { max-width: 340px; }
+  .goal-answer { margin-top: 14px; padding: 14px 18px; border-radius: 10px; background: var(--primary-weak); border: 1px solid var(--primary-line); }
+  .goal-big { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .goal-big b { font-size: 24px; color: var(--primary); }
+  .sens-table td, .sens-table th { text-align: center !important; font-variant-numeric: tabular-nums; }
+  .sens-table td.row-head { text-align: left !important; }
+  .sens-table td.sens-base { outline: 2.5px solid var(--text); outline-offset: -2px; font-weight: 800; }
 
   /* 公式編輯器 */
   .formula-box { border: 1.5px solid var(--border-strong); border-radius: 10px; background: #fff; overflow: hidden; }
@@ -495,6 +585,9 @@
   .st-已確認 { background: #e8f6ef; color: #146c45; }
   .st-已結案 { background: #f1e9ff; color: #6a3dbd; }
   .bridge-legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+  .rpt-table td.recon-ok { color: var(--success); font-weight: 600; }
+  .rpt-table td.recon-warn { color: var(--warning); font-weight: 600; }
+  .rpt-table td.recon-err { color: var(--danger); font-weight: 700; }
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
   @media (max-width: 1100px) {

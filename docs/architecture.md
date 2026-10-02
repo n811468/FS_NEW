@@ -8,7 +8,7 @@
 ## 1. 整體資料流
 
 ```
-使用者操作前端表單 (src/script.html)
+使用者操作前端表單 (src/ui/*.js)
    │  google.script.run.withSuccessHandler(...).saveXxx(...)   ← 介面沿用 Apps Script 的寫法
    ▼
 local/host.js：google.script.run 替身，直接呼叫同一頁裡的後端函式(非同步回呼、參數/回傳值走一次 JSON)
@@ -48,25 +48,35 @@ src/                        # 系統本體(後端 + 前端)，build 時原封不
 ├─ FormulaEngine.gs        # v2：公式解析/計算(自己寫的遞迴下降解析器，不用 eval)、引用分析
 ├─ ChartService.gs         # v2：每個車型各自的科目表、計算來源、公式檢查(循環引用/未計入)、試算、
 │                          #     參數定義、科目說明、改善作法、拖曳排序 API、範本複製、資料升級
-├─ ReportService.gs        # v2：GATE 報告資料(現況/目標/前回、各車系 + 加權、說明、作法、開發總投 by 部門)
+├─ ReportService.gs        # v2：GATE 報告資料(現況/目標/前回、各車系 + 加權、說明、作法、開發總投 by 部門、損益兩平)
+├─ WhatIfService.gs        # v2.1：目標反推(solveGoal)與敏感度表(sensitivityTable)，靠 CalcEngine 的記憶體覆寫重算
 ├─ SetupSheets.gs          # 建立分頁與科目表；重設科目排序、清除未使用參數等維護作業
 ├─ DataService.gs          # 各表 CRUD 與表格式整批存檔：getXxxGrid() / saveXxxGrid()
 ├─ CalcEngine.gs           # 損益計算引擎：依科目表逐科目取值(手動輸入/公式/開發攤提)；比較 API 與小計驗算
-├─ index.html              # SPA 外殼（nav 分頁 + 各 panel 容器）
-├─ style.html              # 共用 CSS
-└─ script.html             # 全部前端 JS：主檔表格、各輸入表格、儀表板
+├─ index.html              # SPA 外殼（左側導覽 + 各 panel 容器）
+├─ style.html              # 共用 CSS(設計系統、列印樣式)
+└─ ui/                     # 前端 JS，依頁面拆檔；build/預覽/驗證都由 tools/frontend.js 依檔名順序串成同一段 <script>
+   ├─ 00-core.js           #   共用工具、toast、對話框、未儲存提醒、拖曳排序、從 Excel 貼上、頁籤與上方選單
+   ├─ 10-masters.js        #   車型 / 車系 / 情境
+   ├─ 20-inputs.js         #   銷售構成、銷貨成本/營業費用矩陣(含整張表匯入)、開發總投、參數、匯率
+   ├─ 30-chart.js          #   科目與公式
+   ├─ 40-report.js         #   GATE 報告(含作法對帳)
+   ├─ 45-whatif.js         #   目標反推與敏感度
+   ├─ 50/51/52-*.js        #   損益儀表板(表格、SVG 圖表、hover 提示)
+   └─ 99-init.js           #   開頁初始化
 
 local/                      # 地端層：讓 src/ 在瀏覽器裡跑起來 + 資料包
 ├─ gas-shim.js             # 瀏覽器版 Apps Script 模擬層：記憶體試算表(比照 Sheets 自動偵測格式)、Lock/Cache/Session
 ├─ pack.js                 # 資料包(JSON)：匯出、讀取檢查、只取部分車型、合併匯入(車型取代 + 自訂科目改號)
 ├─ host.js                 # 後端主機：.gs 後端 + 瀏覽器暫存 + google.script.run 替身 + 多分頁保護
-├─ boot.js                 # 開機：在 script.html 執行前架好主機
+├─ boot.js                 # 開機：在前端程式執行前架好主機
 └─ local-ui.js / local-ui.css  # 地端版工具列(匯出/匯入/合併/提醒備份)
 
 dist/FS-local.html          # 產出物(單一檔案)，提交進 git，使用者直接複製這一個檔案
 
 tools/                      # 開發用，只在本機用 Node 執行
 ├─ build-local.js          # src/ + local/ + 示範資料 → dist/FS-local.html
+├─ frontend.js             # 把 src/ui/*.js 串成一段 <script>(build、本機預覽、verify-ui 共用)
 ├─ fake-apps-script.js     # Node 版的記憶體試算表(會數 API 呼叫次數)，讓 .gs 能在 Node 驗算
 ├─ verify-gatef.js         # 用實際 Gate F 表的數字逐格驗算計算引擎
 ├─ verify-features.js      # 情境帶入、科目自動編號、匯率精簡等行為
@@ -78,11 +88,10 @@ tools/                      # 開發用，只在本機用 Node 執行
 └─ dev-server.js           # 本機預覽伺服器：改前端時不必每次重新 build，存檔按 F5 就看得到
 ```
 
-> 前端全部集中在 `script.html`（單一 SPA），沒有 `input_*.html` / `dashboard.html` 這類分檔 ——
-> 每個分頁都是同一套表格元件的組態差異，拆檔只會讓共用邏輯散掉。
+> 前端依頁面拆成 `src/ui/*.js`，但仍是同一段 script(共用全域函式，不是 ES module)，串接順序由檔名前綴決定。
 
 > `.gs` 被整段包進 `FSBackendFactory(G)` 函式裡（`G` 是模擬的 Apps Script 全域物件），
-> 後端的全域函式/變數不會跟前端 `script.html` 的同名函式互相蓋掉。每次前端呼叫都比照
+> 後端的全域函式/變數不會跟前端程式的同名函式互相蓋掉。每次前端呼叫都比照
 > 「每次都是新的執行」清掉單次執行快取，跟這套程式原本的假設一致。
 
 ---
@@ -177,9 +186,16 @@ VehicleScope 有值 → ÷ 這些車系的攤提台數合計，只加在這些�
 攤到哪個科目 = TargetLineCode(計算來源為 DEV_AMORT 的科目)
 ```
 
+### 假設分析(WhatIfService.gs)
+
+`CALC_OVERRIDES_`(CalcEngine.gs)是一組只存在記憶體的覆寫：月銷量倍數(攤提基準台數跟著變)、售價倍數、科目金額倍數、
+開發攤提倍數、參數值、匯率，只套用在指定情境上。`withOverrides_()` 掛上覆寫 → 重算 → 一定拿掉並清掉計算記憶，
+存檔資料不受影響(`verify-formula.js` 驗證)。`solveGoal` 先從基準值往兩邊擴大找「結果跨過目標」的區間，再二分法逼近
+(公式裡有取整/IF，不假設平滑)；找不到就回報達不到。`sensitivityTable` 最多 11×11 格。
+
 ## 5. 前端頁面設計
 
-**v2 共用元件**（`script.html` 開頭）：`toast()` 右上角提示、`openModal()` 對話框(取代 prompt/confirm)、
+**v2 共用元件**（`src/ui/00-core.js`）：`toast()` 右上角提示、`openModal()` 對話框(取代 prompt/confirm)、
 `markDirty()/clearDirty()` 未儲存提醒(底部浮動儲存列、Ctrl+S、切頁/切車型前確認、關閉視窗前警告)、
 `makeSortable()` 拖曳排序(指標事件，滑鼠/觸控都可以；把手取得焦點時 Alt+↑↓ 也能移動；巢狀清單用 `direct`)。
 所有原本的 ▲▼/◀▶ 移動鈕都換成拖曳：車系/情境(放開立即 `setVehicleOrder`/`setScenarioOrder`)、

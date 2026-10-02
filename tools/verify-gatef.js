@@ -142,7 +142,7 @@ function buildScenario(gs) {
 }
 
 function main() {
-  const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'SetupSheets.gs']);
+  const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs']);
   const sid = buildScenario(gs);
 
   // LIFE CYCLE 總台數必須先對，否則 b5/b8/f3/f4 全部會偏

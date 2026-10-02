@@ -113,6 +113,9 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
   var target = reportScenarioBlock_(targetScenarioId);
   var base = baseScenarioId ? reportScenarioBlock_(baseScenarioId) : null;
   var prev = prevScenarioId ? reportScenarioBlock_(prevScenarioId) : null;
+  // 損益兩平月銷量：月銷量要多少台營業淨利才會是 0(攤提台數跟著變)
+  target.breakEvenVolume = breakEvenVolume_(targetScenarioId);
+  if (base) base.breakEvenVolume = breakEvenVolume_(baseScenarioId);
 
   var types = [target.meta.VehicleTypeID];
   if (base) types.push(base.meta.VehicleTypeID);

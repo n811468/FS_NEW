@@ -9,7 +9,7 @@
  * `<?!= include('style'); ?>` 這類樣板語法替換成實際檔案內容，並補上一個假的
  * `google.script.run`：前端呼叫什麼後端函式，就 POST /rpc 到這裡、由 Node 端的 .gs 執行後回傳。
  *
- * 前端 script.html / style.html 完全是原檔，不需要為了本機預覽另外改寫；
+ * 前端 src/ui/*.js / style.html 完全是原檔，不需要為了本機預覽另外改寫；
  * 每次重新整理頁面都會重新讀檔，改完前端存檔、按 F5 就看得到。
  * 資料只存在記憶體，重啟伺服器就回到示範資料。
  */
@@ -24,7 +24,7 @@ const PORT = Number(process.env.PORT) || 8787;
 
 /* ---- 示範資料：Gate F 現況(來自驗算腳本)、由它衍生的目標情境、再加一個別的車型 ---- */
 function seedDemoData() {
-  const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'SetupSheets.gs']);
+  const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs']);
   const baselineId = gatef.buildScenario(gs);
 
   gs.getBootstrap('DA');   // 開頁時的資料升級：DA 有自己的一份科目表
@@ -132,8 +132,8 @@ const RUN_STUB = `
 function renderIndex() {
   let html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   html = html.replace(/<\?!=\s*include\('([^']+)'\);?\s*\?>/g, (m, name) =>
-    fs.readFileSync(path.join(ROOT, name + '.html'), 'utf8'));
-  // 假的 google.script.run 要在 script.html 之前就位
+    name === 'script' ? require('./frontend').frontendScript() : fs.readFileSync(path.join(ROOT, name + '.html'), 'utf8'));
+  // 假的 google.script.run 要在前端程式之前就位
   return html.replace('<body>', '<body>' + RUN_STUB);
 }
 

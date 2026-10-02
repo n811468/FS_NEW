@@ -3,8 +3,8 @@
  *
  *   node tools/verify-ui.js
  *
- * script.html 只有在瀏覽器裡才跑得到，但裡面產生 HTML 的函式其實是純函式。
- * 這裡把 script.html 的 JS 抽出來、給最小的 document/google 假物件，
+ * 前端程式(src/ui/*.js)只有在瀏覽器裡才跑得到，但裡面產生 HTML 的函式其實是純函式。
+ * 這裡把前端 JS 串起來(tools/frontend.js)、給最小的 document/google 假物件，
  * 再用計算引擎真實算出來的資料呼叫那些函式，檢查產出的表格結構是否正確
  * （欄數、colspan、縮排、% 欄基準），避免版面改壞了卻要部署後才發現。
  */
@@ -17,7 +17,7 @@ const failures = [];
 function assert(cond, message) { if (!cond) failures.push(message); }
 
 /* ---- 1. 用計算引擎算出一份真實的比較結果 ---- */
-const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'SetupSheets.gs']);
+const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs']);
 gs.setupSpreadsheet();
 gs.saveVehicleType({ VehicleTypeID: 'DA' });
 gs.saveVehicle({ VehicleID: 'V1', VehicleTypeID: 'DA', VehicleCode: '3人貨車' });
@@ -39,9 +39,8 @@ const comparison = gs.calculateComparison([
   { ScenarioID: sc.ScenarioID, VehicleID: '' }
 ]);
 
-/* ---- 2. 把 script.html 的 JS 載進來 ---- */
-const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'script.html'), 'utf8');
-const js = html.replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
+/* ---- 2. 把前端 JS 載進來 ---- */
+const js = require('./frontend').frontendJs();
 const noopEl = {
   innerHTML: '', textContent: '', className: '', value: '', style: {}, options: [],
   querySelector: () => noopEl, querySelectorAll: () => [], insertAdjacentHTML: () => { }, select: () => { },
@@ -69,9 +68,9 @@ const ctx = {
   confirm: () => true, alert: () => { }
 };
 vm.createContext(ctx);
-vm.runInContext(js, ctx, { filename: 'script.html' });
+vm.runInContext(js, ctx, { filename: 'src/ui' });
 
-// script.html 用 const/let 宣告，這些是 context 的語彙繫結而不是 global 屬性，
+// 前端用 const/let 宣告，這些是 context 的語彙繫結而不是 global 屬性，
 // 不能用 ctx.xxx 存取，得在同一個 context 裡再跑一段程式碼才拿得到／改得動。
 const api = expr => vm.runInContext(expr, ctx);
 ctx.__in = {};   // 要塞進 context 的外部資料先掛在這裡
@@ -180,7 +179,7 @@ const chartSection = api('chartSectionHtml')(cols, lines);
 assert(chartSection.indexOf('id="chart-lines"') !== -1, '圖表區塊應該有科目選擇區');
 assert(chartSection.indexOf('id="chart-area"') !== -1, '圖表區塊應該跟科目選擇區放在一起');
 assert(chartSection.indexOf('<svg') !== -1, '圖表應該直接以 SVG 產生，不依賴外部圖表程式庫');
-assert(chartSection.indexOf('google.visualization') === -1 && html.indexOf('gstatic.com/charts') === -1, '不該再用 Google Charts');
+assert(chartSection.indexOf('google.visualization') === -1 && js.indexOf('gstatic.com/charts') === -1, '不該再用 Google Charts');
 // 原生 multiple select 要按住 Ctrl 才能複選，等於選不動；必須是核取方塊
 assert(chartSection.indexOf('multiple') === -1, '圖表科目不該用原生 multiple select');
 const chartPicker = chartSection.split('id="chart-lines"')[1].split('</div>')[0];
@@ -228,7 +227,9 @@ api("chartSelected = 'd4'");
 api("chartDraft = JSON.parse(JSON.stringify(chartEditor.lines.find(l => l.LineCode === 'd4')))");
 const paneHtml = api('chartEditorPaneHtml_')();
 assert(paneHtml.indexOf('calc-type-card active') !== -1 && paneHtml.indexOf('id="ce-formula"') !== -1, '公式科目應該選中「公式」並顯示公式編輯框');
-assert(paneHtml.indexOf('車系個別公式') !== -1, '應該可以設定車系個別公式');
+assert(paneHtml.indexOf('個別車系的算法') !== -1, '應該可以設定車系個別公式');
+assert(api('toNameForm_')('P8 * [季Margin率] + ROUND(B)') === '[廠價(未稅)] * [季Margin率] + ROUND([銷貨成本合計])', '公式應該用科目名稱顯示，函式名稱不動：' + api('toNameForm_')('P8 * [季Margin率] + ROUND(B)'));
+assert(api('toNameForm_')('P2') === 'P2', '科目名稱跟系統變數撞名(強配件售價)時要保留代碼，不然存回去意思會變');
 const previewHtml = api('chartPreviewHtml_')();
 api("currentScenarioId = ''");
 assert(previewHtml.indexOf('3人貨車') !== -1 && previewHtml.indexOf('目前') !== -1, '試算表應列出各車系目前的值');

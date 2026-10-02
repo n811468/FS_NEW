@@ -83,17 +83,55 @@ async function main() {
 
   // v2：科目與公式 —— 改季Margin 的公式，Ctrl+S 存檔，後端真的換成新公式
   await page.click('nav button[data-tab="lineitems"]');
-  await page.waitForSelector('.tree-row');
+  await page.waitForSelector('.tree-row:has-text("季Margin")');
   await page.click('.tree-row:has-text("季Margin")');
   await page.waitForSelector('#ce-formula');
   await page.fill('#ce-formula', 'P8 * 1%');
-  await page.waitForFunction(() => /公式正確/.test((document.getElementById('ce-status') || {}).textContent || ''));
+  await page.waitForFunction(() => /✔/.test((document.getElementById('ce-status') || {}).textContent || ''));
   await page.keyboard.press('Control+s');
   await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'));
   const d4 = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DA')));
   assert(d4.find(l => l.LineCode === 'd4').Formula === 'P8 * 1%', '科目與公式存檔後，後端的公式應該換成新的');
   const de4 = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DE')));
   assert(de4.find(l => l.LineCode === 'd4').Formula === 'P8 * [季Margin率]', '改 DA 的公式不該影響 DE 的科目表');
+
+  // v2.1：公式用科目名稱顯示；輸入 [ 會跳出清單，選了之後存成代碼
+  await page.click('.tree-row:has-text("季Margin")');
+  await page.waitForSelector('#ce-formula');
+  assert((await page.inputValue('#ce-formula')) === '[廠價(未稅)] * 1%', '公式應該用科目名稱顯示：' + await page.inputValue('#ce-formula'));
+  await page.fill('#ce-formula', '');
+  await page.click('#ce-formula');
+  await page.keyboard.type('[廠價');
+  await page.waitForSelector('#ce-ac:not([hidden]) .ac-item');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('* [季Margin率]');
+  await page.waitForFunction(() => /✔/.test((document.getElementById('ce-status') || {}).textContent || ''));
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'));
+  const d4b = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DA')));
+  assert(d4b.find(l => l.LineCode === 'd4').Formula === 'P8 * [季Margin率]', '自動完成選的科目應存成代碼：' + d4b.find(l => l.LineCode === 'd4').Formula);
+
+  // v2.1：從 Excel 貼上一整塊數字到銷貨成本
+  await page.click('nav button[data-tab="costofsales"]');
+  await page.waitForSelector('input[data-line="b4"]');
+  await page.evaluate(() => {
+    const el = document.querySelector('input[data-line="b4"]'); el.focus();
+    const dt = new DataTransfer(); dt.setData('text/plain', '1,111\t2,222\t3,333\n');
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+  });
+  const pasted = await page.$$eval('input[data-line="b4"]', els => els.map(e => e.value).join(','));
+  assert(pasted === '1111,2222,3333', '從 Excel 貼上的一整列應該依序填入各車系：' + pasted);
+  await page.click('#savebar-discard');
+
+  // v2.1：目標反推頁算得出答案、GATE 報告有作法對帳與敏感度表
+  await page.click('nav button[data-tab="whatif"]');
+  await page.waitForSelector('button:has-text("損益兩平要賣多少錢")');
+  await page.click('button:has-text("損益兩平要賣多少錢")');
+  await page.waitForSelector('.goal-answer, #wi-goal-result .callout', { timeout: 15000 });
+  assert(/建議零售價/.test(await page.textContent('#wi-goal-result')), '目標反推應該回答售價要調到多少');
+  await page.click('nav button[data-tab="report"]');
+  await page.waitForFunction(() => /作法對帳/.test(document.getElementById('panel-report').textContent) &&
+    document.querySelector('#rpt-sens .sens-table'), null, { timeout: 15000 });
 
   // v2：拖曳把手可以用鍵盤 Alt+↓ 調整車系順序，放開(按下)就存檔
   await page.click('nav button[data-tab="vehicles"]');
@@ -183,7 +221,7 @@ async function main() {
     failures.forEach(f => console.log('  ✗ ' + f));
     process.exit(1);
   }
-  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
+  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
 }
 
 main().catch(e => { console.error(e); if (ERRS.length) console.error('頁面錯誤：', ERRS.join(' | ')); process.exit(1); });

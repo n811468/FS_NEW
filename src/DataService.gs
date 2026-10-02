@@ -786,3 +786,89 @@ function lookupParam_(paramsForScenario, paramName, vehicleId) {
   return DEFAULT_PARAMS[paramName] !== undefined ? DEFAULT_PARAMS[paramName] : 0;
 }
 
+
+// ---- 從 Excel 貼上整張表(銷貨成本/營業費用) ----
+
+/** 科目名稱比對用：去空白、全形半形括號一致、英文不分大小寫(「材料成本 - KD」=「材料成本-KD」) */
+function normalizeLineNameKey_(s) {
+  return String(s || '').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/[－—–]/g, '-')
+    .replace(/\s+/g, '').toLowerCase();
+}
+
+/**
+ * 把從 Excel 複製的整張表匯入銷貨成本(kind='cost')或營業費用(kind='opex')。
+ * rows = [{ name: 科目名稱, values: { 車系ID: 金額 } }]，前端已經把欄位對到車系。
+ * 依科目名稱比對這個車型的科目表：
+ *   - 對到手動輸入科目 → 寫入/覆蓋金額(沒貼到的車系不動)
+ *   - 對到公式或開發總投攤提科目 → 略過(那些金額是算出來的，不能輸入)
+ *   - 對不到 → createMissing 時新增成手動輸入科目(掛在 parentForNew 底下)，否則列在 unmatched
+ * 整批一次寫入，回傳摘要給前端顯示。
+ */
+function importMatrixRows(scenarioId, vehicleTypeId, kind, rows, createMissing, parentForNew) {
+  return withLock_(function () {
+    if (!scenarioId || !vehicleTypeId) throw new Error('請先選擇車型與情境');
+    var isCost = kind === 'cost';
+    ensureTypeChart_(vehicleTypeId);
+    var parent = parentForNew || (isCost ? 'B' : 'E');
+    var report = { updated: 0, created: [], skipped: [], unmatched: [], matched: [] };
+    var vehicleIds = {};
+    getVehicles(vehicleTypeId).forEach(function (v) { vehicleIds[v.VehicleID] = true; });
+
+    var findLine = function () {
+      var byKey = {};
+      getPLLineItems(vehicleTypeId).forEach(function (d) {
+        var k = normalizeLineNameKey_(d.LineName);
+        if (!byKey[k]) byKey[k] = d;
+      });
+      return byKey;
+    };
+    var byKey = findLine();
+    var defs = getPLLineItems(vehicleTypeId);
+    var targets = [];
+    (rows || []).forEach(function (r) {
+      var name = String(r.name || '').trim();
+      if (!name) return;
+      var d = byKey[normalizeLineNameKey_(name)];
+      if (d && (d.CalcType !== CALC_TYPES.INPUT || isCostSectionLine_(d, defs) !== isCost)) {
+        report.skipped.push({ name: name, reason: d.CalcType !== CALC_TYPES.INPUT ? '是' + CALC_TYPE_LABELS[d.CalcType] + '科目' : '屬於' + (isCost ? '營業費用' : '銷貨成本') + '頁' });
+        return;
+      }
+      if (!d) {
+        if (!createMissing) { report.unmatched.push(name); return; }
+        var row = newLineItemRow_(parent, name, vehicleTypeId);
+        upsertRow_(SHEETS.PL_LINE_ITEMS, 'LineID', row);
+        byKey = findLine();
+        defs = getPLLineItems(vehicleTypeId);
+        d = byKey[normalizeLineNameKey_(name)];
+        report.created.push(name);
+      } else {
+        report.matched.push(name);
+      }
+      targets.push({ code: d.LineCode, values: r.values || {} });
+    });
+
+    var sheetName = isCost ? SHEETS.COST_OF_SALES : SHEETS.OPERATING_EXPENSE;
+    var existing = {};
+    (sheetToObjects_(sheetName) || []).forEach(function (r) {
+      if (r.ScenarioID === scenarioId) existing[r.LineCode + '|' + r.VehicleID] = r;
+    });
+    var upserts = [];
+    targets.forEach(function (t) {
+      Object.keys(t.values).forEach(function (vid) {
+        if (!vehicleIds[vid]) return;
+        var v = t.values[vid];
+        if (v === '' || v === null || v === undefined || isNaN(Number(v))) return;
+        var cur = existing[t.code + '|' + vid];
+        var row = {};
+        SCHEMA[sheetName].forEach(function (h) { row[h] = cur && cur[h] !== undefined ? cur[h] : ''; });
+        row.RowID = cur ? cur.RowID : '';
+        row.ScenarioID = scenarioId; row.VehicleID = vid; row.LineCode = t.code; row.Amount = Number(v);
+        if (isCost && !row.Currency) row.Currency = BASE_CURRENCY;
+        upserts.push(row);
+        report.updated++;
+      });
+    });
+    if (upserts.length) batchWriteRows_(sheetName, 'RowID', upserts, []);
+    return report;
+  });
+}

@@ -5,8 +5,8 @@
  *
  * 內容全部來自原始檔，地端版沒有另外一份商業邏輯：
  *   - 後端：src/ 的 .gs 原檔，整段包進 FSBackendFactory(G) 函式裡(G = 模擬的 Apps Script 全域物件)，
- *     這樣 .gs 的全域函式/變數不會跟前端 script.html 的同名函式互相蓋掉
- *   - 前端：src/index.html + style.html + script.html 原檔
+ *     這樣 .gs 的全域函式/變數不會跟前端程式的同名函式互相蓋掉
+ *   - 前端：src/index.html + style.html + src/ui/*.js(依檔名順序串成一段 script，見 tools/frontend.js)
  *   - 地端層：local/ 底下的模擬層、資料包、主機、工具列
  *   - 示範資料：跑 tools/dev-server.js 同一組示範資料，存成資料包內嵌在檔案裡(工具列「載入示範資料」)
  *
@@ -21,7 +21,7 @@ const LOCAL_DIR = path.join(REPO, 'local');
 const OUT_FILE = path.join(REPO, 'dist', 'FS-local.html');
 
 // 後端檔案(依載入順序)
-const BACKEND_FILES = ['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'SetupSheets.gs'];
+const BACKEND_FILES = ['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs'];
 // .gs 用到的 Apps Script 全域物件，由 local/gas-shim.js 的 createGlobals() 提供
 const GAS_GLOBALS = ['SpreadsheetApp', 'LockService', 'CacheService', 'Utilities', 'Session', 'Logger'];
 const EXPORTED_CONSTS = ['SCHEMA', 'TEXT_COLUMNS', 'PL_LINE_ITEMS', 'LINE_CODE_PREFIX'];
@@ -120,7 +120,7 @@ function buildHtml() {
     .replace('<head>', '<head>\n' + head)
     .replace('<body>', '<body>\n' + boot)
     .replace('<!--FS-LOCAL-FRONTEND-->',
-      read(path.join(GAS_DIR, 'script.html')) + '\n' + inlineScript(read(path.join(LOCAL_DIR, 'local-ui.js'))));
+      require('./frontend').frontendScript() + '\n' + inlineScript(read(path.join(LOCAL_DIR, 'local-ui.js'))));
   return '<!DOCTYPE html>\n<!-- 由 tools/build-local.js 產生，請勿直接修改；原始檔在 src/ 與 local/ -->\n' +
     html.replace(/^<!DOCTYPE html>\s*/i, '');
 }

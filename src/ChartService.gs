@@ -60,6 +60,46 @@ function parseVehicleFormulas_(v) {
   try { var o = JSON.parse(v); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; }
 }
 
+/**
+ * 公式裡的 [科目名稱] 換成科目代碼(存檔用)。名稱同時也是系統變數/參數/匯率時保留原樣
+ * (計算時這些名稱優先，換掉會改變意思)。字串常數(REF 的參數)與函式名稱不動。
+ */
+function codifyFormulaNames_(formula, defs) {
+  if (!formula) return formula;
+  var reserved = formulaReservedNames_();
+  var byName = {};
+  defs.forEach(function (d) { if (!byName[d.LineName]) byName[d.LineName] = d.LineCode; });
+  return mapFormulaTokens_(formula, function (tok) {
+    if (tok.charAt(0) !== '[') return tok;
+    var name = tok.slice(1, -1).trim();
+    if (reserved[name] || /^[A-Za-z]{3}匯率$/.test(name)) return tok;
+    return byName[name] ? byName[name] : tok;
+  });
+}
+
+/** 把公式裡的 [舊名稱] 換成科目代碼(科目改名時用) */
+function replaceNameRef_(formula, oldName, code) {
+  if (!formula) return formula;
+  return mapFormulaTokens_(formula, function (tok) {
+    return tok.charAt(0) === '[' && tok.slice(1, -1).trim() === oldName ? code : tok;
+  });
+}
+
+/** 系統變數與參數名稱(公式裡 [名稱] 會優先解讀成這些) */
+function formulaReservedNames_() {
+  var out = {};
+  SYSTEM_VARIABLES.forEach(function (v) { out[v.name] = true; });
+  getParamDefs().forEach(function (p) { out[p.ParamName] = true; });
+  return out;
+}
+
+/** 依序走過公式的 "字串"、[名稱]、其他片段，讓呼叫端替換 [名稱]；其他內容原封不動 */
+function mapFormulaTokens_(formula, fn) {
+  return String(formula).replace(/"[^"]*"|'[^']*'|\[[^\]]*\]/g, function (tok) {
+    return tok.charAt(0) === '[' ? fn(tok) : tok;
+  });
+}
+
 /** 把讀出來的科目列整理成計算/畫面用的樣子(補 CalcType、Formula) */
 function normalizeLineDef_(row) {
   var d = {};
@@ -318,13 +358,16 @@ function saveChartLine(vehicleTypeId, line) {
       .forEach(function (f) { if (line[f] !== undefined) row[f] = line[f] === null ? '' : line[f]; });
     row.LineName = String(row.LineName).trim();
     if (!CALC_TYPES[row.CalcType]) throw new Error('計算來源不正確：' + row.CalcType);
+    // 公式可以用 [科目名稱] 寫(畫面上就是這樣顯示的)，存檔時一律換成科目代碼：
+    // 代碼不會變，之後科目改名也不會讓公式斷掉
+    var normalize = function (f) { return codifyFormulaNames_(cleanFormulaText_(f), defs); };
     if (line.VehicleFormulas !== undefined) {
       var vf = parseVehicleFormulas_(line.VehicleFormulas);
       var cleaned = {};
-      Object.keys(vf).forEach(function (k) { if (String(vf[k] || '').trim()) cleaned[k] = cleanFormulaText_(vf[k]); });
+      Object.keys(vf).forEach(function (k) { if (String(vf[k] || '').trim()) cleaned[k] = normalize(vf[k]); });
       row.VehicleFormulas = Object.keys(cleaned).length ? JSON.stringify(cleaned) : '';
     }
-    row.Formula = row.CalcType === CALC_TYPES.FORMULA ? cleanFormulaText_(row.Formula) : '';
+    row.Formula = row.CalcType === CALC_TYPES.FORMULA ? normalize(row.Formula) : '';
     if (row.CalcType === CALC_TYPES.FORMULA && !row.Formula) throw new Error('請輸入公式');
     if (row.CalcType === CALC_TYPES.DEV_AMORT && !row.DevAmortCategory) {
       row.DevAmortCategory = row.ParentLine === 'G' ? '費用' : '模具';
@@ -347,10 +390,35 @@ function saveChartLine(vehicleTypeId, line) {
       row.SortOrder = nextSortOrder_(row.ParentLine, vehicleTypeId);
     }
 
-    var nextDefs = defs.filter(function (d) { return d.LineCode !== row.LineCode; }).concat([normalizeLineDef_(row)]);
+    // 改名：其他公式裡還用舊名稱 [舊名稱] 引用這個科目的(舊資料、或直接寫在車系個別公式裡的)，一併換成代碼
+    var renamed = [];
+    if (existing && existing.LineName !== row.LineName) {
+      defs.forEach(function (d) {
+        if (d.LineCode === row.LineCode) return;
+        var changed = false;
+        var r2 = copyLineRow_(d, vehicleTypeId);
+        var fix = function (f) {
+          var out = replaceNameRef_(f, existing.LineName, row.LineCode);
+          if (out !== f) changed = true;
+          return out;
+        };
+        if (r2.Formula) r2.Formula = fix(r2.Formula);
+        var vf2 = parseVehicleFormulas_(r2.VehicleFormulas);
+        Object.keys(vf2).forEach(function (k) { vf2[k] = fix(vf2[k]); });
+        if (Object.keys(vf2).length) r2.VehicleFormulas = JSON.stringify(vf2);
+        if (changed) renamed.push(r2);
+      });
+    }
+
+    var touched = {};
+    renamed.forEach(function (r) { touched[r.LineCode] = r; });
+    var nextDefs = defs.filter(function (d) { return d.LineCode !== row.LineCode; })
+      .map(function (d) { return touched[d.LineCode] ? normalizeLineDef_(touched[d.LineCode]) : d; })
+      .concat([normalizeLineDef_(row)]);
     var problems = chartProblems_(nextDefs, vehicleTypeId).filter(function (p) { return p.level === 'error'; });
     if (problems.length) throw new Error(problems.map(function (p) { return p.message; }).join('\n'));
 
+    if (renamed.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', renamed, []);
     upsertRow_(SHEETS.PL_LINE_ITEMS, 'LineID', row);
     return { line: normalizeLineDef_(row), editor: getChartEditor(vehicleTypeId, line.__scenarioId || '') };
   });
@@ -698,7 +766,8 @@ function lineUsageCounts_(vehicleTypeId) {
 function chartPreviewValues_(scenarioId, vehicles, overrideDefs) {
   var mix = {};
   getSalesMix(scenarioId).forEach(function (r) { mix[r.VehicleID] = true; });
-  var out = { scenarioId: scenarioId, values: {}, errors: {}, traces: {} };
+  var out = { scenarioId: scenarioId, values: {}, errors: {}, traces: {}, weights: {} };
+  getSalesMix(scenarioId).forEach(function (r) { out.weights[r.VehicleID] = toNumber_(r.SalesMixPct); });
   vehicles.forEach(function (v) {
     if (!mix[v.VehicleID]) return;
     try {

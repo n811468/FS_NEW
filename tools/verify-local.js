@@ -93,7 +93,7 @@ function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 }
 
 /* ---- 1. 地端版與 Node 驗算層算出來的數字完全相同 -------------------------------------------- */
-const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'SetupSheets.gs']);
+const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs']);
 const sidRef = gatef.buildScenario(gs);
 const refSel = gatef.VEHICLES.map(v => ({ ScenarioID: sidRef, VehicleID: v.id })).concat([{ ScenarioID: sidRef, VehicleID: '' }]);
 const reference = numbers(gs.calculateComparison(refSel));

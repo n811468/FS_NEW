@@ -32,6 +32,53 @@ function fxRateFor_(params, currency, vehicleId) {
   return picked ? (toNumber_(picked.Value) || 1) : 1;
 }
 
+/* ---------------------------------------------------------------
+ * 假設分析(What-if)：目標反推與敏感度表要「假設月銷量變成 N、售價調 x%、某科目降 y%…」重算損益，
+ * 但完全不能動到存檔的資料。做法是在計算期間掛一組只存在記憶體裡的覆寫(CALC_OVERRIDES_)，
+ * 計算引擎讀銷售構成/參數/科目金額時套上去，算完立刻拿掉(見 WhatIfService.gs withOverrides_)。
+ *   { scenarioId, volume: 倍數, price: 倍數, lineScale: {科目: 倍數}, dev: 倍數,
+ *     params: {參數名稱: 值(原單位)}, fx: {幣別: 匯率} }
+ * 只套在指定的情境上；REF 引用到的其他情境照原本的資料算。
+ * --------------------------------------------------------------- */
+var CALC_OVERRIDES_ = null;
+function overridesFor_(scenarioId) {
+  return CALC_OVERRIDES_ && CALC_OVERRIDES_.scenarioId === scenarioId ? CALC_OVERRIDES_ : null;
+}
+function calcSalesMix_(scenarioId) {
+  var rows = getSalesMix(scenarioId);
+  var o = overridesFor_(scenarioId);
+  if (!o || (!o.volume && !o.price)) return rows;
+  return rows.map(function (r) {
+    var c = {};
+    Object.keys(r).forEach(function (k) { c[k] = r[k]; });
+    if (o.volume) c.MonthlyVolume = toNumber_(r.MonthlyVolume) * o.volume;
+    if (o.price) c.ListPriceTaxIncl = toNumber_(r.ListPriceTaxIncl) * o.price;
+    return c;
+  });
+}
+function calcParameters_(scenarioId) {
+  var params = getParameters(scenarioId);
+  var o = overridesFor_(scenarioId);
+  if (!o || (!o.params && !o.fx)) return params;
+  var p = o.params || {}, fx = o.fx || {};
+  var out = params.filter(function (r) {
+    if (p[r.ParamName] !== undefined) return false;
+    if (r.ParamName === COST_FX_PARAM_NAME && fx[r.Currency] !== undefined) return false;
+    return true;
+  });
+  Object.keys(p).forEach(function (name) { out.push({ ParamName: name, VehicleID: '', ScenarioID: scenarioId, Value: p[name], Currency: '' }); });
+  Object.keys(fx).forEach(function (cur) { out.push({ ParamName: COST_FX_PARAM_NAME, VehicleID: '', ScenarioID: scenarioId, Value: fx[cur], Currency: cur }); });
+  return out;
+}
+function overrideLineScale_(scenarioId, code) {
+  var o = overridesFor_(scenarioId);
+  return o && o.lineScale && o.lineScale[code] !== undefined ? o.lineScale[code] : 1;
+}
+function overrideDevScale_(scenarioId) {
+  var o = overridesFor_(scenarioId);
+  return o && o.dev !== undefined ? o.dev : 1;
+}
+
 /**
  * 算損益並把結果寫回 PLResult 快照（快照給外部讀取用，畫面一律用不寫入的 calculatePLCore_）。
  */
@@ -59,6 +106,8 @@ function calculatePL(scenarioId, vehicleId) {
 var PL_CORE_MEMO_ = {};
 var REF_STACK_ = [];   // 跨情境引用(REF)正在計算中的情境|車系，用來擋循環引用
 function calculatePLCore_(scenarioId, vehicleId) {
+  // 假設分析(目標反推/敏感度)改的數字只在記憶體裡，不能讀/寫一般的計算記憶
+  if (CALC_OVERRIDES_ && CALC_OVERRIDES_.scenarioId === scenarioId) return calculatePLWithDefs_(scenarioId, vehicleId, null);
   var key = String(scenarioId) + '|' + String(vehicleId);
   if (!PL_CORE_MEMO_[key]) PL_CORE_MEMO_[key] = calculatePLWithDefs_(scenarioId, vehicleId, null);
   return PL_CORE_MEMO_[key];
@@ -100,12 +149,12 @@ function systemVariables_(scenarioId, salesMixRow, salesMix, params, vehicleId) 
  * 單一科目的公式出錯不會讓整張損益表掛掉：那一格以 0 計，錯誤訊息放在 errors 給畫面顯示。
  */
 function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
-  var salesMix = getSalesMix(scenarioId);
+  var salesMix = calcSalesMix_(scenarioId);
   var salesMixRow = salesMix.filter(function (r) { return r.VehicleID === vehicleId; })[0];
   if (!salesMixRow) throw new Error('找不到 SalesMix 資料：' + scenarioId + ' / ' + vehicleId);
 
   var defs = overrideDefs || lineDefsForScenario_(scenarioId);
-  var params = getParameters(scenarioId);
+  var params = calcParameters_(scenarioId);
   var vars = systemVariables_(scenarioId, salesMixRow, salesMix, params, vehicleId);
   var paramDefs = {};
   getParamDefs().forEach(function (d) { paramDefs[d.ParamName] = d; });
@@ -153,7 +202,7 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
         // 使用者自訂的攤提落點只有這個情境真的有開發總投列指到這裡才列出來，
         // 否則試用過一次的攤提落點會永遠以 0 留在每一份損益表上
         if (amt === undefined && d.AutoSource === AUTO_SOURCE.DEV_AMORT) excluded[code] = true;
-        v = amt || 0;
+        v = (amt || 0) * overrideDevScale_(scenarioId);
         traces[code] = { kind: 'dev', total: dev.totalsByLine[code] || 0, units: dev.totalUnits, perUnit: v };
       } else {
         v = inputs[code] || 0;
@@ -164,6 +213,7 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
       v = 0;
     }
     visiting[code] = false;
+    v = v * overrideLineScale_(scenarioId, code);
     values[code] = typeof v === 'number' && isFinite(v) ? v : 0;
     return values[code];
   }
@@ -239,7 +289,7 @@ function referenceValue_(scenarioRef, lineCode, vehicleRef, currentVehicleId) {
       return [s.VehicleTypeID, s.Gate, s.ScenarioName].filter(function (x) { return x; }).join(' ') === scenarioRef;
     })[0];
   if (!target) throw formulaError_('REF 找不到情境「' + scenarioRef + '」');
-  var mix = getSalesMix(target.ScenarioID);
+  var mix = calcSalesMix_(target.ScenarioID);
   var vid = vehicleRef || (mix.some(function (r) { return r.VehicleID === currentVehicleId; }) ? currentVehicleId : '');
   if (vehicleRef && !mix.some(function (r) { return r.VehicleID === vehicleRef; })) {
     throw formulaError_('REF 的情境沒有車系「' + vehicleRef + '」');
@@ -264,7 +314,7 @@ function referenceValue_(scenarioRef, lineCode, vehicleRef, currentVehicleId) {
  * 儀表板/報告只是「看」，一律用不寫入快照的 calculatePLCore_()。
  */
 function calculatePLAllVehicles(scenarioId) {
-  var salesMix = getSalesMix(scenarioId);
+  var salesMix = calcSalesMix_(scenarioId);
   var results = salesMix.map(function (row) { return calculatePLCore_(scenarioId, row.VehicleID); });
 
   // 加權平均列（以 SalesMixPct 加權）
@@ -336,7 +386,7 @@ function calculateComparison(selections) {
     var errors = {};
     if (vehicleCalc) errors = vehicleCalc.errors;
     else {
-      getSalesMix(sel.ScenarioID).forEach(function (r) {
+      calcSalesMix_(sel.ScenarioID).forEach(function (r) {
         var res = calculatePLCore_(sel.ScenarioID, r.VehicleID);
         Object.keys(res.errors).forEach(function (c) { if (!errors[c]) errors[c] = res.errors[c]; });
       });
@@ -433,7 +483,7 @@ function resultAutoSource_(def) {
  * 加權平均：月銷量/總台數是該情境所有車系加總，並附上各車系的構成比(mix)。
  */
 function columnVolumeInfo_(scenarioId, vehicleId, vehicles) {
-  var rows = getSalesMix(scenarioId);
+  var rows = calcSalesMix_(scenarioId);
   var nameOf = function (id) {
     var v = vehicles.filter(function (x) { return x.VehicleID === id; })[0];
     return (v && v.VehicleCode) || id;
@@ -527,7 +577,7 @@ function parseVehicleScope_(v) {
  * 「只攤給部分車系」的投資(如中低規式樣、TNCAP 只有部分車系要)用這組台數當分母。
  */
 function vehicleAmortUnits_(scenarioId) {
-  var mix = getSalesMix(scenarioId);
+  var mix = calcSalesMix_(scenarioId);
   var total = getLifeCycleUnits(scenarioId);
   var basisSet = (function () {
     var s = getScenarios().filter(function (r) { return r.ScenarioID === scenarioId; })[0];
@@ -559,7 +609,7 @@ function amortizeDevInvestmentPerUnit_(scenarioId, overrideRows) {
 
   // 現況情境沒有挑戰低減目標，一律用原始金額；目標情境才套用低減率。
   var isBaseline = isBaselineScenario_(scenarioId);
-  var params = getParameters(scenarioId);
+  var params = calcParameters_(scenarioId);
   var vUnits = null;
 
   var totals = {}, shared = {}, perVehicle = {};
@@ -610,7 +660,8 @@ function isBaselineScenario_(scenarioId) {
 function getLifeCycleUnits(scenarioId) {
   var scenario = getScenarios().filter(function (s) { return s.ScenarioID === scenarioId; })[0];
   if (scenario) {
-    var vol = toNumber_(scenario.AmortMonthlyVolume);
+    var o = overridesFor_(scenarioId);
+    var vol = toNumber_(scenario.AmortMonthlyVolume) * (o && o.volume ? o.volume : 1);
     var years = toNumber_(scenario.AmortLifeCycleYears);
     if (vol > 0 && years > 0) return vol * 12 * years;
   }
@@ -619,7 +670,7 @@ function getLifeCycleUnits(scenarioId) {
 
 /** 銷售構成推算的 LIFE CYCLE 總台數 = Σ(預估銷售台數(月) × 12 × LC年限) */
 function getSalesMixLifeCycleUnits(scenarioId) {
-  return getSalesMix(scenarioId).reduce(function (sum, r) {
+  return calcSalesMix_(scenarioId).reduce(function (sum, r) {
     return sum + toNumber_(r.MonthlyVolume) * 12 * toNumber_(r.LifeCycleYears);
   }, 0);
 }
@@ -760,7 +811,7 @@ function buildAutoLines_(scenarioId, vehicles, costSection) {
   if (!candidates.length) return result;
 
   var salesMixIds = {};
-  getSalesMix(scenarioId).forEach(function (r) { salesMixIds[r.VehicleID] = true; });
+  calcSalesMix_(scenarioId).forEach(function (r) { salesMixIds[r.VehicleID] = true; });
   var shown = {};
   vehicles.forEach(function (v) {
     if (!salesMixIds[v.VehicleID]) return;

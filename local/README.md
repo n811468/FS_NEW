@@ -4,7 +4,7 @@
 把 `dist/FS-local.html` 複製到電腦任何位置，用 Chrome / Edge **雙擊**就能用。
 所有資料只存在你這台電腦的瀏覽器裡，不會上傳到任何地方。
 
-後端是 `src/*.gs`（計算引擎與資料存取），前端是 `src/index.html` / `script.html` / `style.html`，
+後端是 `src/*.gs`（計算引擎與資料存取），前端是 `src/index.html` / `style.html` / `src/ui/*.js`，
 build 時原封不動放進這一個檔案。`tools/verify-local.js` 會用 Gate F 實際數字逐格確認算出來的結果正確。
 
 ## 日常使用
@@ -61,7 +61,7 @@ local/
 ├─ gas-shim.js   # 瀏覽器版的 Apps Script 模擬層(記憶體試算表、LockService、Session...)
 ├─ pack.js       # 資料包格式：匯出、讀取檢查、只取部分車型、合併(含科目改號)
 ├─ host.js       # 後端主機：.gs 後端 + 暫存 + google.script.run 替身
-├─ boot.js       # 開機：在前端 script.html 執行前架好主機
+├─ boot.js       # 開機：在前端程式執行前架好主機
 ├─ local-ui.js   # 地端版工具列與匯入對話框
 └─ local-ui.css
 tools/build-local.js   # 組成 dist/FS-local.html(單一檔案)
@@ -77,6 +77,6 @@ node tools/verify-local.js    # 會檢查 dist 是不是最新的
 node tools/e2e-local.js       # 有 Playwright 時跑瀏覽器測試
 ```
 
-`.gs` 被整段包進 `FSBackendFactory(G)` 函式裡，跟前端 `script.html` 的全域名稱互不干擾；
+`.gs` 被整段包進 `FSBackendFactory(G)` 函式裡，跟前端程式的全域名稱互不干擾；
 `G` 是模擬的 Apps Script 全域物件。每次前端呼叫都比照 Apps Script「每次都是新的執行」清掉單次執行快取，
 參數與回傳值都走一次 JSON，跟 `google.script.run` 的序列化行為一致。

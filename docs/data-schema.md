@@ -2,7 +2,7 @@
 
 依據實務 Gate F 損益試算 Excel（材料成本 / 開發總投 / GATE F 含TNCAP）整理而成。
 架構：地端版（`dist/FS-local.html`）在瀏覽器裡用記憶體試算表當資料庫（每個分頁 = 一張表），
-`src/*.gs` 作為後端、`src/script.html` 作為前端；資料包（JSON）的每張表就是下面定義的欄位。
+`src/*.gs` 作為後端、`src/ui/*.js` 作為前端；資料包（JSON）的每張表就是下面定義的欄位。
 
 ---
 
