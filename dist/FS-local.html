@@ -459,10 +459,14 @@
     padding: 12px 14px; cursor: default; box-shadow: var(--shadow-1); transition: border-color .12s; }
   .kpi-card:hover { border-color: var(--primary-line); }
   .kpi-card.baseline { border-color: #e9c46a; background: #fffdf3; }
-  .kpi-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; margin-bottom: 6px; }
-  .kpi-type { font-size: 11px; color: var(--muted); }
-  .kpi-vehicle { font-size: 13px; font-weight: 700; color: var(--text); }
-  .kpi-main { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+  /* 標題固定兩行(車型/情境、車系)，太長就截斷加 …(hover 看完整名稱)，每張卡片高度一致、數字對齊 */
+  .kpi-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "type star" "veh star"; column-gap: 6px; row-gap: 2px; margin-bottom: 8px; }
+  .kpi-type { grid-area: type; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi-vehicle { grid-area: veh; font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.3em; }
+  .kpi-title .star { grid-area: star; align-self: start; }
+  .kpi-main { display: flex; align-items: baseline; gap: 2px 6px; flex-wrap: wrap; min-width: 0; }
+  .kpi-main-label { white-space: nowrap; }
+  .kpi-main-num { white-space: nowrap; }
   .kpi-main-label { font-size: 11px; color: var(--muted); }
   .kpi-main-num { font-size: 22px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
   .kpi-main-pct { font-size: 12px; font-weight: 700; color: var(--text-2); }
@@ -11075,8 +11079,8 @@ function kpiStripHtml(cols, lines) {
     }
     const barW = Math.min(100, Math.abs(kPct) / maxAbsPct * 100);
     return `<div class="kpi-card${isBase ? ' baseline' : ''}" data-c="${i}" data-tipfn="col">
-      <div class="kpi-title"><span class="kpi-type">${esc([c.vehicleTypeLabel, c.scenarioLabel].filter(p => p).join(' / '))}</span>
-        <span class="kpi-vehicle">${esc(c.vehicleLabel)}</span>
+      <div class="kpi-title"><span class="kpi-type" title="${esc([c.vehicleTypeLabel, c.scenarioLabel].filter(p => p).join(' / '))}">${esc([c.vehicleTypeLabel, c.scenarioLabel].filter(p => p).join(' / '))}</span>
+        <span class="kpi-vehicle" title="${esc(c.vehicleLabel)}">${esc(c.vehicleLabel)}</span>
         <button type="button" class="star${isBase ? ' on' : ''}" data-tip="${isBase ? '目前的比較基準（再點一次取消）' : '設為比較基準'}"
           onclick="setBaselineColumnAt(${i})">★</button></div>
       <div class="kpi-main"><span class="kpi-main-label">${esc(nameOf('K'))}</span>

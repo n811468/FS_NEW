@@ -621,8 +621,8 @@ function kpiStripHtml(cols, lines) {
     }
     const barW = Math.min(100, Math.abs(kPct) / maxAbsPct * 100);
     return `<div class="kpi-card${isBase ? ' baseline' : ''}" data-c="${i}" data-tipfn="col">
-      <div class="kpi-title"><span class="kpi-type">${esc([c.vehicleTypeLabel, c.scenarioLabel].filter(p => p).join(' / '))}</span>
-        <span class="kpi-vehicle">${esc(c.vehicleLabel)}</span>
+      <div class="kpi-title"><span class="kpi-type" title="${esc([c.vehicleTypeLabel, c.scenarioLabel].filter(p => p).join(' / '))}">${esc([c.vehicleTypeLabel, c.scenarioLabel].filter(p => p).join(' / '))}</span>
+        <span class="kpi-vehicle" title="${esc(c.vehicleLabel)}">${esc(c.vehicleLabel)}</span>
         <button type="button" class="star${isBase ? ' on' : ''}" data-tip="${isBase ? '目前的比較基準（再點一次取消）' : '設為比較基準'}"
           onclick="setBaselineColumnAt(${i})">★</button></div>
       <div class="kpi-main"><span class="kpi-main-label">${esc(nameOf('K'))}</span>
