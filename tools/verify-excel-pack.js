@@ -212,6 +212,21 @@ async function main() {
   const r3 = E.buildAndVerify(() => { const h = newHost(); return { host: h, api: apiOf(h) }; }, noAmort.plan);
   assert(r3.verify[0].ok && !Object.values(r3.built.formulaRows).some(m => m === 'amort'), '關閉開發攤提追蹤時全部帶入數字');
 
+  /* ---- 4e. 命令列版 ---- */
+  const os = require('os'), { spawnSync } = require('child_process');
+  const tmpDir = fs.mkdtempSync(require('path').join(os.tmpdir(), 'xp-cli-'));
+  const xf = require('path').join(tmpDir, 'dq.xlsx');
+  fs.writeFileSync(xf, fx.bytes);
+  const cli = out => spawnSync(process.execPath, [require('path').join(__dirname, 'excel-to-pack.js'), xf, '--all-same', '--target', '目標',
+    '--exported-at', '2026-01-01T00:00:00.000Z', '--out', out], { encoding: 'utf8' });
+  const c1 = cli(require('path').join(tmpDir, 'a.json')), c2 = cli(require('path').join(tmpDir, 'b.json'));
+  assert(c1.status === 0 && /✓ DQ FS_目標/.test(c1.stdout), '命令列版要驗算通過並輸出：' + c1.stdout.slice(-300) + c1.stderr);
+  const cliPack = c1.status === 0 ? JSON.parse(fs.readFileSync(require('path').join(tmpDir, 'a.json'), 'utf8')) : { tables: { Scenarios: [] } };
+  assert(cliPack.tables.Scenarios.some(x => x.ScenarioType === '目標') && cliPack.tables.Scenarios.length >= 2, '--all-same / --target：' + cliPack.tables.Scenarios.map(x => x.ScenarioName + x.ScenarioType));
+  assert(c2.status === 0 && fs.readFileSync(require('path').join(tmpDir, 'a.json'), 'utf8') === fs.readFileSync(require('path').join(tmpDir, 'b.json'), 'utf8'),
+    '同一份 Excel 重新產生的資料包要完全相同');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+
   /* ---- 5. 資料包 ---- */
   const pack = host.exportPack(['DQ']);
   const fresh = newHost();

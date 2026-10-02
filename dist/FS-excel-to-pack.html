@@ -7561,6 +7561,43 @@ function reportMaintenance_(message) {
     return vals.map(function (v) { return Math.round(v * scale * 1e6) / 1e6; });
   }
 
+  /**
+   * 不做任何調整、全部採用自動判斷時的對應設定(跟畫面上選檔後的預設值相同)。tools/excel-to-pack.js 與測試共用。
+   * opts：{ typeId, typeNotes, gate, typeOf(分頁名稱) → '現況'|'目標', useFormulas, useAmort, backcalc }
+   */
+  function autoPlan(wb, refIndex, sheetIndexes, opts) {
+    opts = opts || {};
+    var sheet = wb.sheets[refIndex];
+    var layout = analyzeSheet(sheet);
+    var rows = extractRows(sheet, layout);
+    var sug = suggestRoles(rows, layout);
+    var typeId = opts.typeId || ((/^[A-Za-z0-9]+/.exec(sheet.name.trim()) || [''])[0]);
+    var plan = {
+      typeId: typeId, typeNotes: opts.typeNotes || '', vehicles: layout.vehicles, weightedCol: layout.weightedCol,
+      noteCol: layout.noteCol, labelCol: layout.labelCol, firstRow: layout.firstRow, rows: rows, roles: sug.roles,
+      workbook: wb, useFormulas: opts.useFormulas !== false, useAmort: opts.useAmort !== false, backcalc: opts.backcalc || {}
+    };
+    plan.scenarios = (sheetIndexes || [refIndex]).map(function (i) {
+      var sh = wb.sheets[i];
+      var name = sh.name.trim();
+      if (typeId && name.indexOf(typeId) === 0 && name.length > typeId.length) name = name.slice(typeId.length).trim();
+      return {
+        sheet: sh, name: name, gate: opts.gate || 'GATE F', type: opts.typeOf ? opts.typeOf(sh.name) : '現況',
+        rates: inferRates(extractRows(sh, layout), sug.roles), mix: mixFor(sh, plan)
+      };
+    });
+    return { plan: plan, layout: layout, notes: sug.notes };
+  }
+
+  /** 跟參考分頁版面相同(同一列的科目名稱一樣)、沒有隱藏的分頁 */
+  function sameLayoutSheets(wb, refIndex) {
+    var probe = autoPlan(wb, refIndex, [refIndex]).plan;
+    return wb.sheets.map(function (s, i) { return i; }).filter(function (i) {
+      var s = wb.sheets[i];
+      return i === refIndex || (!s.hidden && s.maxRow > 0 && sameLayout(s, probe).length === 0);
+    });
+  }
+
   /** 對應設定的「指紋」：同一份 Excel 換新版時，科目名稱一樣就能沿用上次的對應 */
   function signature(rows) {
     var s = rows.map(function (r) { return r.row + ':' + r.label; }).join('|');
@@ -7573,7 +7610,7 @@ function reportMaintenance_(message) {
     TOLERANCE: TOLERANCE, ROLE_LABELS: ROLE_LABELS, PARENTS: PARENTS, STRUCTURE: STRUCTURE,
     analyzeSheet: analyzeSheet, extractRows: extractRows, suggestRoles: suggestRoles, inferRates: inferRates,
     formulaShape: formulaShape, planProblems: planProblems, buildFromPlan: buildFromPlan, verifyPlan: verifyPlan, buildAndVerify: buildAndVerify,
-    translateAll: translateAll,
+    translateAll: translateAll, autoPlan: autoPlan, sameLayoutSheets: sameLayoutSheets,
     sameLayout: sameLayout, mixFor: mixFor, signature: signature, clean: clean
   };
 }));

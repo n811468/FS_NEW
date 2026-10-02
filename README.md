@@ -42,7 +42,7 @@ local/   地端層：瀏覽器版模擬層、資料包、暫存、工具列
 dist/    FS-local.html —— 由 tools/build-local.js 產生的單一檔案，使用者拿這一個就好
          FS-excel-to-pack.html —— Excel 轉資料包工具(同一份後端，也是單一檔案)
 tools/   build、驗算、本機預覽(只在開發時用 Node 執行)
-data/    整理好的資料包(可直接「匯入資料包…→合併匯入」)
+data/    整理好的資料包(可直接「匯入資料包…→合併匯入」)：D5X_FS_CMC(單一情境)、D5X_全部情境(8 個情境)
 docs/    說明文件
 ```
 
@@ -67,8 +67,15 @@ node tools/verify-excel-pack.js        # Excel 轉資料包：讀 .xlsx、版面
 node tools/e2e-excel-pack.js           # Excel 轉資料包瀏覽器測試（需要 Playwright）
 ```
 
-`node tools/import-d5x-fs-cmc.js` 由「D5X 損益 FS_CMC」Excel 的 `D5X  FS_CMC` 分頁產生 `data/D5X_FS_CMC_資料包.json`，
-並逐格對 Excel 驗算(112 格)後才輸出。
+`node tools/excel-to-pack.js 檔案.xlsx [--sheet 分頁] [--all-same] [--target 挑戰]` 是 Excel 轉資料包的命令列版
+(跟 `dist/FS-excel-to-pack.html` 同一套判斷，全部採用自動判斷，逐格驗算通過才輸出)。`data/` 底下的 D5X 資料包就是用它產生的：
+
+```bash
+# 只轉「D5X  FS_CMC」一個分頁
+node tools/excel-to-pack.js D5X_FS_CMC_0921.xlsx --sheet "D5X  FS_CMC" --out data/D5X_FS_CMC_資料包.json --exported-at 2026-10-02T00:00:00.000Z
+# 版面相同的 8 個 FS 分頁全部轉成情境，名稱有「挑戰」的設為目標情境
+node tools/excel-to-pack.js D5X_FS_CMC_0921.xlsx --sheet "D5X  FS_CMC" --all-same --target 挑戰 --out data/D5X_全部情境_資料包.json --exported-at 2026-10-02T00:00:00.000Z
+```
 
 `verify-gatef.js` 會順便把比較表印出來，方便跟原始試算表並排肉眼再對一次。
 
