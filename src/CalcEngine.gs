@@ -472,8 +472,9 @@ function calculateComparison(selections) {
 
 /**
  * 哪一個科目是「營業淨利」：預設是 K。K 被刪掉時(例如另外新增一個淨利科目、再把原本的刪掉)，
- * 改用損益表最後一行不計入任何小計、也不是售價結構的科目，也就是損益表最底下的總計。
- * 儀表板重點指標、GATE 報告、損益兩平、目標反推的預設指標都看這裡，不寫死 K。
+ * 改用損益表最底下的總計：頂層、不是售價結構、用公式算、而且沒有被其他科目的公式引用的科目，
+ * 有好幾個就取損益表上最後一個。不看位置挑「最後一行」，否則最後一行是手動輸入的費用(例如前瞻費用)
+ * 時會把費用當成淨利。儀表板重點指標、GATE 報告、損益兩平、目標反推的預設指標都看這裡，不寫死 K。
  */
 function profitLineCode_(defs) {
   defs = defs || [];
@@ -481,7 +482,27 @@ function profitLineCode_(defs) {
   var top = displayOrderDefs_(defs.slice()).filter(function (d) {
     return !d.ParentLine && String(d.Category || '') !== '售價結構';
   });
-  return top.length ? top[top.length - 1].LineCode : '';
+  if (!top.length) return '';
+  var referenced = {};
+  defs.forEach(function (d) {
+    var formulas = [];
+    if (d.CalcType === CALC_TYPES.FORMULA && d.Formula) formulas.push(d.Formula);
+    var vf = parseVehicleFormulas_(d.VehicleFormulas);
+    Object.keys(vf).forEach(function (k) { if (vf[k]) formulas.push(vf[k]); });
+    formulas.forEach(function (f) {
+      var info = inspectFormula_(f);
+      if (!info.ok) return;
+      info.refs.codes.forEach(function (c) { if (c !== d.LineCode) referenced[c] = true; });
+      info.refs.names.forEach(function (n) {
+        defs.forEach(function (x) { if (x.LineName === n && x.LineCode !== d.LineCode) referenced[x.LineCode] = true; });
+      });
+    });
+  });
+  var isFormula = function (d) { return d.CalcType === CALC_TYPES.FORMULA; };
+  var pick = top.filter(function (d) { return isFormula(d) && !referenced[d.LineCode]; });
+  if (!pick.length) pick = top.filter(isFormula);
+  if (!pick.length) pick = top;
+  return pick[pick.length - 1].LineCode;
 }
 
 /** 科目的縮排層級(父科目鏈長度) */

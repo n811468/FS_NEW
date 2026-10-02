@@ -758,11 +758,21 @@ function getChartEditor(vehicleTypeId, scenarioId) {
     preview = chartPreviewValues_(scenarioId, vehicles, null);
   }
   var usage = lineUsageCounts_(vehicleTypeId);
-  // 目前情境的參數值(公式編輯器的選單顯示用；% 參數是小數)
+  var profitCode = profitLineCode_(defs);
+  // 目前情境的參數值(公式編輯器的選單顯示用；% 參數是小數)。
+  // 參數可以每個車系各設一個值：有試算資料時跟每一行的數字一樣用銷售構成加權平均，否則看情境共用的值
   var paramValues = {};
   if (scenarioId) {
     var scenarioParams = calcParameters_(scenarioId);
-    getParamDefs().forEach(function (p) { paramValues[p.ParamName] = paramValueForFormula_(scenarioParams, p, ''); });
+    var weights = {};
+    if (preview) Object.keys(preview.values).forEach(function (vid) { weights[vid] = toNumber_(preview.weights[vid]); });
+    var totalWeight = Object.keys(weights).reduce(function (s, vid) { return s + weights[vid]; }, 0);
+    getParamDefs().forEach(function (p) {
+      if (!totalWeight) { paramValues[p.ParamName] = paramValueForFormula_(scenarioParams, p, ''); return; }
+      paramValues[p.ParamName] = Object.keys(weights).reduce(function (s, vid) {
+        return s + paramValueForFormula_(scenarioParams, p, vid) * weights[vid];
+      }, 0) / totalWeight;
+    });
   }
   return {
     vehicleTypeId: vehicleTypeId || '',
@@ -777,7 +787,9 @@ function getChartEditor(vehicleTypeId, scenarioId) {
       return out;
     }),
     vehicles: vehicles,
-    profitCode: profitLineCode_(defs),
+    profitCode: profitCode,
+    // 刪掉目前的營業淨利之後會改用哪個科目(刪除確認視窗說明用)
+    nextProfitCode: profitLineCode_(defs.filter(function (d) { return d.LineCode !== profitCode; })),
     paramValues: paramValues,
     variables: SYSTEM_VARIABLES,
     params: getParamDefs(),
@@ -848,9 +860,25 @@ function previewLineFormula(vehicleTypeId, scenarioId, line) {
     ? defs.map(function (d) { return d.LineCode === line.LineCode ? patchLine(d) : d; })
     : defs.concat([patchLine({ LineCode: code, LineName: String(line.LineName || '').trim() || code, ParentLine: '', SortOrder: 9999 })]);
   var problems = chartProblems_(patched, vehicleTypeId).filter(function (p) { return p.code === code && p.level === 'error'; });
-  if (problems.length || !scenarioId) return { problems: problems, preview: null };
+  if (!scenarioId) return { problems: problems, preview: null };
   var vehicles = getVehicles(vehicleTypeId).map(function (v) { return { VehicleID: v.VehicleID, VehicleCode: v.VehicleCode || '' }; });
   var probe = Array.isArray(line.Probes) && line.Probes.length ? { code: code, formulas: line.Probes.slice(0, 80).map(String) } : null;
+  if (problems.length) {
+    // 公式有錯也照樣算每一行/每顆膠囊：這個科目先當成手動輸入，算得出來的行顯示數字，有錯的那一行是 null
+    var out = { problems: problems, preview: null };
+    if (probe) {
+      var safe = patched.map(function (d) {
+        if (d.LineCode !== code) return d;
+        var p = {};
+        Object.keys(d).forEach(function (k) { p[k] = d[k]; });
+        p.CalcType = CALC_TYPES.INPUT; p.Formula = ''; p.VehicleFormulas = '';
+        return p;
+      });
+      var pv = chartPreviewValues_(scenarioId, vehicles, safe, probe);
+      out.probes = { probes: pv.probes, weights: pv.weights };
+    }
+    return out;
+  }
   return { problems: [], preview: chartPreviewValues_(scenarioId, vehicles, patched, probe) };
 }
 

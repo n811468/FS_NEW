@@ -114,8 +114,10 @@ function rAmt_(v) { return v === undefined || v === null ? '' : fmt(Number(v) / 
 function rSigned_(v) { return v === undefined || v === null ? '' : signed_(Number(v) / reportUnit, reportUnit === 1000 ? 1 : 0); }
 function rUnit_() { return reportUnit === 1000 ? '千元/台' : '元/台'; }
 function rPct_(v, base) { return base ? (Number(v) / base * 100).toFixed(1) + '%' : ''; }
-/** 營業淨利科目(預設 K；K 被刪掉時後端指定損益表最後一行總計) */
+/** 目標情境的營業淨利科目(預設 K；K 被刪掉時後端指定損益表最底下的總計) */
 function rK_() { return profitCodeOf_(reportData); }
+/** 某個情境(目標/現況/前回)的營業淨利：各看自己車型的淨利科目，不同車型可能不是同一個代碼 */
+function rProfit_(block) { return block ? (block.weighted[block.profitCode || rK_()] || 0) : 0; }
 function reportLineName_(code) { const l = reportData.lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : code; }
 function reportCodeNameMap_() { const m = {}; reportData.lines.forEach(l => { m[l.LineCode] = shortLineName(l.LineName); }); return m; }
 function noteFor_(block, code) {
@@ -193,7 +195,7 @@ function drawReport_() {
 
 function reportSummaryHtml_() {
   const R = reportData, T = R.target, B = R.base;
-  const tK = T.weighted[rK_()] || 0, bK = B ? (B.weighted[rK_()] || 0) : null;
+  const tK = rProfit_(T), bK = B ? rProfit_(B) : null;
   const tRev = T.weighted.P8 || T.weighted.A || 0, bRev = B ? (B.weighted.P8 || B.weighted.A || 0) : 0;
   const tVol = T.volume.monthlyVolume || 0;
   const gap = B ? tK - bK : null;
@@ -221,11 +223,12 @@ function reportSummaryHtml_() {
     <div class="grid-scroll"><table class="rpt-table">
       <thead><tr><th style="text-align:left;">重點科目（加權平均）</th>${B ? '<th>現況</th><th>%</th>' : ''}<th>目標</th><th>%</th>${B ? '<th>差距</th>' : ''}<th style="text-align:left;">說明</th></tr></thead>
       <tbody>${keyCodes.map(c => {
-        const line = R.lines.find(l => l.LineCode === c) || { LineCode: c };
-        const d = B ? (T.weighted[c] || 0) - (B.weighted[c] || 0) : 0;
+        // 營業淨利這一行：現況看自己車型的淨利科目(可能跟目標的代碼不同)
+        const bv = B ? (c === rK_() ? bK : B.weighted[c]) : undefined;
+        const d = B ? (T.weighted[c] || 0) - (bv || 0) : 0;
         const good = (c === 'B' ? -d : d) > 0.5, bad = (c === 'B' ? -d : d) < -0.5;
         return `<tr class="${c === rK_() ? 'key' : 'subtotal'}"><td class="name">${esc(reportLineName_(c))}</td>
-          ${B ? `<td>${rAmt_(B.weighted[c])}</td><td class="pct">${rPct_(B.weighted[c], bRev)}</td>` : ''}
+          ${B ? `<td>${rAmt_(bv)}</td><td class="pct">${rPct_(bv, bRev)}</td>` : ''}
           <td>${rAmt_(T.weighted[c])}</td><td class="pct">${rPct_(T.weighted[c], tRev)}</td>
           ${B ? `<td class="${good ? 'gap-good' : bad ? 'gap-bad' : ''}">${rSigned_(d)}</td>` : ''}
           ${noteCellHtml_(T, c)}</tr>`;
@@ -244,7 +247,7 @@ function reportBridgeHtml_() {
     const d = ((T.weighted[l.LineCode] || 0) - (B.weighted[l.LineCode] || 0)) * sign;
     return Math.abs(d) >= 0.5 ? { code: l.LineCode, label: shortLineName(l.LineName), value: d } : null;
   }).filter(x => x).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
-  const start = B.weighted[rK_()] || 0, end = T.weighted[rK_()] || 0;
+  const start = rProfit_(B), end = rProfit_(T);
   const top = contribs.slice(0, 10);
   const rest = contribs.slice(10).reduce((s, c) => s + c.value, 0);
   const explained = top.reduce((s, c) => s + c.value, 0) + rest;
@@ -357,7 +360,7 @@ function reportActionsHtml_() {
 }
 function reportActionsTableHtml_() {
   const R = reportData, T = R.target, B = R.base;
-  const gap = B ? (T.weighted[rK_()] || 0) - (B.weighted[rK_()] || 0) : null;
+  const gap = B ? rProfit_(T) - rProfit_(B) : null;
   const vol = T.volume.monthlyVolume || 0;
   const lineOpts = R.lines.filter(l => !l.isPriceStructure && !l.isSubtotal);
   const total = reportActions.reduce((s, a) => s + num(a.Effect), 0);
@@ -391,7 +394,7 @@ function reportActionsTableHtml_() {
 function reportActionWfSteps_() {
   const R = reportData, T = R.target, B = R.base;
   if (!B) return [];
-  const start = B.weighted[rK_()] || 0, end = T.weighted[rK_()] || 0;
+  const start = rProfit_(B), end = rProfit_(T);
   let acts = reportActions.filter(a => String(a.Title || '').trim() && num(a.Effect))
     .map(a => ({ label: a.Title, value: num(a.Effect), kind: 'delta', tip: `${a.Title}\n${[a.LineCode ? reportLineName_(a.LineCode) : '', a.Owner, a.Status].filter(x => x).join('｜')}\n${signed_(num(a.Effect))} 元/台` }));
   if (acts.length > 10) {
@@ -400,7 +403,7 @@ function reportActionWfSteps_() {
     acts = acts.filter(a => drop.indexOf(a) === -1);
     acts.push({ label: `其他 ${drop.length} 項作法`, value: drop.reduce((s, a) => s + a.value, 0), kind: 'delta' });
   }
-  const steps = [{ label: `現況 ${reportLineName_(rK_())}`, value: start, kind: 'total' }].concat(acts);
+  const steps = [{ label: `現況 ${reportLineName_(B.profitCode || rK_())}`, value: start, kind: 'total' }].concat(acts);
   const remain = (end - start) - acts.reduce((s, a) => s + a.value, 0);
   if (Math.abs(remain) >= 0.5) steps.push({ label: remain > 0 ? '其他改善（沒有寫成作法）' : '作法高估或其他惡化', value: remain, kind: 'delta', remain: true });
   steps.push({ label: `目標 ${reportLineName_(rK_())}`, value: end, kind: 'total' });
@@ -435,7 +438,7 @@ function updateReportActionTotals_() {
   const t = document.getElementById('rpt-act-total'); if (t) t.textContent = fmt(total);
   const tm = document.getElementById('rpt-act-total-m'); if (tm) tm.textContent = fmt(total * vol / 10000, 1);
   if (R.base) {
-    const gap = (R.target.weighted[rK_()] || 0) - (R.base.weighted[rK_()] || 0);
+    const gap = rProfit_(R.target) - rProfit_(R.base);
     const r = document.getElementById('rpt-act-remain');
     if (r) { r.textContent = fmt(gap - total); r.className = gap - total > 0.5 ? 'negative' : 'good'; }
   }
@@ -477,10 +480,10 @@ function reportPrevHtml_() {
         const d = (tv || 0) - (pv || 0);
         const sign = l.isSubtotal ? (l.LineCode === 'B' ? -1 : 1) : profitSign_(l);
         const cls = !sign || Math.abs(d) < 0.5 ? '' : d * sign > 0 ? 'gap-good' : 'gap-bad';
-        return `<tr class="${l.LineCode === rK_() ? 'key' : l.isSubtotal ? 'subtotal' : ''}"><td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
+        return `<tr class="${l.isProfit ? 'key' : l.isSubtotal ? 'subtotal' : ''}"><td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
           <td>${rAmt_(pv)}</td><td>${rAmt_(tv)}</td><td class="${cls}">${Math.abs(d) < 0.5 ? '' : rSigned_(d)}</td>${noteCellHtml_(T, l.LineCode)}</tr>`;
       }).join('')}
-      <tr class="key"><td class="name">營業淨利(每月)</td><td>${fmt((P.weighted[rK_()] || 0) * vol(P) / 10000, 0)} 萬</td><td>${fmt((T.weighted[rK_()] || 0) * vol(T) / 10000, 0)} 萬</td><td>${signed_(((T.weighted[rK_()] || 0) * vol(T) - (P.weighted[rK_()] || 0) * vol(P)) / 10000, 0)} 萬</td><td class="note"></td></tr>
+      <tr class="key"><td class="name">營業淨利(每月)</td><td>${fmt(rProfit_(P) * vol(P) / 10000, 0)} 萬</td><td>${fmt(rProfit_(T) * vol(T) / 10000, 0)} 萬</td><td>${signed_((rProfit_(T) * vol(T) - rProfit_(P) * vol(P)) / 10000, 0)} 萬</td><td class="note"></td></tr>
     </tbody></table></div>`;
 }
 

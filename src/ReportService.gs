@@ -121,7 +121,11 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
   if (base) types.push(base.meta.VehicleTypeID);
   if (prev) types.push(prev.meta.VehicleTypeID);
   var defs = unionLineDefs_(types.map(function (t) { return getPLLineItems(t); }));
-  var profitCode = profitLineCode_(getPLLineItems(target.meta.VehicleTypeID));
+  // 每個情境看自己車型的營業淨利科目(現況/前回可能是別的車型，K 還在或已經換成別的科目)
+  [target, base, prev].forEach(function (b) { if (b) b.profitCode = profitLineCode_(getPLLineItems(b.meta.VehicleTypeID)); });
+  var profitCode = target.profitCode;
+  var profitCodes = {};
+  [target, base, prev].forEach(function (b) { if (b) profitCodes[b.profitCode] = true; });
   var depth = lineDepths_(defs);
   var used = function (code) {
     return [target, base, prev].some(function (b) { return b && b.weighted[code] !== undefined; });
@@ -136,8 +140,8 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
         LineCode: d.LineCode, LineName: d.LineName, ParentLine: d.ParentLine || '', Category: d.Category || '',
         CalcType: d.CalcType, Formula: d.CalcType === CALC_TYPES.FORMULA ? d.Formula : '',
         Depth: depth[d.LineCode] || 0,
-        isSubtotal: PROTECTED_LINE_CODES.indexOf(d.LineCode) !== -1 || d.LineCode === profitCode || isGroupLine_(d, defs),
-        isProfit: d.LineCode === profitCode,
+        isSubtotal: PROTECTED_LINE_CODES.indexOf(d.LineCode) !== -1 || !!profitCodes[d.LineCode] || isGroupLine_(d, defs),
+        isProfit: !!profitCodes[d.LineCode],
         isPriceStructure: d.Category === '售價結構'
       };
     }),

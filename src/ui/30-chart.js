@@ -28,8 +28,9 @@ const FORMULA_FUNCTIONS_UI = [
   ['CHILDREN()', '這個科目底下所有子科目的合計（小計用）'],
   ['TAXDEDUCT()', '勾選「貨物稅完稅價格可扣除」的科目合計'],
   ['ROUND(x)', '四捨五入到整數；ROUND(x, 2) 到小數 2 位'],
-  ['SUM(a, b, …)', '加總'], ['MAX(a, b)', '取大'], ['MIN(a, b)', '取小'], ['ABS(x)', '絕對值'],
-  ['IF(條件, 成立, 不成立)', '例：IF([月銷量] > 100, 1, 2)'],
+  ['ROUNDUP(x, 位數)', '無條件進位'], ['ROUNDDOWN(x, 位數)', '無條件捨去'],
+  ['IF(條件, 成立, 不成立)', '如果…就…否則，例：IF([月銷量] > 100, 1, 2)'],
+  ['MAX(a, b)', '取大'], ['MIN(a, b)', '取小'], ['SUM(a, b, …)', '加總'], ['ABS(x)', '絕對值'],
   ['REF("情境", "科目代碼")', '引用另一個情境（可以是別的車型）的科目金額']
 ];
 
@@ -591,8 +592,8 @@ function schedulePreview_(immediate) {
     if (chartDraft.CalcType === 'FORMULA' && !String(chartDraft.Formula || '').trim()) { chartPreview = null; renderChartPreview_(); return; }   // 還沒寫公式不算錯
     const probes = fxProbeList_();
     google.script.run
-      .withSuccessHandler(res => { chartPreview = res; renderChartPreview_(); fxApplyProbes_(res && res.preview, probes); })
-      .withFailureHandler(err => { chartPreview = { problems: [{ message: err.message }] }; renderChartPreview_(); })
+      .withSuccessHandler(res => { chartPreview = res; renderChartPreview_(); fxApplyProbes_(res && (res.preview || res.probes), probes); })
+      .withFailureHandler(err => { chartPreview = { problems: [{ message: err.message }] }; renderChartPreview_(); fxApplyProbes_(null, probes); })
       .previewLineFormula(currentVehicleTypeId, currentScenarioId, Object.assign(chartDraftPayload_(), { Probes: probes }));
   }, immediate ? 0 : 350);
 }
@@ -677,10 +678,9 @@ function deleteChartLine() {
   const d = chartDraft;
   let profitNote = '';
   if (d.LineCode === profitCodeOf_(chartEditor)) {
-    // 刪掉營業淨利：儀表板重點指標、GATE 報告、目標反推會改看損益表最後一行總計(同後端 profitLineCode_)
-    const rest = chartEditor.lines.filter(l => l.LineCode !== d.LineCode && !l.ParentLine && l.Category !== '售價結構');
-    const next = rest[rest.length - 1];
-    profitNote = `<div class="callout warn" style="margin-top:10px;"><div>這是目前的營業淨利。刪除後，儀表板重點指標、GATE 報告、目標反推會改用損益表最後一行${next ? `<b>「${esc(next.LineName)}」</b>` : '（目前沒有其他總計科目）'}當營業淨利。只是想換名稱或公式的話，直接改這個科目就好，不必刪除。</div></div>`;
+    // 刪掉營業淨利：儀表板重點指標、GATE 報告、目標反推會改看損益表最底下的總計(後端 profitLineCode_ 決定)
+    const next = chartEditor.nextProfitCode ? chartLineByCode_(chartEditor.nextProfitCode) : null;
+    profitNote = `<div class="callout warn" style="margin-top:10px;"><div>這是目前的營業淨利。刪除後，儀表板重點指標、GATE 報告、目標反推會改用損益表最底下的總計${next ? `<b>「${esc(next.LineName)}」</b>` : '（目前沒有其他總計科目）'}當營業淨利。只是想換名稱或公式的話，直接改這個科目就好，不必刪除。</div></div>`;
   }
   confirmModal('刪除科目「' + d.LineName + '」？',
     `只影響車型 <b>${esc(currentVehicleTypeId)}</b>。${d.usage ? `這個科目在 ${esc(currentVehicleTypeId)} 的情境裡有 <b>${d.usage}</b> 筆輸入金額，會一起清掉。` : ''}被其他公式引用、或底下還有子科目時會被擋下來。${profitNote}`,

@@ -16,15 +16,10 @@ let fxCaret = 0;            // 膠囊游標位置(第幾顆之前)
 let fxSelTok = -1;          // 選取中的膠囊
 let fxProbeVals = {};       // 公式片段 → 目前情境的加權平均值
 let fxDraftKey_ = null;     // 目前的編輯狀態屬於哪一個科目(換科目才重新判斷模式)
+let fxProbeScenario_ = null; // fxProbeVals 是哪一個情境算的(換情境就清掉，不顯示上一個情境的數字)
 let fxPicker_ = null;       // 選單狀態
 
 const FX_SPECIAL_FNS_ = { CHILDREN: '子科目合計', TAXDEDUCT: '可扣除貨物稅科目合計' };
-const FX_FUNCTIONS_ = [
-  ['ROUND', '四捨五入', 'ROUND(x) 到整數；ROUND(x, 2) 到小數 2 位'],
-  ['ROUNDUP', '無條件進位', 'ROUNDUP(x, 位數)'], ['ROUNDDOWN', '無條件捨去', 'ROUNDDOWN(x, 位數)'],
-  ['IF', '如果…就…否則', 'IF(條件, 成立時, 不成立時)，例：IF([月銷量] > 100, 1, 2)'],
-  ['MAX', '取大', 'MAX(a, b, …)'], ['MIN', '取小', 'MIN(a, b, …)'], ['SUM', '加總', 'SUM(a, b, …)'], ['ABS', '絕對值', 'ABS(x)']
-];
 
 /* ---------------- 公式文字 ⇄ token ---------------- */
 /** 名稱版公式拆成 token；有引號字串等膠囊表達不了的寫法時回傳 null(只能用文字輸入) */
@@ -210,7 +205,10 @@ function fxProbeList_() {
 }
 /** 試算結果回來：算各探測公式的加權平均、更新畫面上的數字(不重畫，輸入框不會掉焦點) */
 function fxApplyProbes_(preview, probes) {
-  if (preview && preview.probes) {
+  fxProbeScenario_ = currentScenarioId;
+  if (!preview || !preview.probes) {
+    probes.forEach(text => { fxProbeVals[text] = null; });   // 算不出來(沒有情境、試算失敗)：顯示 —，不留舊數字
+  } else {
     probes.forEach((text, idx) => {
       let sum = 0, w = 0, any = false;
       Object.keys(preview.probes).forEach(vid => {
@@ -252,6 +250,7 @@ function fxInitForDraft_() {
   const text = chartDraft ? chartDraft.Formula || '' : '';
   const toks = fxTokenize_(text);
   const terms = fxTermsFromToks_(toks);
+  if (fxProbeScenario_ !== currentScenarioId) { fxProbeScenario_ = currentScenarioId; fxProbeVals = {}; }
   if (fxDraftKey_ !== key) {
     fxDraftKey_ = key;
     fxProbeVals = {};
@@ -297,6 +296,7 @@ function fxCommit_(redraw) {
 
 /* ---------------- 畫面 ---------------- */
 function fxEditorHtml_() {
+  closeFxPicker_();   // 編輯器整個重畫(存檔、換科目…)：舊選單記的行號已經不對，直接關掉
   fxInitForDraft_();
   const segMode = fxMode === 'text' ? 'chips' : fxMode;
   return `<div class="ed-step-title"><span class="step-no">2</span>公式
@@ -328,8 +328,13 @@ function fxRowsHtml_() {
     const src = t.src;
     let srcHtml;
     if (src && src.t === 'num') {
-      srcHtml = `<span class="fx-inline">固定 <input type="number" step="any" class="fx-num" value="${esc(src.v)}" placeholder="金額"
-        oninput="fxSetNum_(${i}, -1, this.value)"> 元 <button type="button" class="link-btn" onclick="fxPickSrc_(${i}, this)">換</button></span>`;
+      // 固定金額，或像「15% × 某科目」這種寫在最前面的百分比(數字框不能放 %，單位另外切換)
+      const pct = /%$/.test(src.v);
+      srcHtml = `<span class="fx-inline">固定 <input type="number" step="any" class="fx-num" value="${esc(String(src.v).replace('%', ''))}" placeholder="${pct ? '百分比' : '金額'}"
+        oninput="fxSetNum_(${i}, -1, this.value)"><span class="seg fx-unit">
+        <button type="button" class="seg-btn${pct ? '' : ' active'}" onclick="fxSetPct_(${i}, -1, false)">元</button>
+        <button type="button" class="seg-btn${pct ? ' active' : ''}" onclick="fxSetPct_(${i}, -1, true)">%</button></span>
+        <button type="button" class="link-btn" onclick="fxPickSrc_(${i}, this)">換</button></span>`;
     } else if (src && src.t === 'ref') {
       const scs = chartEditor.referenceScenarios || [];
       srcHtml = `<span class="fx-inline fx-ref">
@@ -370,13 +375,15 @@ function fxRowsHtml_() {
     ${fxTerms.length ? `<div class="fx-total"><span>${esc(name)}（目前情境加權平均）</span><b id="ce-fx-total">${fxTotalText_()}</b></div>` : ''}`;
 }
 
+/** 固定數字的值：15% → 0.15 */
+function fxNumValue_(v) { const s = String(v || ''); return /%$/.test(s) ? Number(s.replace('%', '')) / 100 : Number(s); }
 /** 一行右邊的小計：有乘除就問後端整行的值，沒有就是來源本身的值(固定金額直接顯示) */
 function fxRowValHtml_(t) {
   const core = fxTermCore_(t);
   if (!core) return '<span class="fx-row-val muted">—</span>';
   const neg = t.sign < 0 ? ' neg' : '';
   const key = t.factors.length ? core : fxProbeText_(t.src);
-  if (!key) return `<span class="fx-row-val${neg}">${fxSigned_(Number(t.src.v) * t.sign)}</span>`;
+  if (!key) return `<span class="fx-row-val${neg}">${fxSigned_(fxNumValue_(t.src.v) * t.sign)}</span>`;
   const v = fxProbeVals[key];
   return `<span class="fx-row-val${neg}" data-probe="${esc(key)}" data-signed="${t.sign}">${v === undefined ? '…' : v === null ? '—' : fxSigned_(v * t.sign)}</span>`;
 }
@@ -446,20 +453,22 @@ function fxDelFactor_(i, k) { fxTerms[i].factors.splice(k, 1); fxCommit_(); }
 function fxSetNum_(i, k, value) {
   const a = k < 0 ? fxTerms[i].src : fxTerms[i].factors[k].a;
   const pct = /%$/.test(a.v);
-  a.v = String(value).trim() + (pct && k >= 0 ? '%' : '');
+  a.v = String(value).trim() + (pct ? '%' : '');
   fxCommit_(false);   // 不重畫：游標留在輸入框，只換掉這一行的小計
   const row = document.querySelectorAll('#ce-fx-body .fx-row')[i];
   const cell = row && row.querySelector('.fx-row-val');
   if (cell) cell.outerHTML = fxRowValHtml_(fxTerms[i]);
 }
 function fxSetPct_(i, k, pct) {
-  const a = fxTerms[i].factors[k].a;
+  const a = k < 0 ? fxTerms[i].src : fxTerms[i].factors[k].a;
   a.v = String(a.v).replace('%', '') + (pct ? '%' : '');
   fxCommit_();
 }
 function fxSetRef_(i, field, value) { fxTerms[i].src[field] = value; fxCommit_(); }
 function fxPickSrc_(i, anchor) {
+  const row = fxTerms[i];
   openFxPicker_(anchor, fxSourceSections_(), item => {
+    if (fxTerms[i] !== row) return;
     if (item.special === 'const') { fxTerms[i].src = { t: 'num', v: '' }; fxCommit_(); fxFocusNum_(i, -1); return; }
     if (item.special === 'ref') {
       const sc = (chartEditor.referenceScenarios || []).find(r => r.ScenarioID !== currentScenarioId) || (chartEditor.referenceScenarios || [])[0];
@@ -470,11 +479,13 @@ function fxPickSrc_(i, anchor) {
     }
     fxTerms[i].src = item.tok;
     fxCommit_();
-  }, () => { if (!fxTerms[i].src) { fxTerms.splice(i, 1); fxRedraw_(); } });
+  }, () => { if (fxTerms[i] === row && !row.src) { fxTerms.splice(i, 1); fxRedraw_(); } });
 }
 function fxPickFactor_(i, k, anchor) {
+  const row = fxTerms[i];
   openFxPicker_(anchor, fxFactorSections_(), item => {
     const t = fxTerms[i];
+    if (t !== row) return;
     const set = a => { if (k < 0) t.factors.push({ op: item.op || '*', a }); else { t.factors[k].a = a; if (item.op) t.factors[k].op = item.op; } };
     if (item.special === 'pct' || item.special === 'mul') {
       set({ t: 'num', v: item.special === 'pct' ? '%' : '' });
@@ -573,11 +584,6 @@ function fxRefModal_() {
     ], okText: '插入'
   }).then(v => v ? { t: 'ref', sc: v.sc, code: v.code, vid: '' } : null);
 }
-/** 函式說明表的「插入」：膠囊模式插 token，文字模式插文字 */
-function fxInsertText_(text) {
-  if (fxMode !== 'chips') { insertFormulaText(text); return; }
-  (fxTokenize_(text) || []).forEach(t => fxInsertTok_(t));
-}
 
 /* ---------------- 選單內容 ---------------- */
 function fxLineTok_(l) { return chartNameUsable_(l) ? { t: 'name', v: l.LineName } : { t: 'code', v: l.LineCode }; }
@@ -603,7 +609,8 @@ function fxParamSections_() {
   ];
 }
 function fxSourceSections_(forChips) {
-  const kids = chartDraft ? chartEditor.lines.filter(l => l.ParentLine === chartDraft.LineCode) : [];
+  // 新增中的科目還沒有代碼，也不會有子科目(否則 ParentLine 空白的頂層科目全部會被當成它的子科目)
+  const kids = chartDraft && chartDraft.LineCode ? chartEditor.lines.filter(l => l.ParentLine === chartDraft.LineCode) : [];
   const kidsSum = kids.reduce((s, l) => s + (chartWeightedValue_(l.LineCode) || 0), 0);
   const special = { g: '特殊', items: [
     { label: '子科目合計', kind: 'special', tok: { t: 'fn0', v: 'CHILDREN' },
@@ -623,7 +630,10 @@ function fxFactorSections_() {
   return fxParamSections_().concat([fixed], fxLineSections_());
 }
 function fxFunctionSections_() {
-  return [{ g: '函式', items: FX_FUNCTIONS_.map(f => ({ label: f[0] + '(　)', hint: f[1] + '：' + f[2], kind: 'fn', fn: f[0], search: f[1] })) }];
+  // 跟文字輸入的「函式與變數說明」同一份清單(30-chart.js 的 FORMULA_FUNCTIONS_UI)；REF 用「另一個情境的科目…」插入
+  const fns = FORMULA_FUNCTIONS_UI.map(f => ({ fn: (/^([A-Z]+)\(/.exec(f[0]) || [])[1], usage: f[0], desc: f[1] }))
+    .filter(f => f.fn && !FX_SPECIAL_FNS_[f.fn] && f.fn !== 'REF');
+  return [{ g: '函式', items: fns.map(f => ({ label: f.fn + '(　)', hint: f.usage + '：' + f.desc, kind: 'fn', fn: f.fn, search: f.desc })) }];
 }
 
 /* ---------------- 選單(可搜尋、方向鍵、Enter) ---------------- */

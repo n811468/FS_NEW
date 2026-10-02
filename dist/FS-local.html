@@ -3904,11 +3904,21 @@ function getChartEditor(vehicleTypeId, scenarioId) {
     preview = chartPreviewValues_(scenarioId, vehicles, null);
   }
   var usage = lineUsageCounts_(vehicleTypeId);
-  // 目前情境的參數值(公式編輯器的選單顯示用；% 參數是小數)
+  var profitCode = profitLineCode_(defs);
+  // 目前情境的參數值(公式編輯器的選單顯示用；% 參數是小數)。
+  // 參數可以每個車系各設一個值：有試算資料時跟每一行的數字一樣用銷售構成加權平均，否則看情境共用的值
   var paramValues = {};
   if (scenarioId) {
     var scenarioParams = calcParameters_(scenarioId);
-    getParamDefs().forEach(function (p) { paramValues[p.ParamName] = paramValueForFormula_(scenarioParams, p, ''); });
+    var weights = {};
+    if (preview) Object.keys(preview.values).forEach(function (vid) { weights[vid] = toNumber_(preview.weights[vid]); });
+    var totalWeight = Object.keys(weights).reduce(function (s, vid) { return s + weights[vid]; }, 0);
+    getParamDefs().forEach(function (p) {
+      if (!totalWeight) { paramValues[p.ParamName] = paramValueForFormula_(scenarioParams, p, ''); return; }
+      paramValues[p.ParamName] = Object.keys(weights).reduce(function (s, vid) {
+        return s + paramValueForFormula_(scenarioParams, p, vid) * weights[vid];
+      }, 0) / totalWeight;
+    });
   }
   return {
     vehicleTypeId: vehicleTypeId || '',
@@ -3923,7 +3933,9 @@ function getChartEditor(vehicleTypeId, scenarioId) {
       return out;
     }),
     vehicles: vehicles,
-    profitCode: profitLineCode_(defs),
+    profitCode: profitCode,
+    // 刪掉目前的營業淨利之後會改用哪個科目(刪除確認視窗說明用)
+    nextProfitCode: profitLineCode_(defs.filter(function (d) { return d.LineCode !== profitCode; })),
     paramValues: paramValues,
     variables: SYSTEM_VARIABLES,
     params: getParamDefs(),
@@ -3994,9 +4006,25 @@ function previewLineFormula(vehicleTypeId, scenarioId, line) {
     ? defs.map(function (d) { return d.LineCode === line.LineCode ? patchLine(d) : d; })
     : defs.concat([patchLine({ LineCode: code, LineName: String(line.LineName || '').trim() || code, ParentLine: '', SortOrder: 9999 })]);
   var problems = chartProblems_(patched, vehicleTypeId).filter(function (p) { return p.code === code && p.level === 'error'; });
-  if (problems.length || !scenarioId) return { problems: problems, preview: null };
+  if (!scenarioId) return { problems: problems, preview: null };
   var vehicles = getVehicles(vehicleTypeId).map(function (v) { return { VehicleID: v.VehicleID, VehicleCode: v.VehicleCode || '' }; });
   var probe = Array.isArray(line.Probes) && line.Probes.length ? { code: code, formulas: line.Probes.slice(0, 80).map(String) } : null;
+  if (problems.length) {
+    // 公式有錯也照樣算每一行/每顆膠囊：這個科目先當成手動輸入，算得出來的行顯示數字，有錯的那一行是 null
+    var out = { problems: problems, preview: null };
+    if (probe) {
+      var safe = patched.map(function (d) {
+        if (d.LineCode !== code) return d;
+        var p = {};
+        Object.keys(d).forEach(function (k) { p[k] = d[k]; });
+        p.CalcType = CALC_TYPES.INPUT; p.Formula = ''; p.VehicleFormulas = '';
+        return p;
+      });
+      var pv = chartPreviewValues_(scenarioId, vehicles, safe, probe);
+      out.probes = { probes: pv.probes, weights: pv.weights };
+    }
+    return out;
+  }
   return { problems: [], preview: chartPreviewValues_(scenarioId, vehicles, patched, probe) };
 }
 
@@ -4746,8 +4774,9 @@ function calculateComparison(selections) {
 
 /**
  * 哪一個科目是「營業淨利」：預設是 K。K 被刪掉時(例如另外新增一個淨利科目、再把原本的刪掉)，
- * 改用損益表最後一行不計入任何小計、也不是售價結構的科目，也就是損益表最底下的總計。
- * 儀表板重點指標、GATE 報告、損益兩平、目標反推的預設指標都看這裡，不寫死 K。
+ * 改用損益表最底下的總計：頂層、不是售價結構、用公式算、而且沒有被其他科目的公式引用的科目，
+ * 有好幾個就取損益表上最後一個。不看位置挑「最後一行」，否則最後一行是手動輸入的費用(例如前瞻費用)
+ * 時會把費用當成淨利。儀表板重點指標、GATE 報告、損益兩平、目標反推的預設指標都看這裡，不寫死 K。
  */
 function profitLineCode_(defs) {
   defs = defs || [];
@@ -4755,7 +4784,27 @@ function profitLineCode_(defs) {
   var top = displayOrderDefs_(defs.slice()).filter(function (d) {
     return !d.ParentLine && String(d.Category || '') !== '售價結構';
   });
-  return top.length ? top[top.length - 1].LineCode : '';
+  if (!top.length) return '';
+  var referenced = {};
+  defs.forEach(function (d) {
+    var formulas = [];
+    if (d.CalcType === CALC_TYPES.FORMULA && d.Formula) formulas.push(d.Formula);
+    var vf = parseVehicleFormulas_(d.VehicleFormulas);
+    Object.keys(vf).forEach(function (k) { if (vf[k]) formulas.push(vf[k]); });
+    formulas.forEach(function (f) {
+      var info = inspectFormula_(f);
+      if (!info.ok) return;
+      info.refs.codes.forEach(function (c) { if (c !== d.LineCode) referenced[c] = true; });
+      info.refs.names.forEach(function (n) {
+        defs.forEach(function (x) { if (x.LineName === n && x.LineCode !== d.LineCode) referenced[x.LineCode] = true; });
+      });
+    });
+  });
+  var isFormula = function (d) { return d.CalcType === CALC_TYPES.FORMULA; };
+  var pick = top.filter(function (d) { return isFormula(d) && !referenced[d.LineCode]; });
+  if (!pick.length) pick = top.filter(isFormula);
+  if (!pick.length) pick = top;
+  return pick[pick.length - 1].LineCode;
 }
 
 /** 科目的縮排層級(父科目鏈長度) */
@@ -5286,7 +5335,11 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
   if (base) types.push(base.meta.VehicleTypeID);
   if (prev) types.push(prev.meta.VehicleTypeID);
   var defs = unionLineDefs_(types.map(function (t) { return getPLLineItems(t); }));
-  var profitCode = profitLineCode_(getPLLineItems(target.meta.VehicleTypeID));
+  // 每個情境看自己車型的營業淨利科目(現況/前回可能是別的車型，K 還在或已經換成別的科目)
+  [target, base, prev].forEach(function (b) { if (b) b.profitCode = profitLineCode_(getPLLineItems(b.meta.VehicleTypeID)); });
+  var profitCode = target.profitCode;
+  var profitCodes = {};
+  [target, base, prev].forEach(function (b) { if (b) profitCodes[b.profitCode] = true; });
   var depth = lineDepths_(defs);
   var used = function (code) {
     return [target, base, prev].some(function (b) { return b && b.weighted[code] !== undefined; });
@@ -5301,8 +5354,8 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
         LineCode: d.LineCode, LineName: d.LineName, ParentLine: d.ParentLine || '', Category: d.Category || '',
         CalcType: d.CalcType, Formula: d.CalcType === CALC_TYPES.FORMULA ? d.Formula : '',
         Depth: depth[d.LineCode] || 0,
-        isSubtotal: PROTECTED_LINE_CODES.indexOf(d.LineCode) !== -1 || d.LineCode === profitCode || isGroupLine_(d, defs),
-        isProfit: d.LineCode === profitCode,
+        isSubtotal: PROTECTED_LINE_CODES.indexOf(d.LineCode) !== -1 || !!profitCodes[d.LineCode] || isGroupLine_(d, defs),
+        isProfit: !!profitCodes[d.LineCode],
         isPriceStructure: d.Category === '售價結構'
       };
     }),
@@ -8790,8 +8843,9 @@ const FORMULA_FUNCTIONS_UI = [
   ['CHILDREN()', '這個科目底下所有子科目的合計（小計用）'],
   ['TAXDEDUCT()', '勾選「貨物稅完稅價格可扣除」的科目合計'],
   ['ROUND(x)', '四捨五入到整數；ROUND(x, 2) 到小數 2 位'],
-  ['SUM(a, b, …)', '加總'], ['MAX(a, b)', '取大'], ['MIN(a, b)', '取小'], ['ABS(x)', '絕對值'],
-  ['IF(條件, 成立, 不成立)', '例：IF([月銷量] > 100, 1, 2)'],
+  ['ROUNDUP(x, 位數)', '無條件進位'], ['ROUNDDOWN(x, 位數)', '無條件捨去'],
+  ['IF(條件, 成立, 不成立)', '如果…就…否則，例：IF([月銷量] > 100, 1, 2)'],
+  ['MAX(a, b)', '取大'], ['MIN(a, b)', '取小'], ['SUM(a, b, …)', '加總'], ['ABS(x)', '絕對值'],
   ['REF("情境", "科目代碼")', '引用另一個情境（可以是別的車型）的科目金額']
 ];
 
@@ -9353,8 +9407,8 @@ function schedulePreview_(immediate) {
     if (chartDraft.CalcType === 'FORMULA' && !String(chartDraft.Formula || '').trim()) { chartPreview = null; renderChartPreview_(); return; }   // 還沒寫公式不算錯
     const probes = fxProbeList_();
     google.script.run
-      .withSuccessHandler(res => { chartPreview = res; renderChartPreview_(); fxApplyProbes_(res && res.preview, probes); })
-      .withFailureHandler(err => { chartPreview = { problems: [{ message: err.message }] }; renderChartPreview_(); })
+      .withSuccessHandler(res => { chartPreview = res; renderChartPreview_(); fxApplyProbes_(res && (res.preview || res.probes), probes); })
+      .withFailureHandler(err => { chartPreview = { problems: [{ message: err.message }] }; renderChartPreview_(); fxApplyProbes_(null, probes); })
       .previewLineFormula(currentVehicleTypeId, currentScenarioId, Object.assign(chartDraftPayload_(), { Probes: probes }));
   }, immediate ? 0 : 350);
 }
@@ -9439,10 +9493,9 @@ function deleteChartLine() {
   const d = chartDraft;
   let profitNote = '';
   if (d.LineCode === profitCodeOf_(chartEditor)) {
-    // 刪掉營業淨利：儀表板重點指標、GATE 報告、目標反推會改看損益表最後一行總計(同後端 profitLineCode_)
-    const rest = chartEditor.lines.filter(l => l.LineCode !== d.LineCode && !l.ParentLine && l.Category !== '售價結構');
-    const next = rest[rest.length - 1];
-    profitNote = `<div class="callout warn" style="margin-top:10px;"><div>這是目前的營業淨利。刪除後，儀表板重點指標、GATE 報告、目標反推會改用損益表最後一行${next ? `<b>「${esc(next.LineName)}」</b>` : '（目前沒有其他總計科目）'}當營業淨利。只是想換名稱或公式的話，直接改這個科目就好，不必刪除。</div></div>`;
+    // 刪掉營業淨利：儀表板重點指標、GATE 報告、目標反推會改看損益表最底下的總計(後端 profitLineCode_ 決定)
+    const next = chartEditor.nextProfitCode ? chartLineByCode_(chartEditor.nextProfitCode) : null;
+    profitNote = `<div class="callout warn" style="margin-top:10px;"><div>這是目前的營業淨利。刪除後，儀表板重點指標、GATE 報告、目標反推會改用損益表最底下的總計${next ? `<b>「${esc(next.LineName)}」</b>` : '（目前沒有其他總計科目）'}當營業淨利。只是想換名稱或公式的話，直接改這個科目就好，不必刪除。</div></div>`;
   }
   confirmModal('刪除科目「' + d.LineName + '」？',
     `只影響車型 <b>${esc(currentVehicleTypeId)}</b>。${d.usage ? `這個科目在 ${esc(currentVehicleTypeId)} 的情境裡有 <b>${d.usage}</b> 筆輸入金額，會一起清掉。` : ''}被其他公式引用、或底下還有子科目時會被擋下來。${profitNote}`,
@@ -9519,15 +9572,10 @@ let fxCaret = 0;            // 膠囊游標位置(第幾顆之前)
 let fxSelTok = -1;          // 選取中的膠囊
 let fxProbeVals = {};       // 公式片段 → 目前情境的加權平均值
 let fxDraftKey_ = null;     // 目前的編輯狀態屬於哪一個科目(換科目才重新判斷模式)
+let fxProbeScenario_ = null; // fxProbeVals 是哪一個情境算的(換情境就清掉，不顯示上一個情境的數字)
 let fxPicker_ = null;       // 選單狀態
 
 const FX_SPECIAL_FNS_ = { CHILDREN: '子科目合計', TAXDEDUCT: '可扣除貨物稅科目合計' };
-const FX_FUNCTIONS_ = [
-  ['ROUND', '四捨五入', 'ROUND(x) 到整數；ROUND(x, 2) 到小數 2 位'],
-  ['ROUNDUP', '無條件進位', 'ROUNDUP(x, 位數)'], ['ROUNDDOWN', '無條件捨去', 'ROUNDDOWN(x, 位數)'],
-  ['IF', '如果…就…否則', 'IF(條件, 成立時, 不成立時)，例：IF([月銷量] > 100, 1, 2)'],
-  ['MAX', '取大', 'MAX(a, b, …)'], ['MIN', '取小', 'MIN(a, b, …)'], ['SUM', '加總', 'SUM(a, b, …)'], ['ABS', '絕對值', 'ABS(x)']
-];
 
 /* ---------------- 公式文字 ⇄ token ---------------- */
 /** 名稱版公式拆成 token；有引號字串等膠囊表達不了的寫法時回傳 null(只能用文字輸入) */
@@ -9713,7 +9761,10 @@ function fxProbeList_() {
 }
 /** 試算結果回來：算各探測公式的加權平均、更新畫面上的數字(不重畫，輸入框不會掉焦點) */
 function fxApplyProbes_(preview, probes) {
-  if (preview && preview.probes) {
+  fxProbeScenario_ = currentScenarioId;
+  if (!preview || !preview.probes) {
+    probes.forEach(text => { fxProbeVals[text] = null; });   // 算不出來(沒有情境、試算失敗)：顯示 —，不留舊數字
+  } else {
     probes.forEach((text, idx) => {
       let sum = 0, w = 0, any = false;
       Object.keys(preview.probes).forEach(vid => {
@@ -9755,6 +9806,7 @@ function fxInitForDraft_() {
   const text = chartDraft ? chartDraft.Formula || '' : '';
   const toks = fxTokenize_(text);
   const terms = fxTermsFromToks_(toks);
+  if (fxProbeScenario_ !== currentScenarioId) { fxProbeScenario_ = currentScenarioId; fxProbeVals = {}; }
   if (fxDraftKey_ !== key) {
     fxDraftKey_ = key;
     fxProbeVals = {};
@@ -9800,6 +9852,7 @@ function fxCommit_(redraw) {
 
 /* ---------------- 畫面 ---------------- */
 function fxEditorHtml_() {
+  closeFxPicker_();   // 編輯器整個重畫(存檔、換科目…)：舊選單記的行號已經不對，直接關掉
   fxInitForDraft_();
   const segMode = fxMode === 'text' ? 'chips' : fxMode;
   return `<div class="ed-step-title"><span class="step-no">2</span>公式
@@ -9831,8 +9884,13 @@ function fxRowsHtml_() {
     const src = t.src;
     let srcHtml;
     if (src && src.t === 'num') {
-      srcHtml = `<span class="fx-inline">固定 <input type="number" step="any" class="fx-num" value="${esc(src.v)}" placeholder="金額"
-        oninput="fxSetNum_(${i}, -1, this.value)"> 元 <button type="button" class="link-btn" onclick="fxPickSrc_(${i}, this)">換</button></span>`;
+      // 固定金額，或像「15% × 某科目」這種寫在最前面的百分比(數字框不能放 %，單位另外切換)
+      const pct = /%$/.test(src.v);
+      srcHtml = `<span class="fx-inline">固定 <input type="number" step="any" class="fx-num" value="${esc(String(src.v).replace('%', ''))}" placeholder="${pct ? '百分比' : '金額'}"
+        oninput="fxSetNum_(${i}, -1, this.value)"><span class="seg fx-unit">
+        <button type="button" class="seg-btn${pct ? '' : ' active'}" onclick="fxSetPct_(${i}, -1, false)">元</button>
+        <button type="button" class="seg-btn${pct ? ' active' : ''}" onclick="fxSetPct_(${i}, -1, true)">%</button></span>
+        <button type="button" class="link-btn" onclick="fxPickSrc_(${i}, this)">換</button></span>`;
     } else if (src && src.t === 'ref') {
       const scs = chartEditor.referenceScenarios || [];
       srcHtml = `<span class="fx-inline fx-ref">
@@ -9873,13 +9931,15 @@ function fxRowsHtml_() {
     ${fxTerms.length ? `<div class="fx-total"><span>${esc(name)}（目前情境加權平均）</span><b id="ce-fx-total">${fxTotalText_()}</b></div>` : ''}`;
 }
 
+/** 固定數字的值：15% → 0.15 */
+function fxNumValue_(v) { const s = String(v || ''); return /%$/.test(s) ? Number(s.replace('%', '')) / 100 : Number(s); }
 /** 一行右邊的小計：有乘除就問後端整行的值，沒有就是來源本身的值(固定金額直接顯示) */
 function fxRowValHtml_(t) {
   const core = fxTermCore_(t);
   if (!core) return '<span class="fx-row-val muted">—</span>';
   const neg = t.sign < 0 ? ' neg' : '';
   const key = t.factors.length ? core : fxProbeText_(t.src);
-  if (!key) return `<span class="fx-row-val${neg}">${fxSigned_(Number(t.src.v) * t.sign)}</span>`;
+  if (!key) return `<span class="fx-row-val${neg}">${fxSigned_(fxNumValue_(t.src.v) * t.sign)}</span>`;
   const v = fxProbeVals[key];
   return `<span class="fx-row-val${neg}" data-probe="${esc(key)}" data-signed="${t.sign}">${v === undefined ? '…' : v === null ? '—' : fxSigned_(v * t.sign)}</span>`;
 }
@@ -9949,20 +10009,22 @@ function fxDelFactor_(i, k) { fxTerms[i].factors.splice(k, 1); fxCommit_(); }
 function fxSetNum_(i, k, value) {
   const a = k < 0 ? fxTerms[i].src : fxTerms[i].factors[k].a;
   const pct = /%$/.test(a.v);
-  a.v = String(value).trim() + (pct && k >= 0 ? '%' : '');
+  a.v = String(value).trim() + (pct ? '%' : '');
   fxCommit_(false);   // 不重畫：游標留在輸入框，只換掉這一行的小計
   const row = document.querySelectorAll('#ce-fx-body .fx-row')[i];
   const cell = row && row.querySelector('.fx-row-val');
   if (cell) cell.outerHTML = fxRowValHtml_(fxTerms[i]);
 }
 function fxSetPct_(i, k, pct) {
-  const a = fxTerms[i].factors[k].a;
+  const a = k < 0 ? fxTerms[i].src : fxTerms[i].factors[k].a;
   a.v = String(a.v).replace('%', '') + (pct ? '%' : '');
   fxCommit_();
 }
 function fxSetRef_(i, field, value) { fxTerms[i].src[field] = value; fxCommit_(); }
 function fxPickSrc_(i, anchor) {
+  const row = fxTerms[i];
   openFxPicker_(anchor, fxSourceSections_(), item => {
+    if (fxTerms[i] !== row) return;
     if (item.special === 'const') { fxTerms[i].src = { t: 'num', v: '' }; fxCommit_(); fxFocusNum_(i, -1); return; }
     if (item.special === 'ref') {
       const sc = (chartEditor.referenceScenarios || []).find(r => r.ScenarioID !== currentScenarioId) || (chartEditor.referenceScenarios || [])[0];
@@ -9973,11 +10035,13 @@ function fxPickSrc_(i, anchor) {
     }
     fxTerms[i].src = item.tok;
     fxCommit_();
-  }, () => { if (!fxTerms[i].src) { fxTerms.splice(i, 1); fxRedraw_(); } });
+  }, () => { if (fxTerms[i] === row && !row.src) { fxTerms.splice(i, 1); fxRedraw_(); } });
 }
 function fxPickFactor_(i, k, anchor) {
+  const row = fxTerms[i];
   openFxPicker_(anchor, fxFactorSections_(), item => {
     const t = fxTerms[i];
+    if (t !== row) return;
     const set = a => { if (k < 0) t.factors.push({ op: item.op || '*', a }); else { t.factors[k].a = a; if (item.op) t.factors[k].op = item.op; } };
     if (item.special === 'pct' || item.special === 'mul') {
       set({ t: 'num', v: item.special === 'pct' ? '%' : '' });
@@ -10076,11 +10140,6 @@ function fxRefModal_() {
     ], okText: '插入'
   }).then(v => v ? { t: 'ref', sc: v.sc, code: v.code, vid: '' } : null);
 }
-/** 函式說明表的「插入」：膠囊模式插 token，文字模式插文字 */
-function fxInsertText_(text) {
-  if (fxMode !== 'chips') { insertFormulaText(text); return; }
-  (fxTokenize_(text) || []).forEach(t => fxInsertTok_(t));
-}
 
 /* ---------------- 選單內容 ---------------- */
 function fxLineTok_(l) { return chartNameUsable_(l) ? { t: 'name', v: l.LineName } : { t: 'code', v: l.LineCode }; }
@@ -10106,7 +10165,8 @@ function fxParamSections_() {
   ];
 }
 function fxSourceSections_(forChips) {
-  const kids = chartDraft ? chartEditor.lines.filter(l => l.ParentLine === chartDraft.LineCode) : [];
+  // 新增中的科目還沒有代碼，也不會有子科目(否則 ParentLine 空白的頂層科目全部會被當成它的子科目)
+  const kids = chartDraft && chartDraft.LineCode ? chartEditor.lines.filter(l => l.ParentLine === chartDraft.LineCode) : [];
   const kidsSum = kids.reduce((s, l) => s + (chartWeightedValue_(l.LineCode) || 0), 0);
   const special = { g: '特殊', items: [
     { label: '子科目合計', kind: 'special', tok: { t: 'fn0', v: 'CHILDREN' },
@@ -10126,7 +10186,10 @@ function fxFactorSections_() {
   return fxParamSections_().concat([fixed], fxLineSections_());
 }
 function fxFunctionSections_() {
-  return [{ g: '函式', items: FX_FUNCTIONS_.map(f => ({ label: f[0] + '(　)', hint: f[1] + '：' + f[2], kind: 'fn', fn: f[0], search: f[1] })) }];
+  // 跟文字輸入的「函式與變數說明」同一份清單(30-chart.js 的 FORMULA_FUNCTIONS_UI)；REF 用「另一個情境的科目…」插入
+  const fns = FORMULA_FUNCTIONS_UI.map(f => ({ fn: (/^([A-Z]+)\(/.exec(f[0]) || [])[1], usage: f[0], desc: f[1] }))
+    .filter(f => f.fn && !FX_SPECIAL_FNS_[f.fn] && f.fn !== 'REF');
+  return [{ g: '函式', items: fns.map(f => ({ label: f.fn + '(　)', hint: f.usage + '：' + f.desc, kind: 'fn', fn: f.fn, search: f.desc })) }];
 }
 
 /* ---------------- 選單(可搜尋、方向鍵、Enter) ---------------- */
@@ -10326,8 +10389,10 @@ function rAmt_(v) { return v === undefined || v === null ? '' : fmt(Number(v) / 
 function rSigned_(v) { return v === undefined || v === null ? '' : signed_(Number(v) / reportUnit, reportUnit === 1000 ? 1 : 0); }
 function rUnit_() { return reportUnit === 1000 ? '千元/台' : '元/台'; }
 function rPct_(v, base) { return base ? (Number(v) / base * 100).toFixed(1) + '%' : ''; }
-/** 營業淨利科目(預設 K；K 被刪掉時後端指定損益表最後一行總計) */
+/** 目標情境的營業淨利科目(預設 K；K 被刪掉時後端指定損益表最底下的總計) */
 function rK_() { return profitCodeOf_(reportData); }
+/** 某個情境(目標/現況/前回)的營業淨利：各看自己車型的淨利科目，不同車型可能不是同一個代碼 */
+function rProfit_(block) { return block ? (block.weighted[block.profitCode || rK_()] || 0) : 0; }
 function reportLineName_(code) { const l = reportData.lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : code; }
 function reportCodeNameMap_() { const m = {}; reportData.lines.forEach(l => { m[l.LineCode] = shortLineName(l.LineName); }); return m; }
 function noteFor_(block, code) {
@@ -10405,7 +10470,7 @@ function drawReport_() {
 
 function reportSummaryHtml_() {
   const R = reportData, T = R.target, B = R.base;
-  const tK = T.weighted[rK_()] || 0, bK = B ? (B.weighted[rK_()] || 0) : null;
+  const tK = rProfit_(T), bK = B ? rProfit_(B) : null;
   const tRev = T.weighted.P8 || T.weighted.A || 0, bRev = B ? (B.weighted.P8 || B.weighted.A || 0) : 0;
   const tVol = T.volume.monthlyVolume || 0;
   const gap = B ? tK - bK : null;
@@ -10433,11 +10498,12 @@ function reportSummaryHtml_() {
     <div class="grid-scroll"><table class="rpt-table">
       <thead><tr><th style="text-align:left;">重點科目（加權平均）</th>${B ? '<th>現況</th><th>%</th>' : ''}<th>目標</th><th>%</th>${B ? '<th>差距</th>' : ''}<th style="text-align:left;">說明</th></tr></thead>
       <tbody>${keyCodes.map(c => {
-        const line = R.lines.find(l => l.LineCode === c) || { LineCode: c };
-        const d = B ? (T.weighted[c] || 0) - (B.weighted[c] || 0) : 0;
+        // 營業淨利這一行：現況看自己車型的淨利科目(可能跟目標的代碼不同)
+        const bv = B ? (c === rK_() ? bK : B.weighted[c]) : undefined;
+        const d = B ? (T.weighted[c] || 0) - (bv || 0) : 0;
         const good = (c === 'B' ? -d : d) > 0.5, bad = (c === 'B' ? -d : d) < -0.5;
         return `<tr class="${c === rK_() ? 'key' : 'subtotal'}"><td class="name">${esc(reportLineName_(c))}</td>
-          ${B ? `<td>${rAmt_(B.weighted[c])}</td><td class="pct">${rPct_(B.weighted[c], bRev)}</td>` : ''}
+          ${B ? `<td>${rAmt_(bv)}</td><td class="pct">${rPct_(bv, bRev)}</td>` : ''}
           <td>${rAmt_(T.weighted[c])}</td><td class="pct">${rPct_(T.weighted[c], tRev)}</td>
           ${B ? `<td class="${good ? 'gap-good' : bad ? 'gap-bad' : ''}">${rSigned_(d)}</td>` : ''}
           ${noteCellHtml_(T, c)}</tr>`;
@@ -10456,7 +10522,7 @@ function reportBridgeHtml_() {
     const d = ((T.weighted[l.LineCode] || 0) - (B.weighted[l.LineCode] || 0)) * sign;
     return Math.abs(d) >= 0.5 ? { code: l.LineCode, label: shortLineName(l.LineName), value: d } : null;
   }).filter(x => x).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
-  const start = B.weighted[rK_()] || 0, end = T.weighted[rK_()] || 0;
+  const start = rProfit_(B), end = rProfit_(T);
   const top = contribs.slice(0, 10);
   const rest = contribs.slice(10).reduce((s, c) => s + c.value, 0);
   const explained = top.reduce((s, c) => s + c.value, 0) + rest;
@@ -10569,7 +10635,7 @@ function reportActionsHtml_() {
 }
 function reportActionsTableHtml_() {
   const R = reportData, T = R.target, B = R.base;
-  const gap = B ? (T.weighted[rK_()] || 0) - (B.weighted[rK_()] || 0) : null;
+  const gap = B ? rProfit_(T) - rProfit_(B) : null;
   const vol = T.volume.monthlyVolume || 0;
   const lineOpts = R.lines.filter(l => !l.isPriceStructure && !l.isSubtotal);
   const total = reportActions.reduce((s, a) => s + num(a.Effect), 0);
@@ -10603,7 +10669,7 @@ function reportActionsTableHtml_() {
 function reportActionWfSteps_() {
   const R = reportData, T = R.target, B = R.base;
   if (!B) return [];
-  const start = B.weighted[rK_()] || 0, end = T.weighted[rK_()] || 0;
+  const start = rProfit_(B), end = rProfit_(T);
   let acts = reportActions.filter(a => String(a.Title || '').trim() && num(a.Effect))
     .map(a => ({ label: a.Title, value: num(a.Effect), kind: 'delta', tip: `${a.Title}\n${[a.LineCode ? reportLineName_(a.LineCode) : '', a.Owner, a.Status].filter(x => x).join('｜')}\n${signed_(num(a.Effect))} 元/台` }));
   if (acts.length > 10) {
@@ -10612,7 +10678,7 @@ function reportActionWfSteps_() {
     acts = acts.filter(a => drop.indexOf(a) === -1);
     acts.push({ label: `其他 ${drop.length} 項作法`, value: drop.reduce((s, a) => s + a.value, 0), kind: 'delta' });
   }
-  const steps = [{ label: `現況 ${reportLineName_(rK_())}`, value: start, kind: 'total' }].concat(acts);
+  const steps = [{ label: `現況 ${reportLineName_(B.profitCode || rK_())}`, value: start, kind: 'total' }].concat(acts);
   const remain = (end - start) - acts.reduce((s, a) => s + a.value, 0);
   if (Math.abs(remain) >= 0.5) steps.push({ label: remain > 0 ? '其他改善（沒有寫成作法）' : '作法高估或其他惡化', value: remain, kind: 'delta', remain: true });
   steps.push({ label: `目標 ${reportLineName_(rK_())}`, value: end, kind: 'total' });
@@ -10647,7 +10713,7 @@ function updateReportActionTotals_() {
   const t = document.getElementById('rpt-act-total'); if (t) t.textContent = fmt(total);
   const tm = document.getElementById('rpt-act-total-m'); if (tm) tm.textContent = fmt(total * vol / 10000, 1);
   if (R.base) {
-    const gap = (R.target.weighted[rK_()] || 0) - (R.base.weighted[rK_()] || 0);
+    const gap = rProfit_(R.target) - rProfit_(R.base);
     const r = document.getElementById('rpt-act-remain');
     if (r) { r.textContent = fmt(gap - total); r.className = gap - total > 0.5 ? 'negative' : 'good'; }
   }
@@ -10689,10 +10755,10 @@ function reportPrevHtml_() {
         const d = (tv || 0) - (pv || 0);
         const sign = l.isSubtotal ? (l.LineCode === 'B' ? -1 : 1) : profitSign_(l);
         const cls = !sign || Math.abs(d) < 0.5 ? '' : d * sign > 0 ? 'gap-good' : 'gap-bad';
-        return `<tr class="${l.LineCode === rK_() ? 'key' : l.isSubtotal ? 'subtotal' : ''}"><td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
+        return `<tr class="${l.isProfit ? 'key' : l.isSubtotal ? 'subtotal' : ''}"><td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
           <td>${rAmt_(pv)}</td><td>${rAmt_(tv)}</td><td class="${cls}">${Math.abs(d) < 0.5 ? '' : rSigned_(d)}</td>${noteCellHtml_(T, l.LineCode)}</tr>`;
       }).join('')}
-      <tr class="key"><td class="name">營業淨利(每月)</td><td>${fmt((P.weighted[rK_()] || 0) * vol(P) / 10000, 0)} 萬</td><td>${fmt((T.weighted[rK_()] || 0) * vol(T) / 10000, 0)} 萬</td><td>${signed_(((T.weighted[rK_()] || 0) * vol(T) - (P.weighted[rK_()] || 0) * vol(P)) / 10000, 0)} 萬</td><td class="note"></td></tr>
+      <tr class="key"><td class="name">營業淨利(每月)</td><td>${fmt(rProfit_(P) * vol(P) / 10000, 0)} 萬</td><td>${fmt(rProfit_(T) * vol(T) / 10000, 0)} 萬</td><td>${signed_((rProfit_(T) * vol(T) - rProfit_(P) * vol(P)) / 10000, 0)} 萬</td><td class="note"></td></tr>
     </tbody></table></div>`;
 }
 
@@ -11385,12 +11451,19 @@ function wfTrim_(deltas) {
 function wfBridgeSteps_(cmp) {
   const [cf, ct] = cmp.columns;
   const lines = cmp.lines;
-  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : profitCodeOf_(cmp.columns[0]);
-  const endLine = lines.find(l => l.LineCode === end) || { LineName: end };
+  const chosen = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : '';
+  // 畫到營業淨利時，兩欄各看自己車型的淨利科目(不同車型可能一個還是 K、一個已經換成別的科目)
+  const pf = profitCodeOf_(cf), pt = profitCodeOf_(ct);
+  const toProfit = !chosen || chosen === pf || chosen === pt;
+  const endFrom = toProfit ? pf : chosen, endTo = toProfit ? pt : chosen;
+  const rootOrder = wfStructure_(lines).roots.map(r => r.LineCode);
+  const end = rootOrder.indexOf(endTo) >= rootOrder.indexOf(endFrom) ? endTo : endFrom;   // 扣除項列到比較後面的那一個
+  const lineOf = code => lines.find(l => l.LineCode === code) || { LineName: code };
+  const endLine = lineOf(end);
   const items = wfItems_(lines, end, wfPrefs.level).filter(it => !it.isResult);
   const ff = wfFactor_(cf, wfPrefs.basis), ft = wfFactor_(ct, wfPrefs.basis);
   const splitVolume = wfPrefs.basis !== 'unit' && wfPrefs.volumeEffect;
-  const mFrom = (Number(cf.amounts[end]) || 0), mTo = (Number(ct.amounts[end]) || 0);
+  const mFrom = (Number(cf.amounts[endFrom]) || 0), mTo = (Number(ct.amounts[endTo]) || 0);
   const start = mFrom * ff, finish = mTo * ft;
   const deltas = [];
   if (splitVolume && Math.abs(ft - ff) > 1e-9) {
@@ -11405,10 +11478,9 @@ function wfBridgeSteps_(cmp) {
   });
   const residual = (finish - start) - deltas.reduce((s, d) => s + d.value, 0);
   if (Math.abs(residual) >= 0.5) deltas.push({ label: '其他（公式交互/尾差）', value: residual, kind: 'delta', pinned: true, tip: '不能直接歸到單一科目的差異（例如自訂公式的交互作用、四捨五入）' });
-  const name = shortLineName(endLine.LineName);
-  return [{ label: `${wfColName_(cf, ct)} ${name}`, value: start, kind: 'total' }]
+  return [{ label: `${wfColName_(cf, ct)} ${shortLineName(lineOf(endFrom).LineName)}`, value: start, kind: 'total' }]
     .concat(wfTrim_(deltas))
-    .concat([{ label: `${wfColName_(ct, cf)} ${name}`, value: finish, kind: 'total' }]);
+    .concat([{ label: `${wfColName_(ct, cf)} ${shortLineName(lineOf(endTo).LineName)}`, value: finish, kind: 'total' }]);
 }
 
 function wfStructureSteps_(cmp) {

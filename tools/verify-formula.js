@@ -419,6 +419,47 @@ check('另建營業淨利再刪掉 K：儀表板、GATE 報告、目標反推、
   near(gs.getSnapshots('DQ')[0].K, before.amounts.K, '快照清單的營業淨利');
 });
 
+check('刪掉 K 沒有另建淨利科目：營業淨利改看最後一個總計(I)，不會把手動輸入的前瞻費用(J)當成淨利', () => {
+  const noK = gs.PL_LINE_ITEMS.filter(d => d.LineCode !== 'K');
+  assert(gs.profitLineCode_(noK) === 'I', '應該是 I：' + gs.profitLineCode_(noK));
+  // 新的淨利科目沒有放在最後一行也找得到(它沒有被其他公式引用)
+  const yBeforeJ = noK.concat([{ LineCode: 'Y', LineName: '淨利Y', ParentLine: '', Category: '自訂', SortOrder: 70.5, CalcType: 'FORMULA', Formula: 'I - J' }]);
+  assert(gs.profitLineCode_(yBeforeJ) === 'Y', '應該是 Y：' + gs.profitLineCode_(yBeforeJ));
+  // 用名稱引用也算被引用
+  const byName = noK.concat([{ LineCode: 'Y', LineName: '淨利Y', ParentLine: '', Category: '自訂', SortOrder: 90, CalcType: 'FORMULA', Formula: '[營業淨利(未扣前瞻)] - J' }]);
+  assert(gs.profitLineCode_(byName) === 'Y', '名稱引用：' + gs.profitLineCode_(byName));
+  reset();
+  assert(gs.getChartEditor('DA', sid).nextProfitCode === 'I', '刪除 K 的確認視窗要說改用 I');
+});
+
+check('GATE 報告：現況是另一個還有 K 的車型時，各自看自己的營業淨利', () => {
+  reset();
+  const dq = gs.getScenarios('DQ').find(s => s.ScenarioName === '淨利替換');
+  const y = gs.profitLineCode_(gs.getPLLineItems('DQ'));
+  assert(y && y !== 'K', 'DQ 的淨利科目不是 K：' + y);
+  const rpt = gs.getGateReport(sid, dq.ScenarioID, sid);
+  assert(rpt.target.profitCode === y && rpt.base.profitCode === 'K' && rpt.prev.profitCode === 'K', '各情境的淨利科目：' + [rpt.target.profitCode, rpt.base.profitCode, rpt.prev.profitCode]);
+  assert(rpt.base.weighted.K !== undefined && rpt.base.weighted[y] === undefined, '現況(DA)只有 K');
+  ['K', y].forEach(c => assert(rpt.lines.find(l => l.LineCode === c).isProfit, c + ' 要標成營業淨利'));
+});
+
+check('公式編輯器：公式有錯時其他行照樣試算、參數值依車系加權平均', () => {
+  reset();
+  const res = gs.previewLineFormula('DA', sid, { LineCode: '', LineName: '測試', CalcType: 'FORMULA', Formula: 'P8 + [不存在的名稱]', Probes: ['P8', '[不存在的名稱]'] });
+  assert(res.problems.length && !res.preview, '公式錯誤要回報');
+  assert(res.probes && res.probes.probes, '還是要回傳各行的值');
+  const vids = Object.keys(res.probes.probes);
+  assert(vids.length, '有車系的值');
+  vids.forEach(v => {
+    near(res.probes.probes[v][0], amt(sid, v, 'P8'), v + ' 的 P8');
+    assert(res.probes.probes[v][1] === null, v + ' 有錯的那一行是 null');
+  });
+  const mix = gs.getSalesMix(sid);
+  const w = mix.reduce((s, r) => s + Number(r.SalesMixPct), 0);
+  const expect = mix.reduce((s, r) => s + (r.VehicleID === 'V2' ? 0.10 : 0.13) * Number(r.SalesMixPct), 0) / w;
+  near(gs.getChartEditor('DA', sid).paramValues['關稅率'], expect, '關稅率(V2 另外設 10%)', 1e-9);
+});
+
 check('預設公式下 Gate F 數字不變(回歸)', () => {
   reset();
   const all = gs.calculatePLAllVehicles(sid);
