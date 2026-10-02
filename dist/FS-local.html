@@ -9229,9 +9229,12 @@ function drawFormulaAc_() {
   box.hidden = false;
   scrollListTo_(box, box.querySelector('.ac-item.active'));
 }
-/** 離開公式框稍後再關清單(讓滑鼠點清單來得及)；到時候游標又回到框裡就不關 —— 不然很快點回來打 [ 時，剛開的清單會被這個舊的計時器關掉 */
+/**
+ * 離開公式框稍後再關清單(讓滑鼠點清單來得及)。到時候游標又回到框裡、或這個框已經被重畫掉(存檔後編輯器重畫，
+ * 移除舊框也會觸發 blur)就不關 —— 不然新框裡剛打開的清單會被舊的計時器關掉，按 Enter 變成換行。
+ */
 function onFormulaBlur_(ta) {
-  setTimeout(() => { if (document.activeElement !== ta) closeFormulaAc_(); }, 150);
+  setTimeout(() => { if (ta.isConnected && document.activeElement !== ta) closeFormulaAc_(); }, 150);
 }
 function closeFormulaAc_() {
   chartAc_ = null;
