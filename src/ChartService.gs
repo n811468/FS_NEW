@@ -725,13 +725,14 @@ function chartProblems_(defs, vehicleTypeId) {
   });
 
   // 沒有被算進營業淨利的科目
-  if (byCode.K) {
+  var profitCode = profitLineCode_(defs);
+  if (profitCode) {
     var reach = {};
     (function mark(code) {
       if (reach[code]) return;
       reach[code] = true;
       (deps[code] || []).forEach(mark);
-    })('K');
+    })(profitCode);
     defs.forEach(function (d) {
       if (reach[d.LineCode] || d.Category === '售價結構') return;
       if (d.ParentLine && !reach[d.ParentLine]) return;   // 父科目已經會被提醒，不重複
@@ -757,6 +758,22 @@ function getChartEditor(vehicleTypeId, scenarioId) {
     preview = chartPreviewValues_(scenarioId, vehicles, null);
   }
   var usage = lineUsageCounts_(vehicleTypeId);
+  var profitCode = profitLineCode_(defs);
+  // 目前情境的參數值(公式編輯器的選單顯示用；% 參數是小數)。
+  // 參數可以每個車系各設一個值：有試算資料時跟每一行的數字一樣用銷售構成加權平均，否則看情境共用的值
+  var paramValues = {};
+  if (scenarioId) {
+    var scenarioParams = calcParameters_(scenarioId);
+    var weights = {};
+    if (preview) Object.keys(preview.values).forEach(function (vid) { weights[vid] = toNumber_(preview.weights[vid]); });
+    var totalWeight = Object.keys(weights).reduce(function (s, vid) { return s + weights[vid]; }, 0);
+    getParamDefs().forEach(function (p) {
+      if (!totalWeight) { paramValues[p.ParamName] = paramValueForFormula_(scenarioParams, p, ''); return; }
+      paramValues[p.ParamName] = Object.keys(weights).reduce(function (s, vid) {
+        return s + paramValueForFormula_(scenarioParams, p, vid) * weights[vid];
+      }, 0) / totalWeight;
+    });
+  }
   return {
     vehicleTypeId: vehicleTypeId || '',
     ownChart: hasOwnChart_(vehicleTypeId),
@@ -770,6 +787,10 @@ function getChartEditor(vehicleTypeId, scenarioId) {
       return out;
     }),
     vehicles: vehicles,
+    profitCode: profitCode,
+    // 刪掉目前的營業淨利之後會改用哪個科目(刪除確認視窗說明用)
+    nextProfitCode: profitLineCode_(defs.filter(function (d) { return d.LineCode !== profitCode; })),
+    paramValues: paramValues,
     variables: SYSTEM_VARIABLES,
     params: getParamDefs(),
     calcTypeLabels: CALC_TYPE_LABELS,
@@ -798,16 +819,17 @@ function lineUsageCounts_(vehicleTypeId) {
 }
 
 /** 目前情境各車系的科目值；overrideDefs 有值時用改到一半(還沒存)的科目表試算 */
-function chartPreviewValues_(scenarioId, vehicles, overrideDefs) {
+function chartPreviewValues_(scenarioId, vehicles, overrideDefs, probe) {
   var mix = {};
   getSalesMix(scenarioId).forEach(function (r) { mix[r.VehicleID] = true; });
-  var out = { scenarioId: scenarioId, values: {}, errors: {}, traces: {}, weights: {} };
+  var out = { scenarioId: scenarioId, values: {}, errors: {}, traces: {}, weights: {}, probes: {} };
   getSalesMix(scenarioId).forEach(function (r) { out.weights[r.VehicleID] = toNumber_(r.SalesMixPct); });
   vehicles.forEach(function (v) {
     if (!mix[v.VehicleID]) return;
     try {
-      var res = overrideDefs ? calculatePLWithDefs_(scenarioId, v.VehicleID, overrideDefs) : calculatePLCore_(scenarioId, v.VehicleID);
+      var res = overrideDefs ? calculatePLWithDefs_(scenarioId, v.VehicleID, overrideDefs, probe) : calculatePLCore_(scenarioId, v.VehicleID);
       out.values[v.VehicleID] = res.lineValues;
+      if (res.probes) out.probes[v.VehicleID] = res.probes;
       out.errors[v.VehicleID] = res.errors;
       out.traces[v.VehicleID] = res.traces;
     } catch (e) {
@@ -820,21 +842,44 @@ function chartPreviewValues_(scenarioId, vehicles, overrideDefs) {
 /**
  * 科目設定頁「邊打公式邊看結果」：用畫面上還沒存的那一個科目試算，不寫入任何資料。
  * 回傳每個車系的結果與錯誤；公式本身有問題時回傳 problems。
+ * 還沒新增的科目(LineCode 空白)用暫時代碼 NEW_LINE_PREVIEW_CODE 試算。
+ * line.Probes = [公式...]：另外算每一段公式的值(公式編輯器的每一行/每一顆膠囊)，放在 preview.probes。
  */
+var NEW_LINE_PREVIEW_CODE = '__NEW__';
 function previewLineFormula(vehicleTypeId, scenarioId, line) {
   var defs = getPLLineItems(vehicleTypeId);
-  var patched = defs.map(function (d) {
-    if (d.LineCode !== line.LineCode) return d;
+  var code = line.LineCode || NEW_LINE_PREVIEW_CODE;
+  var patchLine = function (d) {
     var p = {};
     Object.keys(d).forEach(function (k) { p[k] = d[k]; });
     ['CalcType', 'Formula', 'CommodityTaxDeduct', 'ParentLine'].forEach(function (f) { if (line[f] !== undefined) p[f] = line[f]; });
     if (line.VehicleFormulas !== undefined) p.VehicleFormulas = JSON.stringify(parseVehicleFormulas_(line.VehicleFormulas));
     return p;
-  });
-  var problems = chartProblems_(patched, vehicleTypeId).filter(function (p) { return p.code === line.LineCode && p.level === 'error'; });
-  if (problems.length || !scenarioId) return { problems: problems, preview: null };
+  };
+  var patched = line.LineCode
+    ? defs.map(function (d) { return d.LineCode === line.LineCode ? patchLine(d) : d; })
+    : defs.concat([patchLine({ LineCode: code, LineName: String(line.LineName || '').trim() || code, ParentLine: '', SortOrder: 9999 })]);
+  var problems = chartProblems_(patched, vehicleTypeId).filter(function (p) { return p.code === code && p.level === 'error'; });
+  if (!scenarioId) return { problems: problems, preview: null };
   var vehicles = getVehicles(vehicleTypeId).map(function (v) { return { VehicleID: v.VehicleID, VehicleCode: v.VehicleCode || '' }; });
-  return { problems: [], preview: chartPreviewValues_(scenarioId, vehicles, patched) };
+  var probe = Array.isArray(line.Probes) && line.Probes.length ? { code: code, formulas: line.Probes.slice(0, 80).map(String) } : null;
+  if (problems.length) {
+    // 公式有錯也照樣算每一行/每顆膠囊：這個科目先當成手動輸入，算得出來的行顯示數字，有錯的那一行是 null
+    var out = { problems: problems, preview: null };
+    if (probe) {
+      var safe = patched.map(function (d) {
+        if (d.LineCode !== code) return d;
+        var p = {};
+        Object.keys(d).forEach(function (k) { p[k] = d[k]; });
+        p.CalcType = CALC_TYPES.INPUT; p.Formula = ''; p.VehicleFormulas = '';
+        return p;
+      });
+      var pv = chartPreviewValues_(scenarioId, vehicles, safe, probe);
+      out.probes = { probes: pv.probes, weights: pv.weights };
+    }
+    return out;
+  }
+  return { problems: [], preview: chartPreviewValues_(scenarioId, vehicles, patched, probe) };
 }
 
 /* ---------------------------------------------------------------

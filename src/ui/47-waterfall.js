@@ -217,12 +217,19 @@ function wfTrim_(deltas) {
 function wfBridgeSteps_(cmp) {
   const [cf, ct] = cmp.columns;
   const lines = cmp.lines;
-  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : 'K';
-  const endLine = lines.find(l => l.LineCode === end) || { LineName: end };
+  const chosen = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : '';
+  // 畫到營業淨利時，兩欄各看自己車型的淨利科目(不同車型可能一個還是 K、一個已經換成別的科目)
+  const pf = profitCodeOf_(cf), pt = profitCodeOf_(ct);
+  const toProfit = !chosen || chosen === pf || chosen === pt;
+  const endFrom = toProfit ? pf : chosen, endTo = toProfit ? pt : chosen;
+  const rootOrder = wfStructure_(lines).roots.map(r => r.LineCode);
+  const end = rootOrder.indexOf(endTo) >= rootOrder.indexOf(endFrom) ? endTo : endFrom;   // 扣除項列到比較後面的那一個
+  const lineOf = code => lines.find(l => l.LineCode === code) || { LineName: code };
+  const endLine = lineOf(end);
   const items = wfItems_(lines, end, wfPrefs.level).filter(it => !it.isResult);
   const ff = wfFactor_(cf, wfPrefs.basis), ft = wfFactor_(ct, wfPrefs.basis);
   const splitVolume = wfPrefs.basis !== 'unit' && wfPrefs.volumeEffect;
-  const mFrom = (Number(cf.amounts[end]) || 0), mTo = (Number(ct.amounts[end]) || 0);
+  const mFrom = (Number(cf.amounts[endFrom]) || 0), mTo = (Number(ct.amounts[endTo]) || 0);
   const start = mFrom * ff, finish = mTo * ft;
   const deltas = [];
   if (splitVolume && Math.abs(ft - ff) > 1e-9) {
@@ -237,16 +244,15 @@ function wfBridgeSteps_(cmp) {
   });
   const residual = (finish - start) - deltas.reduce((s, d) => s + d.value, 0);
   if (Math.abs(residual) >= 0.5) deltas.push({ label: '其他（公式交互/尾差）', value: residual, kind: 'delta', pinned: true, tip: '不能直接歸到單一科目的差異（例如自訂公式的交互作用、四捨五入）' });
-  const name = shortLineName(endLine.LineName);
-  return [{ label: `${wfColName_(cf, ct)} ${name}`, value: start, kind: 'total' }]
+  return [{ label: `${wfColName_(cf, ct)} ${shortLineName(lineOf(endFrom).LineName)}`, value: start, kind: 'total' }]
     .concat(wfTrim_(deltas))
-    .concat([{ label: `${wfColName_(ct, cf)} ${name}`, value: finish, kind: 'total' }]);
+    .concat([{ label: `${wfColName_(ct, cf)} ${shortLineName(lineOf(endTo).LineName)}`, value: finish, kind: 'total' }]);
 }
 
 function wfStructureSteps_(cmp) {
   const col = cmp.columns[0];
   const lines = cmp.lines;
-  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : 'K';
+  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : profitCodeOf_(cmp.columns[0]);
   const f = wfFactor_(col, wfPrefs.basis);
   const items = wfItems_(lines, end, wfPrefs.level);
   const steps = [];
@@ -272,7 +278,7 @@ function wfStructureSteps_(cmp) {
 
 function wfActionSteps_(cmp, actions) {
   const [cf, ct] = cmp.columns;
-  const mFrom = Number(cf.amounts.K) || 0, mTo = Number(ct.amounts.K) || 0;
+  const mFrom = Number(cf.amounts[profitCodeOf_(cf)]) || 0, mTo = Number(ct.amounts[profitCodeOf_(ct)]) || 0;
   const nameOf = code => { const l = cmp.lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : ''; };
   const deltas = actions.filter(a => String(a.Title || '').trim() && num(a.Effect)).map(a => ({
     label: a.Title, value: num(a.Effect), kind: 'delta',
@@ -410,7 +416,7 @@ function runWaterfall_() {
       })).getActions(p.to.scenarioId);
       return;
     }
-    const endLine = cmp.lines.find(l => l.LineCode === p.end) || cmp.lines.find(l => l.LineCode === 'K') || {};
+    const endLine = cmp.lines.find(l => l.LineCode === p.end) || cmp.lines.find(l => l.LineCode === profitCodeOf_(cmp.columns[0])) || {};
     const basis = wfBasisLabel_(p.basis);
     if (p.mode === 'bridge') {
       wfLast = { steps: wfBridgeSteps_(cmp), title: `${shortLineName(endLine.LineName || '')}差異：${colName(cmp.columns[0])} → ${colName(cmp.columns[1])}（${basis}）` };

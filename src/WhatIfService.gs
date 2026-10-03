@@ -12,7 +12,7 @@
  *   { type: 'dev' }                  開發總投攤提(加權單台合計，元)，所有攤提科目等比例調整
  *   { type: 'param', name: '營業稅率' } 參數值(依參數單位，% 參數填 5 = 5%)，全車系套用
  *   { type: 'fx', currency: 'CNY' }   匯率(1 外幣 = ? 元)
- * 衡量指標(metric)：{ code: 'K', basis: 'unit' | 'month' }
+ * 衡量指標(metric)：{ code: 'K', basis: 'unit' | 'month' }，code 空白 = 營業淨利(K 被刪掉時是損益表最後一行總計)
  *   unit  = 加權平均單台金額；month = 月總額(各車系單台 × 月銷量 加總)
  */
 
@@ -30,7 +30,9 @@ function withOverrides_(overrides, fn) {
 /** 算一個情境的指標值(加權單台或月總額)與重點科目 */
 function whatIfMetric_(scenarioId, metric) {
   var all = calculatePLAllVehicles(scenarioId);
-  var code = (metric && metric.code) || 'K';
+  var code = (metric && metric.code) || '';
+  // 空白或 K = 營業淨利；K 被刪掉、另外建了淨利科目時，自動改看那個科目(存下來的設定還是 K 也照樣能用)
+  if (!code || code === 'K') code = profitLineCode_(lineDefsForScenario_(scenarioId));
   var line = all.weightedAverage.filter(function (l) { return l.LineCode === code; })[0];
   if (metric && metric.basis === 'month') {
     var mix = calcSalesMix_(scenarioId);
@@ -124,7 +126,8 @@ function getWhatIfOptions(scenarioId) {
     drivers: drivers,
     metrics: defs.filter(function (d) { return weighted[d.LineCode] !== undefined && d.Category !== '售價結構'; })
       .map(function (d) { return { code: d.LineCode, label: d.LineName, value: weighted[d.LineCode] }; }),
-    monthlyVolume: driverBase_(scenarioId, { type: 'volume' }).value
+    monthlyVolume: driverBase_(scenarioId, { type: 'volume' }).value,
+    profitCode: profitLineCode_(defs)
   };
 }
 
@@ -135,7 +138,7 @@ function getWhatIfOptions(scenarioId) {
  */
 function solveGoal(scenarioId, metric, target, driver) {
   if (!scenarioId) throw new Error('請先選擇情境');
-  metric = metric || { code: 'K', basis: 'unit' };
+  metric = metric || { code: '', basis: 'unit' };   // 空白 = 營業淨利(profitLineCode_)
   target = toNumber_(target);
   var base = driverBase_(scenarioId, driver);
   var evalAt = function (x) {
@@ -186,7 +189,7 @@ function solveGoal(scenarioId, metric, target, driver) {
  */
 function sensitivityTable(scenarioId, metric, rowDriver, rowValues, colDriver, colValues) {
   if (!scenarioId) throw new Error('請先選擇情境');
-  metric = metric || { code: 'K', basis: 'unit' };
+  metric = metric || { code: '', basis: 'unit' };   // 空白 = 營業淨利(profitLineCode_)
   if ((rowValues || []).length * (colValues || []).length > 121) throw new Error('敏感度表最多 11 × 11 格');
   var rb = driverBase_(scenarioId, rowDriver), cb = colDriver ? driverBase_(scenarioId, colDriver) : null;
   var cells = (rowValues || []).map(function (rv) {
@@ -206,7 +209,7 @@ function sensitivityTable(scenarioId, metric, rowDriver, rowValues, colDriver, c
 /** 損益兩平月銷量(GATE 報告摘要用)：營業淨利(月總額) = 0 時的月總銷量；算不出來回傳 null */
 function breakEvenVolume_(scenarioId) {
   try {
-    var r = solveGoal(scenarioId, { code: 'K', basis: 'unit' }, 0, { type: 'volume' });
+    var r = solveGoal(scenarioId, { code: '', basis: 'unit' }, 0, { type: 'volume' });
     return r.feasible ? r.value : null;
   } catch (e) { return null; }
 }
@@ -276,7 +279,7 @@ function solveScalar_(g, x0, step, lowerBound) {
  */
 function solveGoalMulti(scenarioId, metric, target, levers, mode) {
   if (!scenarioId) throw new Error('請先選擇情境');
-  metric = metric || { code: 'K', basis: 'unit' };
+  metric = metric || { code: '', basis: 'unit' };   // 空白 = 營業淨利(profitLineCode_)
   target = toNumber_(target);
   mode = mode === 'equal' ? 'equal' : 'share';
   levers = (levers || []).filter(function (l) { return l && l.driver && l.driver.type; });
@@ -452,7 +455,7 @@ function saveWhatIfAsScenario(scenarioId, levers, meta) {
       (b.value ? '（' + (v / b.value - 1 >= 0 ? '+' : '') + (Math.round((v / b.value - 1) * 1000) / 10) + '%）' : ''));
   });
   if (!notes.length) throw new Error('沒有任何調整，不需要另存');
-  var expected = withOverrides_(o, function () { return whatIfMetric_(scenarioId, { code: 'K', basis: 'unit' }); });
+  var expected = withOverrides_(o, function () { return whatIfMetric_(scenarioId, { code: '', basis: 'unit' }); });
 
   return withLock_(function () {
     var row = {
@@ -510,7 +513,7 @@ function saveWhatIfAsScenario(scenarioId, levers, meta) {
       batchWriteRows_(SHEETS.PARAMETERS, 'ParamID', adds, dels);
     }
     resetCalcMemo_();
-    var actual = whatIfMetric_(newId, { code: 'K', basis: 'unit' });
+    var actual = whatIfMetric_(newId, { code: '', basis: 'unit' });
     return { scenario: getScenarios().filter(function (s) { return s.ScenarioID === newId; })[0], expected: expected, actual: actual, notes: notes };
   });
 }

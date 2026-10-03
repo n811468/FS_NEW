@@ -62,9 +62,10 @@ function drawWhatIf_() {
   const g = whatIfPrefs.goal, s = whatIfPrefs.sens;
   const body = document.getElementById('whatif-body');
   if (!body || !whatIfOptions) return;
-  // 營業淨利(K)等預設科目可能被刪掉或換掉：記住的指標不存在時改用最後一個科目(通常是最底下的淨利)
+  // 營業淨利(K)等預設科目可能被刪掉或換掉：記住的指標不存在時改看營業淨利(K 被刪掉時是損益表最後一行總計)
   const metrics = whatIfOptions.metrics || [];
-  const fallback = metrics.length ? metrics[metrics.length - 1].code : 'K';
+  const profit = profitCodeOf_(whatIfOptions);
+  const fallback = metrics.some(m => m.code === profit) ? profit : metrics.length ? metrics[metrics.length - 1].code : 'K';
   [g, s, whatIfPrefs.multi].forEach(p => { if (!metrics.some(m => m.code === p.metric)) p.metric = fallback; });
   const basisSeg = (scope, cur) => `<div class="seg">
       <button type="button" class="seg-btn${cur === 'unit' ? ' active' : ''}" onclick="whatIfPrefs.${scope}.basis='unit';saveWhatIfPrefs_();drawWhatIf_()">單台</button>
@@ -114,11 +115,12 @@ function drawWhatIf_() {
 
 function whatIfPreset_(kind) {
   const g = whatIfPrefs.goal;
-  if (kind === 'breakeven-volume') Object.assign(g, { metric: 'K', basis: 'unit', target: 0, driver: 'volume' });
-  if (kind === 'breakeven-price') Object.assign(g, { metric: 'K', basis: 'unit', target: 0, driver: 'price' });
+  const profit = profitCodeOf_(whatIfOptions);
+  if (kind === 'breakeven-volume') Object.assign(g, { metric: profit, basis: 'unit', target: 0, driver: 'volume' });
+  if (kind === 'breakeven-price') Object.assign(g, { metric: profit, basis: 'unit', target: 0, driver: 'price' });
   if (kind === 'material') {
     const lines = whatIfOptions.drivers.filter(d => d.driver.type === 'line').sort((a, b) => Math.abs(b.base) - Math.abs(a.base));
-    Object.assign(g, { metric: 'K', basis: 'unit', target: Math.max(0, Math.round((whatIfOptions.metrics.find(m => m.code === 'K') || {}).value || 0)), driver: lines.length ? driverKey_(lines[0].driver) : 'volume' });
+    Object.assign(g, { metric: profit, basis: 'unit', target: Math.max(0, Math.round((whatIfOptions.metrics.find(m => m.code === profit) || {}).value || 0)), driver: lines.length ? driverKey_(lines[0].driver) : 'volume' });
   }
   saveWhatIfPrefs_();
   drawWhatIf_();

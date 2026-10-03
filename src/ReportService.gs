@@ -121,6 +121,11 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
   if (base) types.push(base.meta.VehicleTypeID);
   if (prev) types.push(prev.meta.VehicleTypeID);
   var defs = unionLineDefs_(types.map(function (t) { return getPLLineItems(t); }));
+  // 每個情境看自己車型的營業淨利科目(現況/前回可能是別的車型，K 還在或已經換成別的科目)
+  [target, base, prev].forEach(function (b) { if (b) b.profitCode = profitLineCode_(getPLLineItems(b.meta.VehicleTypeID)); });
+  var profitCode = target.profitCode;
+  var profitCodes = {};
+  [target, base, prev].forEach(function (b) { if (b) profitCodes[b.profitCode] = true; });
   var depth = lineDepths_(defs);
   var used = function (code) {
     return [target, base, prev].some(function (b) { return b && b.weighted[code] !== undefined; });
@@ -128,13 +133,15 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
 
   return {
     vehicleTypeId: target.meta.VehicleTypeID,
+    profitCode: profitCode,
     target: target, base: base, prev: prev,
     lines: defs.filter(function (d) { return used(d.LineCode); }).map(function (d) {
       return {
         LineCode: d.LineCode, LineName: d.LineName, ParentLine: d.ParentLine || '', Category: d.Category || '',
         CalcType: d.CalcType, Formula: d.CalcType === CALC_TYPES.FORMULA ? d.Formula : '',
         Depth: depth[d.LineCode] || 0,
-        isSubtotal: PROTECTED_LINE_CODES.indexOf(d.LineCode) !== -1 || isGroupLine_(d, defs),
+        isSubtotal: PROTECTED_LINE_CODES.indexOf(d.LineCode) !== -1 || !!profitCodes[d.LineCode] || isGroupLine_(d, defs),
+        isProfit: !!profitCodes[d.LineCode],
         isPriceStructure: d.Category === '售價結構'
       };
     }),
@@ -184,7 +191,8 @@ function getSnapshots(vehicleTypeId) {
       m.scenarioLabel = d ? [d.scenario.Gate, d.scenario.ScenarioName].filter(function (x) { return x; }).join(' ') : '';
       m.scenarioType = d ? d.scenario.ScenarioType || '' : '';
       var w = d ? d.columns.filter(function (c) { return !c.vehicleId; })[0] : null;
-      m.K = w && w.amounts.K !== undefined ? w.amounts.K : null;
+      var pc = d && d.lines ? profitLineCode_(d.lines) : 'K';
+      m.K = w && w.amounts[pc] !== undefined ? w.amounts[pc] : null;
       m.scenarioExists = getScenarios().some(function (s) { return s.ScenarioID === r.ScenarioID; });
       return m;
     })

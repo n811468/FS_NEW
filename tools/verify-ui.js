@@ -226,7 +226,57 @@ assert(api('chartParentOptions_')('B').indexOf('b1') === -1, '不能把自己的
 api("chartSelected = 'd4'");
 api("chartDraft = JSON.parse(JSON.stringify(chartEditor.lines.find(l => l.LineCode === 'd4')))");
 const paneHtml = api('chartEditorPaneHtml_')();
-assert(paneHtml.indexOf('calc-type-card active') !== -1 && paneHtml.indexOf('id="ce-formula"') !== -1, '公式科目應該選中「公式」並顯示公式編輯框');
+assert(paneHtml.indexOf('calc-type-card active') !== -1 && paneHtml.indexOf('class="fx-rows"') !== -1, '公式科目應該選中「公式」，拆得成一行一項就用一行一項');
+assert(/fx-slot kind-line[^>]*>\s*<span class="nm">廠價\(未稅\)/.test(paneHtml) && /fx-slot kind-param[^>]*>\s*<span class="nm">季Margin率/.test(paneHtml),
+  '季Margin 應該顯示成一行：廠價(未稅) × 季Margin率');
+assert(paneHtml.indexOf('tpl-btn') === -1, '常用寫法按鈕已經拿掉');
+// 公式文字 ⇄ 一行一項 來回轉換：拆得成的轉回去意思不變；拆不成的(函式、括號巢狀)回傳 null 改用膠囊
+const fxRound = f => { const t = api('fxTermsFromToks_')(api('fxTokenize_')(f)); return t ? api('fxTermsText_')(t) : null; };
+[
+  ['[廠價(未稅)] * [季Margin率]', '[廠價(未稅)] * [季Margin率]'],
+  ['C - CHILDREN()', 'C - CHILDREN()'],
+  ['P5-P6-P7', 'P5 - P6 - P7'],
+  ['P2 / (1 + [營業稅率])', 'P2 / (1 + [營業稅率])'],
+  ['REF("SC-1","b4")*1.2', 'REF("SC-1", "b4") * 1.2'],
+  ['-[a] + 15% × [b] ÷ 2', '-[a] + 15% * [b] / 2'],
+  ['', '']
+].forEach(([src, want]) => assert(fxRound(src) === want, `一行一項來回轉換：${src} → ${fxRound(src)}（應為 ${want}）`));
+['ROUND(P5 * [營業稅率] / (1 + [營業稅率]))', '(P8 - [水平配件調降] - TAXDEDUCT()) * [貨物稅完稅價格計算率]', 'IF([月銷量] > 100, 1, 2)', '[a] * ([b] + [c])']
+  .forEach(f => assert(fxRound(f) === null, '拆不成一行一項的公式應改用自由公式：' + f));
+const chipsRound = f => api('fxToksToText_')(api('fxTokenize_')(f));
+['ROUND(P5 * [營業稅率] / (1 + [營業稅率]))', 'IF([月銷量] >= 100, -1, 2)', '(P8 - [水平配件調降] - TAXDEDUCT()) * 91%']
+  .forEach(f => assert(chipsRound(f) === f, `膠囊來回轉換應該不變：${f} → ${chipsRound(f)}`));
+assert(api('fxTokenize_')('IF([x] = "a", 1, 0)') === null, '引號字串只能用文字輸入');
+// 寫在最前面的固定百分比(15% × …)：數字框放 15、單位選 %，存回去還是 15%(不會變成 15 倍)
+api("fxMode = 'rows'; fxTerms = fxTermsFromToks_(fxTokenize_('-[a] + 15% × [b] ÷ 2'))");
+const pctRows = api('fxRowsHtml_')();
+assert(/class="fx-num" value="15"/.test(pctRows) && /seg-btn active"[^>]*fxSetPct_\(1, -1, true\)/.test(pctRows), '來源是 15% 時數字框是 15、單位選 %');
+assert(api('fxNumValue_')('15%') === 0.15 && api('fxNumValue_')('15') === 15, '固定數字的值');
+api("fxTerms[1].src.v = '20%'");
+assert(api('fxTermsText_(fxTerms)') === '-[a] + 20% * [b] / 2', '改數字後 % 要保留：' + api('fxTermsText_(fxTerms)'));
+// 新增中的科目(還沒有代碼)不會把頂層科目全部當成子科目
+const saved = api('chartDraft');
+api("chartDraft = { LineCode: '', LineName: '', ParentLine: '', CalcType: 'FORMULA', Formula: '' }");
+const kidsItem = api('fxSourceSections_()').find(g => g.g === '特殊').items.find(it => it.label === '子科目合計');
+assert(kidsItem.value === '' && kidsItem.hint.indexOf('、') === -1, '新增中的科目沒有子科目：' + kidsItem.hint);
+ctx.__in.saved = saved; api('chartDraft = __in.saved');
+// 瀑布圖工具的差異拆解：兩欄是不同車型、一個還是 K、一個已經換成 Y 時，起點/終點各看自己的淨利科目
+ctx.__in.wfCmp = {
+  lines: [
+    { LineCode: 'A', LineName: '收入', ParentLine: '', Category: '收入', CalcType: 'INPUT', Formula: '' },
+    { LineCode: 'B', LineName: '成本', ParentLine: '', Category: '成本', CalcType: 'INPUT', Formula: '' },
+    { LineCode: 'K', LineName: '營業淨利', ParentLine: '', Category: '淨利', CalcType: 'FORMULA', Formula: 'A - B' },
+    { LineCode: 'Y', LineName: '淨利Y', ParentLine: '', Category: '自訂', CalcType: 'FORMULA', Formula: 'A - B' }
+  ],
+  columns: [
+    { profitCode: 'K', amounts: { A: 100, B: 60, K: 40 }, volume: {}, vehicleTypeLabel: 'DA', scenarioLabel: '現況', isWeighted: true },
+    { profitCode: 'Y', amounts: { A: 120, B: 70, Y: 50 }, volume: {}, vehicleTypeLabel: 'DQ', scenarioLabel: '目標', isWeighted: true }
+  ]
+};
+api("wfPrefs.end = 'K'; wfPrefs.basis = 'unit'");
+const wfSteps = api('wfBridgeSteps_(__in.wfCmp)');
+assert(wfSteps[0].value === 40 && wfSteps[wfSteps.length - 1].value === 50, '起點 40(K)、終點 50(Y)：' + wfSteps.map(x => x.value));
+assert(!wfSteps.some(x => /其他（公式交互/.test(x.label)), '收入 +20、成本 −10 剛好解釋 +10，不該有尾差：' + JSON.stringify(wfSteps));
 assert(paneHtml.indexOf('個別車系的算法') !== -1, '應該可以設定車系個別公式');
 assert(api('toNameForm_')('P8 * [季Margin率] + ROUND(B)') === '[廠價(未稅)] * [季Margin率] + ROUND([銷貨成本合計])', '公式應該用科目名稱顯示，函式名稱不動：' + api('toNameForm_')('P8 * [季Margin率] + ROUND(B)'));
 assert(api('toNameForm_')('P2') === 'P2', '科目名稱跟系統變數撞名(強配件售價)時要保留代碼，不然存回去意思會變');

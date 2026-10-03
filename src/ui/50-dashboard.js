@@ -525,7 +525,7 @@ function tableMetaText_(cols) {
  */
 function lineBetter_(line) {
   if (!line || line.isPriceStructure) return null;
-  if (['A', 'C', 'E', 'G', 'I', 'K'].indexOf(line.LineCode) !== -1) return 'high';
+  if (line.isProfit || ['A', 'C', 'E', 'G', 'I', 'K'].indexOf(line.LineCode) !== -1) return 'high';
   if (line.ParentLine === 'A') return 'high';
   if (line.ParentLine || line.LineCode === 'B' || line.LineCode === 'J') return 'low';
   return null;
@@ -597,11 +597,12 @@ function kpiStripHtml(cols, lines) {
   if (!showKpi || !cols.length) return '';
   const nameOf = code => { const l = lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : code; };
   const base = baselineCol_(cols);
-  const kLine = lines.find(l => l.LineCode === 'K');
-  const maxAbsPct = Math.max.apply(null, cols.map(c => Math.abs(pctOf_(c, 'K'))).concat([0.0001]));
+  const maxAbsPct = Math.max.apply(null, cols.map(c => Math.abs(pctOf_(c, profitCodeOf_(c)))).concat([0.0001]));
   const cards = cols.map((c, i) => {
-    const k = c.amounts.K;
-    const kPct = pctOf_(c, 'K');
+    const kCode = profitCodeOf_(c);
+    const kLine = lines.find(l => l.LineCode === kCode);
+    const k = c.amounts[kCode];
+    const kPct = pctOf_(c, kCode);
     const isBase = base && colKey_(base) === colKey_(c);
     const rows = ['A', 'C', 'E', 'G'].map(code => {
       const v = c.amounts[code];
@@ -611,8 +612,9 @@ function kpiStripHtml(cols, lines) {
         <span class="kpi-pct">${code === 'A' ? '' : pctOf_(c, code).toFixed(1) + '%'}</span></div>`;
     }).join('');
     let vsBase = '';
-    if (base && !isBase && k !== undefined && k !== null && base.amounts.K !== undefined && base.amounts.K !== null) {
-      const baseShown = displayAmount_(base.amounts.K, base);
+    const baseK = base ? base.amounts[profitCodeOf_(base)] : undefined;
+    if (base && !isBase && k !== undefined && k !== null && baseK !== undefined && baseK !== null) {
+      const baseShown = displayAmount_(baseK, base);
       const delta = displayAmount_(k, c) - baseShown;
       const tone = deltaTone_(kLine, delta);
       // 百分比的分母要用畫面上實際顯示的基準金額：基準欄的月銷量/總台數是 0 時，
@@ -627,7 +629,7 @@ function kpiStripHtml(cols, lines) {
         <span class="kpi-vehicle" title="${esc(c.vehicleLabel)}">${esc(c.vehicleLabel)}</span>
         <button type="button" class="star${isBase ? ' on' : ''}" data-tip="${isBase ? '目前的比較基準（再點一次取消）' : '設為比較基準'}"
           onclick="setBaselineColumnAt(${i})">★</button></div>
-      <div class="kpi-main"><span class="kpi-main-label">${esc(nameOf('K'))}</span>
+      <div class="kpi-main"><span class="kpi-main-label">${esc(nameOf(kCode))}</span>
         <span class="kpi-main-num${k < 0 ? ' negative' : ''}">${k === undefined || k === null ? '—' : fmt(displayAmount_(k, c))}</span>
         <span class="kpi-main-pct${kPct < 0 ? ' negative' : ''}">${kPct.toFixed(1)}%</span></div>
       <div class="kpi-bar"><div class="kpi-bar-fill${kPct < 0 ? ' negative' : ''}" style="width:${barW.toFixed(1)}%"></div></div>

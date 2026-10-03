@@ -369,10 +369,76 @@
   .ed-step-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; margin-bottom: 12px; }
   .step-no { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 12px; align-items: center; justify-content: center; flex: none; }
   .calc-type-card b { display: flex; align-items: center; gap: 6px; }
-  .tpl-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
-  .tpl-btn { appearance: none; border: 1px dashed var(--primary-line); background: var(--primary-weak); color: var(--primary); border-radius: 999px; padding: 4px 11px;
-    font-size: 12px; font-weight: 600; cursor: pointer; }
-  .tpl-btn:hover { background: var(--primary); color: #fff; border-style: solid; }
+  /* 公式編輯器：一行一項 / 自由公式膠囊 / 選單(32-formula-builder.js) */
+  .fx-mode .seg-btn { padding: 4px 10px; font-size: 12px; }
+  .fx-eq-head { font-size: 14px; margin-bottom: 8px; color: var(--text-2); }
+  .fx-eq-head b { color: var(--primary); }
+  .fx-rows { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  .fx-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 26px; gap: 8px; align-items: center; padding: 8px 8px 8px 10px; border-top: 1px solid var(--border); }
+  .fx-row:first-child { border-top: 0; }
+  .fx-row-main { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+  .fx-sign { appearance: none; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border-strong); background: #fff; font-size: 16px; font-weight: 700; cursor: pointer; }
+  .fx-sign.plus { color: var(--success); } .fx-sign.minus { color: var(--danger); }
+  .fx-sign:hover { border-color: var(--primary); }
+  .fx-slot { appearance: none; display: inline-flex; align-items: baseline; gap: 8px; max-width: 100%; min-height: 32px; border: 1px solid var(--border-strong); background: #fff;
+    border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+  .fx-slot:hover { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-weak); }
+  .fx-slot .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx-slot .v { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .fx-slot.empty { border-style: dashed; color: var(--muted); min-width: 180px; }
+  .kind-line .nm, .fx-chip.kind-line { color: var(--primary); }
+  .kind-param .nm, .fx-chip.kind-param { color: #6a3dbd; }
+  .kind-var .nm, .fx-chip.kind-var { color: #0f7a7a; }
+  .kind-special .nm, .kind-ref .nm, .fx-chip.kind-special, .fx-chip.kind-ref { color: #b5621c; }
+  .kind-bad .nm, .fx-chip.kind-bad { color: var(--danger); }
+  .fx-factor { display: inline-flex; align-items: center; gap: 4px; }
+  .fx-op { appearance: none; border: 0; background: transparent; font-size: 15px; font-weight: 700; color: var(--text-2); width: 22px; height: 26px; border-radius: 5px; cursor: pointer; }
+  .fx-op:hover { background: var(--primary-weak); color: var(--primary); }
+  .fx-x, .fx-del { appearance: none; border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 6px; width: 24px; height: 26px; font-size: 12px; }
+  .fx-x:hover, .fx-del:hover { background: var(--danger-weak); color: var(--danger); }
+  .fx-add-factor { appearance: none; border: 1px dashed var(--border-strong); background: transparent; color: var(--muted); border-radius: 8px; padding: 5px 9px; font-size: 12px; cursor: pointer; }
+  .fx-add-factor:hover { color: var(--primary); border-color: var(--primary); }
+  .fx-num { width: 110px; padding: 5px 8px; }
+  .fx-num.sm { width: 72px; }
+  .fx-unit .seg-btn { padding: 3px 7px; font-size: 11.5px; }
+  .fx-inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: 13px; }
+  .fx-inline .v { color: var(--muted); font-size: 12px; }
+  .fx-ref select { max-width: 200px; padding: 4px 6px; font-size: 12.5px; }
+  .fx-row-val { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; min-width: 70px; }
+  .fx-row-val.neg { color: var(--danger); }
+  .fx-add-row { display: flex; gap: 8px; margin-top: 10px; }
+  .fx-total { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 9px 12px; border-radius: 8px; background: var(--subtotal); font-size: 13px; }
+  .fx-total b { font-size: 15px; font-variant-numeric: tabular-nums; }
+  .fx-chips { min-height: 64px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 8px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 3px; background: #fff; cursor: text; }
+  .fx-chips:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-weak); }
+  .fx-chips-ph { align-self: center; font-size: 12.5px; padding: 0 4px; }
+  .fx-chip { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.25; border-radius: 7px; padding: 4px 8px; border: 1px solid var(--border); background: var(--surface-2);
+    font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; }
+  .fx-chip .cv { font-size: 10.5px; color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .fx-chip.op { border-color: transparent; background: transparent; font-size: 16px; color: var(--text-2); padding: 4px 3px; }
+  .fx-chip.fn { color: #b5621c; background: #fdf3e7; border-color: #f2d5b1; font-family: var(--mono); }
+  .fx-chip.kind-line { background: var(--primary-weak); border-color: var(--primary-line); }
+  .fx-chip.kind-param { background: #f3eefd; border-color: #d9c9f7; }
+  .fx-chip.sel { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .fx-caret { width: 2px; height: 28px; background: var(--primary); align-self: center; animation: fx-blink 1s step-end infinite; }
+  .fx-chips:not(:focus) .fx-caret { opacity: 0; animation: none; }
+  @keyframes fx-blink { 50% { opacity: 0; } }
+  .fx-keys { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; align-items: center; }
+  .fx-key { appearance: none; min-width: 32px; height: 30px; border: 1px solid var(--border-strong); background: #fff; border-radius: 7px; font-size: 15px; font-weight: 700; color: var(--text-2); cursor: pointer; }
+  .fx-key:hover { border-color: var(--primary); color: var(--primary); }
+  .fx-chip-help { font-size: 12px; margin-top: 6px; }
+  .fx-picker { position: fixed; z-index: 1000; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-2); padding: 8px; }
+  .fx-picker-q { width: 100%; margin-bottom: 6px; }
+  .fx-picker-list { max-height: 320px; overflow: auto; }
+  .fx-pk-group { font-size: 11px; font-weight: 700; color: var(--muted); padding: 8px 10px 3px; }
+  .fx-pk-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .fx-pk-item:hover, .fx-pk-item.hl { background: var(--primary-weak); }
+  .fx-pk-item.strong { font-weight: 700; }
+  .fx-pk-text { display: flex; flex-direction: column; min-width: 0; }
+  .fx-pk-text small { color: var(--muted); font-size: 11px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx-pk-v { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .fx-pk-item.kind-param .fx-pk-text > span { color: #6a3dbd; }
+  .fx-pk-item.kind-special .fx-pk-text > span, .fx-pk-item.kind-fn .fx-pk-text > span { color: #b5621c; }
   .formula-box { position: relative; overflow: visible; }
   .formula-box textarea { font-family: var(--font); font-size: 15px; border-radius: 10px; }
   .ac-list { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 25; background: #fff; border: 1px solid var(--border); border-radius: 10px;
@@ -411,10 +477,10 @@
   .sens-table td.sens-base { outline: 2.5px solid var(--text); outline-offset: -2px; font-weight: 800; }
 
   /* 公式編輯器 */
-  .formula-box { border: 1.5px solid var(--border-strong); border-radius: 10px; background: #fff; overflow: hidden; }
+  .formula-box { border: 1.5px solid var(--border-strong); border-radius: 10px; background: #fff; overflow: visible; }   /* visible：自動完成清單要能超出框外 */
   .formula-box:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-weak); }
   .formula-box textarea { width: 100%; border: none; box-shadow: none !important; font-family: var(--mono); font-size: 14px; line-height: 1.6;
-    padding: 10px 12px; resize: vertical; min-height: 64px; }
+    padding: 10px 12px; resize: vertical; min-height: 64px; border-radius: 10px; }
   .formula-readable { border-top: 1px dashed var(--border); padding: 8px 12px; font-size: 12.5px; color: var(--text-2); background: var(--surface-2); line-height: 1.7; }
   .formula-readable .fx-tok-code { color: #2a4cc4; font-weight: 600; }
   .formula-readable .fx-tok-name { color: #6a3dbd; font-weight: 600; }
@@ -3805,13 +3871,14 @@ function chartProblems_(defs, vehicleTypeId) {
   });
 
   // 沒有被算進營業淨利的科目
-  if (byCode.K) {
+  var profitCode = profitLineCode_(defs);
+  if (profitCode) {
     var reach = {};
     (function mark(code) {
       if (reach[code]) return;
       reach[code] = true;
       (deps[code] || []).forEach(mark);
-    })('K');
+    })(profitCode);
     defs.forEach(function (d) {
       if (reach[d.LineCode] || d.Category === '售價結構') return;
       if (d.ParentLine && !reach[d.ParentLine]) return;   // 父科目已經會被提醒，不重複
@@ -3837,6 +3904,22 @@ function getChartEditor(vehicleTypeId, scenarioId) {
     preview = chartPreviewValues_(scenarioId, vehicles, null);
   }
   var usage = lineUsageCounts_(vehicleTypeId);
+  var profitCode = profitLineCode_(defs);
+  // 目前情境的參數值(公式編輯器的選單顯示用；% 參數是小數)。
+  // 參數可以每個車系各設一個值：有試算資料時跟每一行的數字一樣用銷售構成加權平均，否則看情境共用的值
+  var paramValues = {};
+  if (scenarioId) {
+    var scenarioParams = calcParameters_(scenarioId);
+    var weights = {};
+    if (preview) Object.keys(preview.values).forEach(function (vid) { weights[vid] = toNumber_(preview.weights[vid]); });
+    var totalWeight = Object.keys(weights).reduce(function (s, vid) { return s + weights[vid]; }, 0);
+    getParamDefs().forEach(function (p) {
+      if (!totalWeight) { paramValues[p.ParamName] = paramValueForFormula_(scenarioParams, p, ''); return; }
+      paramValues[p.ParamName] = Object.keys(weights).reduce(function (s, vid) {
+        return s + paramValueForFormula_(scenarioParams, p, vid) * weights[vid];
+      }, 0) / totalWeight;
+    });
+  }
   return {
     vehicleTypeId: vehicleTypeId || '',
     ownChart: hasOwnChart_(vehicleTypeId),
@@ -3850,6 +3933,10 @@ function getChartEditor(vehicleTypeId, scenarioId) {
       return out;
     }),
     vehicles: vehicles,
+    profitCode: profitCode,
+    // 刪掉目前的營業淨利之後會改用哪個科目(刪除確認視窗說明用)
+    nextProfitCode: profitLineCode_(defs.filter(function (d) { return d.LineCode !== profitCode; })),
+    paramValues: paramValues,
     variables: SYSTEM_VARIABLES,
     params: getParamDefs(),
     calcTypeLabels: CALC_TYPE_LABELS,
@@ -3878,16 +3965,17 @@ function lineUsageCounts_(vehicleTypeId) {
 }
 
 /** 目前情境各車系的科目值；overrideDefs 有值時用改到一半(還沒存)的科目表試算 */
-function chartPreviewValues_(scenarioId, vehicles, overrideDefs) {
+function chartPreviewValues_(scenarioId, vehicles, overrideDefs, probe) {
   var mix = {};
   getSalesMix(scenarioId).forEach(function (r) { mix[r.VehicleID] = true; });
-  var out = { scenarioId: scenarioId, values: {}, errors: {}, traces: {}, weights: {} };
+  var out = { scenarioId: scenarioId, values: {}, errors: {}, traces: {}, weights: {}, probes: {} };
   getSalesMix(scenarioId).forEach(function (r) { out.weights[r.VehicleID] = toNumber_(r.SalesMixPct); });
   vehicles.forEach(function (v) {
     if (!mix[v.VehicleID]) return;
     try {
-      var res = overrideDefs ? calculatePLWithDefs_(scenarioId, v.VehicleID, overrideDefs) : calculatePLCore_(scenarioId, v.VehicleID);
+      var res = overrideDefs ? calculatePLWithDefs_(scenarioId, v.VehicleID, overrideDefs, probe) : calculatePLCore_(scenarioId, v.VehicleID);
       out.values[v.VehicleID] = res.lineValues;
+      if (res.probes) out.probes[v.VehicleID] = res.probes;
       out.errors[v.VehicleID] = res.errors;
       out.traces[v.VehicleID] = res.traces;
     } catch (e) {
@@ -3900,21 +3988,44 @@ function chartPreviewValues_(scenarioId, vehicles, overrideDefs) {
 /**
  * 科目設定頁「邊打公式邊看結果」：用畫面上還沒存的那一個科目試算，不寫入任何資料。
  * 回傳每個車系的結果與錯誤；公式本身有問題時回傳 problems。
+ * 還沒新增的科目(LineCode 空白)用暫時代碼 NEW_LINE_PREVIEW_CODE 試算。
+ * line.Probes = [公式...]：另外算每一段公式的值(公式編輯器的每一行/每一顆膠囊)，放在 preview.probes。
  */
+var NEW_LINE_PREVIEW_CODE = '__NEW__';
 function previewLineFormula(vehicleTypeId, scenarioId, line) {
   var defs = getPLLineItems(vehicleTypeId);
-  var patched = defs.map(function (d) {
-    if (d.LineCode !== line.LineCode) return d;
+  var code = line.LineCode || NEW_LINE_PREVIEW_CODE;
+  var patchLine = function (d) {
     var p = {};
     Object.keys(d).forEach(function (k) { p[k] = d[k]; });
     ['CalcType', 'Formula', 'CommodityTaxDeduct', 'ParentLine'].forEach(function (f) { if (line[f] !== undefined) p[f] = line[f]; });
     if (line.VehicleFormulas !== undefined) p.VehicleFormulas = JSON.stringify(parseVehicleFormulas_(line.VehicleFormulas));
     return p;
-  });
-  var problems = chartProblems_(patched, vehicleTypeId).filter(function (p) { return p.code === line.LineCode && p.level === 'error'; });
-  if (problems.length || !scenarioId) return { problems: problems, preview: null };
+  };
+  var patched = line.LineCode
+    ? defs.map(function (d) { return d.LineCode === line.LineCode ? patchLine(d) : d; })
+    : defs.concat([patchLine({ LineCode: code, LineName: String(line.LineName || '').trim() || code, ParentLine: '', SortOrder: 9999 })]);
+  var problems = chartProblems_(patched, vehicleTypeId).filter(function (p) { return p.code === code && p.level === 'error'; });
+  if (!scenarioId) return { problems: problems, preview: null };
   var vehicles = getVehicles(vehicleTypeId).map(function (v) { return { VehicleID: v.VehicleID, VehicleCode: v.VehicleCode || '' }; });
-  return { problems: [], preview: chartPreviewValues_(scenarioId, vehicles, patched) };
+  var probe = Array.isArray(line.Probes) && line.Probes.length ? { code: code, formulas: line.Probes.slice(0, 80).map(String) } : null;
+  if (problems.length) {
+    // 公式有錯也照樣算每一行/每顆膠囊：這個科目先當成手動輸入，算得出來的行顯示數字，有錯的那一行是 null
+    var out = { problems: problems, preview: null };
+    if (probe) {
+      var safe = patched.map(function (d) {
+        if (d.LineCode !== code) return d;
+        var p = {};
+        Object.keys(d).forEach(function (k) { p[k] = d[k]; });
+        p.CalcType = CALC_TYPES.INPUT; p.Formula = ''; p.VehicleFormulas = '';
+        return p;
+      });
+      var pv = chartPreviewValues_(scenarioId, vehicles, safe, probe);
+      out.probes = { probes: pv.probes, weights: pv.weights };
+    }
+    return out;
+  }
+  return { problems: [], preview: chartPreviewValues_(scenarioId, vehicles, patched, probe) };
 }
 
 /* ---------------------------------------------------------------
@@ -4339,7 +4450,12 @@ function systemVariables_(scenarioId, salesMixRow, salesMix, params, vehicleId) 
  * 公式之間的相依順序由求值時遞迴決定(用到誰就先算誰)，循環引用會被擋下並記錄在 errors。
  * 單一科目的公式出錯不會讓整張損益表掛掉：那一格以 0 計，錯誤訊息放在 errors 給畫面顯示。
  */
-function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
+/**
+ * probe(選用，科目設定頁的公式編輯器用)：{ code, formulas: [...] } —— 整張損益算完之後，
+ * 用 code 這個科目的計算環境(CHILDREN() 指它的子科目)另外算每一段公式，回傳在 probes(算不出來是 null)。
+ * 公式編輯器靠它顯示「每一行」「每一顆膠囊」目前是多少。
+ */
+function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs, probe) {
   var salesMix = calcSalesMix_(scenarioId);
   var salesMixRow = salesMix.filter(function (r) { return r.VehicleID === vehicleId; })[0];
   if (!salesMixRow) throw new Error('找不到 SalesMix 資料：' + scenarioId + ' / ' + vehicleId);
@@ -4412,7 +4528,13 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
   function evalLineFormula_(code, formula) {
     var ast = parseFormula_(formula);
     var refs = {};
-    var env = {
+    var v = evalFormulaAst_(ast, formulaEnv_(code, refs));
+    traces[code] = { kind: 'formula', formula: formula, refs: refs };
+    return num_(v);
+  }
+
+  function formulaEnv_(code, refs) {
+    return {
       code: function (c) { var x = valueOf(c); refs[c] = x; return x; },
       name: function (n) {
         var x;
@@ -4440,14 +4562,17 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
         return x;
       }
     };
-    var v = evalFormulaAst_(ast, env);
-    traces[code] = { kind: 'formula', formula: formula, refs: refs };
-    return num_(v);
   }
 
+  var probes = null;
   REF_STACK_.push(String(scenarioId) + '|' + String(vehicleId));
   try {
     defs.forEach(function (d) { valueOf(d.LineCode); });
+    if (probe && probe.formulas) {
+      probes = probe.formulas.map(function (f) {
+        try { return num_(evalFormulaAst_(parseFormula_(f), formulaEnv_(probe.code, {}))); } catch (e) { return null; }
+      });
+    }
   } finally {
     REF_STACK_.pop();
   }
@@ -4464,6 +4589,7 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
     lineValues: lineValues,
     errors: errors,
     traces: traces,
+    probes: probes,
     lines: buildResultLines_(lineValues, revenue, exFactory, defs)
   };
 }
@@ -4610,12 +4736,18 @@ function calculateComparison(selections) {
       amounts: amounts,
       revenue: amounts.A || 0,
       exFactoryPrice: amounts.P8 || 0,
-      checks: subtotalChecks_(amounts, lineDefs)
+      checks: subtotalChecks_(amounts, lineDefs),
+      profitCode: profitLineCode_(lineDefs)
     };
   });
 
   var allDefs = unionLineDefs_(columns.map(function (c) { return c.snapshotLines || defsOf(c.vehicleTypeId); }));
-  columns.forEach(function (c) { delete c.snapshotLines; });
+  columns.forEach(function (c) {
+    if (c.snapshotLines) c.profitCode = profitLineCode_(c.snapshotLines);
+    delete c.snapshotLines;
+  });
+  var profitCodes = {};
+  columns.forEach(function (c) { if (c.profitCode) profitCodes[c.profitCode] = true; });
   var depth = lineDepths_(allDefs);
   // 只列出至少有一個比較欄位真的算出數字的科目(不同車型科目不同時，表格才不會塞滿空列)
   var usedLines = allDefs.filter(function (def) {
@@ -4631,12 +4763,48 @@ function calculateComparison(selections) {
       Formula: def.CalcType === CALC_TYPES.FORMULA ? def.Formula : '',
       AutoSource: resultAutoSource_(def),
       Depth: depth[def.LineCode] || 0,
-      isSubtotal: PROTECTED_LINE_CODES.indexOf(def.LineCode) !== -1 || isGroupLine_(def, allDefs),
+      isSubtotal: PROTECTED_LINE_CODES.indexOf(def.LineCode) !== -1 || !!profitCodes[def.LineCode] || isGroupLine_(def, allDefs),
+      isProfit: !!profitCodes[def.LineCode],
       isPriceStructure: String(def.Category || '') === '售價結構'
     };
   });
 
   return { columns: columns, lines: usedLines, subtotalCodes: PROTECTED_LINE_CODES };
+}
+
+/**
+ * 哪一個科目是「營業淨利」：預設是 K。K 被刪掉時(例如另外新增一個淨利科目、再把原本的刪掉)，
+ * 改用損益表最底下的總計：頂層、不是售價結構、用公式算、而且沒有被其他科目的公式引用的科目，
+ * 有好幾個就取損益表上最後一個。不看位置挑「最後一行」，否則最後一行是手動輸入的費用(例如前瞻費用)
+ * 時會把費用當成淨利。儀表板重點指標、GATE 報告、損益兩平、目標反推的預設指標都看這裡，不寫死 K。
+ */
+function profitLineCode_(defs) {
+  defs = defs || [];
+  if (defs.some(function (d) { return d.LineCode === 'K'; })) return 'K';
+  var top = displayOrderDefs_(defs.slice()).filter(function (d) {
+    return !d.ParentLine && String(d.Category || '') !== '售價結構';
+  });
+  if (!top.length) return '';
+  var referenced = {};
+  defs.forEach(function (d) {
+    var formulas = [];
+    if (d.CalcType === CALC_TYPES.FORMULA && d.Formula) formulas.push(d.Formula);
+    var vf = parseVehicleFormulas_(d.VehicleFormulas);
+    Object.keys(vf).forEach(function (k) { if (vf[k]) formulas.push(vf[k]); });
+    formulas.forEach(function (f) {
+      var info = inspectFormula_(f);
+      if (!info.ok) return;
+      info.refs.codes.forEach(function (c) { if (c !== d.LineCode) referenced[c] = true; });
+      info.refs.names.forEach(function (n) {
+        defs.forEach(function (x) { if (x.LineName === n && x.LineCode !== d.LineCode) referenced[x.LineCode] = true; });
+      });
+    });
+  });
+  var isFormula = function (d) { return d.CalcType === CALC_TYPES.FORMULA; };
+  var pick = top.filter(function (d) { return isFormula(d) && !referenced[d.LineCode]; });
+  if (!pick.length) pick = top.filter(isFormula);
+  if (!pick.length) pick = top;
+  return pick[pick.length - 1].LineCode;
 }
 
 /** 科目的縮排層級(父科目鏈長度) */
@@ -5167,6 +5335,11 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
   if (base) types.push(base.meta.VehicleTypeID);
   if (prev) types.push(prev.meta.VehicleTypeID);
   var defs = unionLineDefs_(types.map(function (t) { return getPLLineItems(t); }));
+  // 每個情境看自己車型的營業淨利科目(現況/前回可能是別的車型，K 還在或已經換成別的科目)
+  [target, base, prev].forEach(function (b) { if (b) b.profitCode = profitLineCode_(getPLLineItems(b.meta.VehicleTypeID)); });
+  var profitCode = target.profitCode;
+  var profitCodes = {};
+  [target, base, prev].forEach(function (b) { if (b) profitCodes[b.profitCode] = true; });
   var depth = lineDepths_(defs);
   var used = function (code) {
     return [target, base, prev].some(function (b) { return b && b.weighted[code] !== undefined; });
@@ -5174,13 +5347,15 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
 
   return {
     vehicleTypeId: target.meta.VehicleTypeID,
+    profitCode: profitCode,
     target: target, base: base, prev: prev,
     lines: defs.filter(function (d) { return used(d.LineCode); }).map(function (d) {
       return {
         LineCode: d.LineCode, LineName: d.LineName, ParentLine: d.ParentLine || '', Category: d.Category || '',
         CalcType: d.CalcType, Formula: d.CalcType === CALC_TYPES.FORMULA ? d.Formula : '',
         Depth: depth[d.LineCode] || 0,
-        isSubtotal: PROTECTED_LINE_CODES.indexOf(d.LineCode) !== -1 || isGroupLine_(d, defs),
+        isSubtotal: PROTECTED_LINE_CODES.indexOf(d.LineCode) !== -1 || !!profitCodes[d.LineCode] || isGroupLine_(d, defs),
+        isProfit: !!profitCodes[d.LineCode],
         isPriceStructure: d.Category === '售價結構'
       };
     }),
@@ -5230,7 +5405,8 @@ function getSnapshots(vehicleTypeId) {
       m.scenarioLabel = d ? [d.scenario.Gate, d.scenario.ScenarioName].filter(function (x) { return x; }).join(' ') : '';
       m.scenarioType = d ? d.scenario.ScenarioType || '' : '';
       var w = d ? d.columns.filter(function (c) { return !c.vehicleId; })[0] : null;
-      m.K = w && w.amounts.K !== undefined ? w.amounts.K : null;
+      var pc = d && d.lines ? profitLineCode_(d.lines) : 'K';
+      m.K = w && w.amounts[pc] !== undefined ? w.amounts[pc] : null;
       m.scenarioExists = getScenarios().some(function (s) { return s.ScenarioID === r.ScenarioID; });
       return m;
     })
@@ -5363,7 +5539,7 @@ function snapshotColumn_(sel) {
  *   { type: 'dev' }                  開發總投攤提(加權單台合計，元)，所有攤提科目等比例調整
  *   { type: 'param', name: '營業稅率' } 參數值(依參數單位，% 參數填 5 = 5%)，全車系套用
  *   { type: 'fx', currency: 'CNY' }   匯率(1 外幣 = ? 元)
- * 衡量指標(metric)：{ code: 'K', basis: 'unit' | 'month' }
+ * 衡量指標(metric)：{ code: 'K', basis: 'unit' | 'month' }，code 空白 = 營業淨利(K 被刪掉時是損益表最後一行總計)
  *   unit  = 加權平均單台金額；month = 月總額(各車系單台 × 月銷量 加總)
  */
 
@@ -5381,7 +5557,9 @@ function withOverrides_(overrides, fn) {
 /** 算一個情境的指標值(加權單台或月總額)與重點科目 */
 function whatIfMetric_(scenarioId, metric) {
   var all = calculatePLAllVehicles(scenarioId);
-  var code = (metric && metric.code) || 'K';
+  var code = (metric && metric.code) || '';
+  // 空白或 K = 營業淨利；K 被刪掉、另外建了淨利科目時，自動改看那個科目(存下來的設定還是 K 也照樣能用)
+  if (!code || code === 'K') code = profitLineCode_(lineDefsForScenario_(scenarioId));
   var line = all.weightedAverage.filter(function (l) { return l.LineCode === code; })[0];
   if (metric && metric.basis === 'month') {
     var mix = calcSalesMix_(scenarioId);
@@ -5475,7 +5653,8 @@ function getWhatIfOptions(scenarioId) {
     drivers: drivers,
     metrics: defs.filter(function (d) { return weighted[d.LineCode] !== undefined && d.Category !== '售價結構'; })
       .map(function (d) { return { code: d.LineCode, label: d.LineName, value: weighted[d.LineCode] }; }),
-    monthlyVolume: driverBase_(scenarioId, { type: 'volume' }).value
+    monthlyVolume: driverBase_(scenarioId, { type: 'volume' }).value,
+    profitCode: profitLineCode_(defs)
   };
 }
 
@@ -5486,7 +5665,7 @@ function getWhatIfOptions(scenarioId) {
  */
 function solveGoal(scenarioId, metric, target, driver) {
   if (!scenarioId) throw new Error('請先選擇情境');
-  metric = metric || { code: 'K', basis: 'unit' };
+  metric = metric || { code: '', basis: 'unit' };   // 空白 = 營業淨利(profitLineCode_)
   target = toNumber_(target);
   var base = driverBase_(scenarioId, driver);
   var evalAt = function (x) {
@@ -5537,7 +5716,7 @@ function solveGoal(scenarioId, metric, target, driver) {
  */
 function sensitivityTable(scenarioId, metric, rowDriver, rowValues, colDriver, colValues) {
   if (!scenarioId) throw new Error('請先選擇情境');
-  metric = metric || { code: 'K', basis: 'unit' };
+  metric = metric || { code: '', basis: 'unit' };   // 空白 = 營業淨利(profitLineCode_)
   if ((rowValues || []).length * (colValues || []).length > 121) throw new Error('敏感度表最多 11 × 11 格');
   var rb = driverBase_(scenarioId, rowDriver), cb = colDriver ? driverBase_(scenarioId, colDriver) : null;
   var cells = (rowValues || []).map(function (rv) {
@@ -5557,7 +5736,7 @@ function sensitivityTable(scenarioId, metric, rowDriver, rowValues, colDriver, c
 /** 損益兩平月銷量(GATE 報告摘要用)：營業淨利(月總額) = 0 時的月總銷量；算不出來回傳 null */
 function breakEvenVolume_(scenarioId) {
   try {
-    var r = solveGoal(scenarioId, { code: 'K', basis: 'unit' }, 0, { type: 'volume' });
+    var r = solveGoal(scenarioId, { code: '', basis: 'unit' }, 0, { type: 'volume' });
     return r.feasible ? r.value : null;
   } catch (e) { return null; }
 }
@@ -5627,7 +5806,7 @@ function solveScalar_(g, x0, step, lowerBound) {
  */
 function solveGoalMulti(scenarioId, metric, target, levers, mode) {
   if (!scenarioId) throw new Error('請先選擇情境');
-  metric = metric || { code: 'K', basis: 'unit' };
+  metric = metric || { code: '', basis: 'unit' };   // 空白 = 營業淨利(profitLineCode_)
   target = toNumber_(target);
   mode = mode === 'equal' ? 'equal' : 'share';
   levers = (levers || []).filter(function (l) { return l && l.driver && l.driver.type; });
@@ -5803,7 +5982,7 @@ function saveWhatIfAsScenario(scenarioId, levers, meta) {
       (b.value ? '（' + (v / b.value - 1 >= 0 ? '+' : '') + (Math.round((v / b.value - 1) * 1000) / 10) + '%）' : ''));
   });
   if (!notes.length) throw new Error('沒有任何調整，不需要另存');
-  var expected = withOverrides_(o, function () { return whatIfMetric_(scenarioId, { code: 'K', basis: 'unit' }); });
+  var expected = withOverrides_(o, function () { return whatIfMetric_(scenarioId, { code: '', basis: 'unit' }); });
 
   return withLock_(function () {
     var row = {
@@ -5861,7 +6040,7 @@ function saveWhatIfAsScenario(scenarioId, levers, meta) {
       batchWriteRows_(SHEETS.PARAMETERS, 'ParamID', adds, dels);
     }
     resetCalcMemo_();
-    var actual = whatIfMetric_(newId, { code: 'K', basis: 'unit' });
+    var actual = whatIfMetric_(newId, { code: '', basis: 'unit' });
     return { scenario: getScenarios().filter(function (s) { return s.ScenarioID === newId; })[0], expected: expected, actual: actual, notes: notes };
   });
 }
@@ -5977,7 +6156,7 @@ function reportMaintenance_(message) {
 }
 
   return {
-    fns: { getSheet_: getSheet_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, solveGoalMulti: solveGoalMulti, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
+    fns: { getSheet_: getSheet_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, solveGoalMulti: solveGoalMulti, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
     consts: { SCHEMA: SCHEMA, TEXT_COLUMNS: TEXT_COLUMNS, PL_LINE_ITEMS: PL_LINE_ITEMS, LINE_CODE_PREFIX: LINE_CODE_PREFIX },
     // 模擬 Apps Script「每次 google.script.run 都是全新執行」：單次執行內的快取要清掉
     beginExecution: function () { SHEET_CACHE_ = {}; resetCalcMemo_(); LOCK_DEPTH_ = 0; }
@@ -6386,6 +6565,8 @@ const GATE_OPTIONS = ['GATE F', 'GATE E', 'GATE D', 'GATE C', 'GATE B', 'GATE A'
 const SCENARIO_TYPES = ['現況', '目標'];
 // 結構科目與自動計算科目不能刪、父科目也不能改，否則損益鏈會接錯段（後端也會擋，這裡只是不畫按鈕）
 const PROTECTED_LINE_CODES = ['A', 'B', 'C', 'E', 'G', 'I', 'K'];
+/** 營業淨利是哪個科目：後端在比較欄位/報告/科目表上附 profitCode(預設 K；K 被刪掉時是損益表最後一行總計) */
+function profitCodeOf_(obj) { return (obj && obj.profitCode) || 'K'; }
 const PL_LINE_PARENT_OPTIONS = [
   ['B', 'B 銷貨成本'],
   ['E', 'E 銷售費用(銷貨毛利前)'],
@@ -8639,7 +8820,7 @@ function saveFxGrid() {
  *     群組可以收合；小計列上的「＋」直接在那一段新增科目；拖曳 ⠿ 調整順序。
  *   - 右邊一步一步：① 怎麼算(三選一) ② 公式/輸入說明 ③ 結果，進階設定收起來。
  *   - 公式一律用「科目名稱」顯示與編輯([材料成本-KD] × [關稅率])，存檔時後端自動換成代碼，
- *     所以科目改名不會讓公式斷掉；輸入 [ 會跳出科目/參數清單；常用寫法有範本按鈕一鍵產生。
+ *     所以科目改名不會讓公式斷掉。編輯介面(一行一項 / 自由公式膠囊 / 文字)在 32-formula-builder.js。
  */
 let chartEditor = null;      // getChartEditor 的結果
 let chartSelected = '';      // 目前選中的科目代碼('' = 沒選；'__new__' = 新增中)
@@ -8662,8 +8843,9 @@ const FORMULA_FUNCTIONS_UI = [
   ['CHILDREN()', '這個科目底下所有子科目的合計（小計用）'],
   ['TAXDEDUCT()', '勾選「貨物稅完稅價格可扣除」的科目合計'],
   ['ROUND(x)', '四捨五入到整數；ROUND(x, 2) 到小數 2 位'],
-  ['SUM(a, b, …)', '加總'], ['MAX(a, b)', '取大'], ['MIN(a, b)', '取小'], ['ABS(x)', '絕對值'],
-  ['IF(條件, 成立, 不成立)', '例：IF([月銷量] > 100, 1, 2)'],
+  ['ROUNDUP(x, 位數)', '無條件進位'], ['ROUNDDOWN(x, 位數)', '無條件捨去'],
+  ['IF(條件, 成立, 不成立)', '如果…就…否則，例：IF([月銷量] > 100, 1, 2)'],
+  ['MAX(a, b)', '取大'], ['MIN(a, b)', '取小'], ['SUM(a, b, …)', '加總'], ['ABS(x)', '絕對值'],
   ['REF("情境", "科目代碼")', '引用另一個情境（可以是別的車型）的科目金額']
 ];
 
@@ -8956,7 +9138,7 @@ function chartEditorPaneHtml_() {
       <div style="font-size:30px;opacity:.5;">ƒx</div>
       <h4 style="color:var(--text);margin:8px 0 6px;">點左邊的科目來設定</h4>
       <div class="howto">
-        <div><b>改算法</b>：點科目 → 選「怎麼算」→ 用常用寫法或直接打公式，下面立刻看到結果</div>
+        <div><b>改算法</b>：點科目 → 選「怎麼算」→ 一行一項選科目、乘上比率，每一行旁邊立刻看到結果</div>
         <div><b>加科目</b>：小計那一列右邊的「＋」，直接加在那一段底下</div>
         <div><b>改順序</b>：抓住 ⠿ 拖到想要的位置，放開就存</div>
         <div><b>貼 Excel</b>：成本、費用的金額可以在「銷貨成本」「營業費用」頁直接整塊貼上</div>
@@ -9027,7 +9209,7 @@ function chartEditorPaneHtml_() {
 
 function chartCalcBodyHtml_() {
   const d = chartDraft;
-  const title = `<div class="ed-step-title"><span class="step-no">2</span>${d.CalcType === 'FORMULA' ? '公式' : d.CalcType === 'DEV_AMORT' ? '攤提設定' : '金額在哪裡填'}</div>`;
+  const title = `<div class="ed-step-title"><span class="step-no">2</span>${d.CalcType === 'DEV_AMORT' ? '攤提設定' : '金額在哪裡填'}</div>`;
   if (d.CalcType === 'INPUT') {
     const isCost = chartIsCostSection_(d);
     return title + `<div class="callout info">每個車系的金額在「${isCost ? '銷貨成本' : '營業費用'}」頁填（也可以從 Excel 整塊貼上）。
@@ -9040,32 +9222,7 @@ function chartCalcBodyHtml_() {
       <div class="callout info" style="margin-top:10px;">在「開發總投」頁把投資列的攤提落點選成這個科目，金額 ÷ 攤提台數就會出現在這裡（可以只攤給部分車系）。
         <button type="button" class="link-btn" onclick="switchTab('devinvestment')">前往開發總投 →</button></div>`;
   }
-  return title + `
-    <div class="tpl-row"><span class="muted">常用寫法：</span>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('mul')">某科目 × 比率</button>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('sum')">幾個科目相加</button>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('children')">小計（子科目合計）</button>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('minus')">上一段 − 子科目合計</button>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('ref')">參考另一個情境 × 倍率</button>
-      <button type="button" class="tpl-btn" onclick="formulaTemplate_('const')">固定金額</button>
-    </div>
-    <div class="formula-box" id="ce-formula-box">
-      <textarea id="ce-formula" rows="2" spellcheck="false"
-        oninput="onFormulaInput_(this)" onkeydown="onFormulaKeydown_(event)" onblur="setTimeout(closeFormulaAc_, 150)"
-        placeholder="例：[廠價(未稅)] × [季Margin率]　　輸入 [ 會跳出科目與參數清單">${esc(d.Formula || '')}</textarea>
-      <div class="ac-list" id="ce-ac" hidden></div>
-    </div>
-    <div class="formula-status" id="ce-status"></div>
-    <div class="formula-tools">
-      <button type="button" class="link-btn" onclick="insertFormulaText('[');document.getElementById('ce-formula').dispatchEvent(new Event('input'))">＋ 插入科目或參數</button>
-      <span class="muted">運算：+ − × ÷ ( )，可以直接打 15%</span>
-      <details class="fx-help"><summary class="link-btn">函式與變數說明</summary>
-        <table class="grid-table"><tbody>
-          ${FORMULA_FUNCTIONS_UI.map(f => `<tr><td class="row-head"><code>${esc(f[0])}</code></td><td style="text-align:left;">${esc(f[1])}</td><td><button type="button" class="ins-chip fn" onclick="insertFormulaText('${esc(f[0].replace(/, …/, ''))}')">插入</button></td></tr>`).join('')}
-          ${(chartEditor.variables || []).map(v => `<tr><td class="row-head"><code>[${esc(v.name)}]</code></td><td style="text-align:left;">${esc(v.desc)}</td><td><button type="button" class="ins-chip var" onclick="insertFormulaText('[${esc(v.name)}]')">插入</button></td></tr>`).join('')}
-        </tbody></table>
-      </details>
-    </div>`;
+  return fxEditorHtml_();
 }
 
 function chartIsCostSection_(d) {
@@ -9124,8 +9281,14 @@ function drawFormulaAc_() {
       <span>${esc(c.label)}</span><span class="muted">${esc(c.hint || '')}</span></div>`;
   }).join('');
   box.hidden = false;
-  const active = box.querySelector('.ac-item.active');
-  if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+  scrollListTo_(box, box.querySelector('.ac-item.active'));
+}
+/**
+ * 離開公式框稍後再關清單(讓滑鼠點清單來得及)。到時候游標又回到框裡、或這個框已經被重畫掉(存檔後編輯器重畫，
+ * 移除舊框也會觸發 blur)就不關 —— 不然新框裡剛打開的清單會被舊的計時器關掉，按 Enter 變成換行。
+ */
+function onFormulaBlur_(ta) {
+  setTimeout(() => { if (ta.isConnected && document.activeElement !== ta) closeFormulaAc_(); }, 150);
 }
 function closeFormulaAc_() {
   chartAc_ = null;
@@ -9178,66 +9341,6 @@ function insertFormulaText(text) {
   chartDirty_();
   schedulePreview_();
 }
-function setFormulaText_(text) {
-  const ta = document.getElementById('ce-formula');
-  if (ta) ta.value = text;
-  chartDraft.Formula = text;
-  chartDirty_();
-  schedulePreview_(true);
-}
-
-/** 常用寫法：問幾個問題就幫忙組好公式(名稱版)，使用者不必記語法 */
-function formulaTemplate_(kind) {
-  const lines = chartEditor.lines.filter(l => !chartDraft || l.LineCode !== chartDraft.LineCode);
-  const lineRef = code => { const l = chartLineByCode_(code); return l && chartNameUsable_(l) ? '[' + l.LineName + ']' : code; };
-  const lineOpts = lines.map(l => [l.LineCode, l.LineName]);
-  if (kind === 'children') { setFormulaText_('CHILDREN()'); toast('子科目合計：把其他科目的「計入」選成這個科目，就會被加總進來', 'ok', 4000); return; }
-  if (kind === 'mul') {
-    const params = (chartEditor.params || []).map(p => ['[' + p.ParamName + ']', p.ParamName + (p.Unit === '%' ? '（%）' : '')]);
-    openModal({
-      title: '某科目 × 比率', body: '<p class="help">例：季Margin = 廠價(未稅) × 季Margin率；關稅 = 材料成本-KD × 關稅率。比率可以用參數（到「參數與比率」頁新增），或直接填固定 %。</p>',
-      fields: [
-        { name: 'line', label: '科目', type: 'select', options: lineOpts, value: 'P8' },
-        { name: 'rate', label: '乘以', type: 'select', options: params.concat([['__pct__', '固定百分比（下面填）'], ['__num__', '固定倍數（下面填）']]) },
-        { name: 'value', label: '固定百分比 / 倍數', type: 'number', placeholder: '選固定百分比或倍數時才填，例：0.5 或 1.2' }
-      ], okText: '套用'
-    }).then(v => {
-      if (!v) return;
-      const right = v.rate === '__pct__' ? (num(v.value) + '%') : v.rate === '__num__' ? String(num(v.value)) : v.rate;
-      setFormulaText_(lineRef(v.line) + ' * ' + right);
-    });
-  } else if (kind === 'sum') {
-    openModal({
-      title: '幾個科目相加', wide: true,
-      fields: [{ name: 'codes', label: '勾選要相加的科目', type: 'checks', options: lineOpts.filter(o => !/^P\d$/.test(o[0])) }],
-      okText: '套用', validate: v => v.codes.length < 1 ? '請至少勾一個科目' : ''
-    }).then(v => { if (v) setFormulaText_(v.codes.map(lineRef).join(' + ')); });
-  } else if (kind === 'minus') {
-    openModal({
-      title: '上一段 − 子科目合計', body: '<p class="help">例：銷貨毛利 = 生產毛利 − 銷售費用合計。這個科目底下的子科目就是要扣掉的費用。</p>',
-      fields: [{ name: 'line', label: '上一段', type: 'select', options: lineOpts.filter(o => (chartLineByCode_(o[0]) || {}).isProtected || /CHILDREN/.test((chartLineByCode_(o[0]) || {}).Formula || '')) }],
-      okText: '套用'
-    }).then(v => { if (v) setFormulaText_(lineRef(v.line) + ' - CHILDREN()'); });
-  } else if (kind === 'ref') {
-    openModal({
-      title: '參考另一個情境 × 倍率',
-      body: '<p class="help">例：一般材料以 DE 實績為 BASE × 1.2。對方情境有同一個車系就取同一個車系，否則取它的加權平均。對方的數字改了，這裡會跟著變。</p>',
-      fields: [
-        { name: 'sc', label: '參考的情境（可以是別的車型）', type: 'select', options: (chartEditor.referenceScenarios || []).map(r => [r.ScenarioID, r.label]) },
-        { name: 'code', label: '參考的科目', type: 'select', options: lineOpts, value: chartDraft && chartDraft.LineCode ? chartDraft.LineCode : 'b4', help: '以科目代碼對應；不同車型的科目代碼不同時，打開「顯示代碼」確認' },
-        { name: 'factor', label: '倍率', type: 'number', value: 1 }
-      ], okText: '套用'
-    }).then(v => {
-      if (!v) return;
-      const f = num(v.factor) || 1;
-      setFormulaText_(`REF("${v.sc}", "${v.code}")` + (f === 1 ? '' : ' * ' + f));
-    });
-  } else if (kind === 'const') {
-    openModal({ title: '固定金額', fields: [{ name: 'v', label: '每台金額（元）', type: 'number' }], okText: '套用' })
-      .then(v => { if (v) setFormulaText_(String(num(v.v))); });
-  }
-}
-
 /** 公式的可讀版本(儀表板/報告/矩陣頁用)：代碼換成科目名稱、[名稱] 與函式上色 */
 function formulaReadableHtml_(formula) {
   if (!formula || !String(formula).trim()) return '<span class="muted">（輸入公式後，這裡會用科目名稱顯示）</span>';
@@ -9276,7 +9379,7 @@ function setChartCalcType(t) {
   document.getElementById('ce-calc-body').innerHTML = chartCalcBodyHtml_();
   afterChartEditorRender_();
   chartDirty_();
-  if (t === 'FORMULA') { const ta = document.getElementById('ce-formula'); if (ta) ta.focus(); }
+  if (t === 'FORMULA' && fxMode === 'text') { const ta = document.getElementById('ce-formula'); if (ta) ta.focus(); }
 }
 function setChartOverride(vehicleId, formula) {
   chartDraft.VehicleFormulas = chartDraft.VehicleFormulas || {};
@@ -9301,11 +9404,12 @@ function schedulePreview_(immediate) {
   if (chartPreviewTimer_) clearTimeout(chartPreviewTimer_);
   chartPreviewTimer_ = setTimeout(() => {
     if (!chartDraft) return;
-    if (chartSelected === '__new__') { renderChartPreview_(); return; }
+    if (chartDraft.CalcType === 'FORMULA' && !String(chartDraft.Formula || '').trim()) { chartPreview = null; renderChartPreview_(); return; }   // 還沒寫公式不算錯
+    const probes = fxProbeList_();
     google.script.run
-      .withSuccessHandler(res => { chartPreview = res; renderChartPreview_(); })
-      .withFailureHandler(err => { chartPreview = { problems: [{ message: err.message }] }; renderChartPreview_(); })
-      .previewLineFormula(currentVehicleTypeId, currentScenarioId, chartDraftPayload_());
+      .withSuccessHandler(res => { chartPreview = res; renderChartPreview_(); fxApplyProbes_(res && (res.preview || res.probes), probes); })
+      .withFailureHandler(err => { chartPreview = { problems: [{ message: err.message }] }; renderChartPreview_(); fxApplyProbes_(null, probes); })
+      .previewLineFormula(currentVehicleTypeId, currentScenarioId, Object.assign(chartDraftPayload_(), { Probes: probes }));
   }, immediate ? 0 : 350);
 }
 function renderChartPreview_() {
@@ -9318,18 +9422,19 @@ function renderChartPreview_() {
     else if (probs.length) { st.className = 'formula-status err'; st.textContent = '✘ ' + probs.map(p => p.message.replace(/^「[^」]*」/, '')).join('；'); }
     else if (chartPreview) { st.className = 'formula-status ok'; st.innerHTML = '✔ ' + formulaReadableHtml_(chartDraft.Formula); }
   }
+  fxRefreshValues_();
 }
 /** 結果：每個車系「目前 → 修改後」與對營業淨利的影響；計算過程收在展開區 */
 function chartPreviewHtml_() {
   if (!currentScenarioId) return '<p class="muted">右上角選一個情境就能看到試算結果。</p>';
-  if (chartSelected === '__new__') return '<p class="muted">新增之後就能試算。</p>';
   const cur = chartEditor.preview;
   const next = chartPreview && chartPreview.preview;
   const probs = (chartPreview && chartPreview.problems) || [];
   if (!cur && !next) return '<p class="muted">這個情境還沒有銷售構成資料，無法試算。</p>';
   const vehicles = (chartEditor.vehicles || []).filter(v => (cur && cur.values[v.VehicleID]) || (next && next.values[v.VehicleID]));
   if (!vehicles.length) return '<p class="muted">這個情境還沒有銷售構成資料，無法試算。</p>';
-  const code = chartDraft.LineCode;
+  const code = chartSelected === '__new__' ? '__NEW__' : chartDraft.LineCode;   // 還沒新增的科目用暫時代碼試算
+  const kCode = profitCodeOf_(chartEditor);
   const map = chartCodeNameMap_();
   const row = (label, a, b, k0, k1, cls) => {
     const changed = b !== undefined && a !== undefined && Math.abs(a - b) > 0.5;
@@ -9349,10 +9454,10 @@ function chartPreviewHtml_() {
       <thead><tr><th>車系</th><th>目前</th><th>修改後</th><th>營業淨利變化</th></tr></thead>
       <tbody>${vehicles.map(v => {
         const a = cur && cur.values[v.VehicleID] || {}, b = next && next.values[v.VehicleID] || null;
-        return row(v.VehicleCode || v.VehicleID, a[code], b ? b[code] : undefined, a.K, b ? b.K : undefined);
+        return row(v.VehicleCode || v.VehicleID, a[code], b ? b[code] : undefined, a[kCode], b ? b[kCode] : undefined);
       }).join('')}
       ${row('加權平均', chartWeightedValue_(code, cur), next ? chartWeightedValue_(code, next) : undefined,
-        chartWeightedValue_('K', cur), next ? chartWeightedValue_('K', next) : undefined, 'subtotal')}</tbody>
+        chartWeightedValue_(kCode, cur), next ? chartWeightedValue_(kCode, next) : undefined, 'subtotal')}</tbody>
     </table>
     <details class="trace-box"><summary class="link-btn">看計算過程</summary>${traces}</details>`;
 }
@@ -9386,8 +9491,14 @@ function cancelChartEdit() {
 }
 function deleteChartLine() {
   const d = chartDraft;
+  let profitNote = '';
+  if (d.LineCode === profitCodeOf_(chartEditor)) {
+    // 刪掉營業淨利：儀表板重點指標、GATE 報告、目標反推會改看損益表最底下的總計(後端 profitLineCode_ 決定)
+    const next = chartEditor.nextProfitCode ? chartLineByCode_(chartEditor.nextProfitCode) : null;
+    profitNote = `<div class="callout warn" style="margin-top:10px;"><div>這是目前的營業淨利。刪除後，儀表板重點指標、GATE 報告、目標反推會改用損益表最底下的總計${next ? `<b>「${esc(next.LineName)}」</b>` : '（目前沒有其他總計科目）'}當營業淨利。只是想換名稱或公式的話，直接改這個科目就好，不必刪除。</div></div>`;
+  }
   confirmModal('刪除科目「' + d.LineName + '」？',
-    `只影響車型 <b>${esc(currentVehicleTypeId)}</b>。${d.usage ? `這個科目在 ${esc(currentVehicleTypeId)} 的情境裡有 <b>${d.usage}</b> 筆輸入金額，會一起清掉。` : ''}被其他公式引用、或底下還有子科目時會被擋下來。`,
+    `只影響車型 <b>${esc(currentVehicleTypeId)}</b>。${d.usage ? `這個科目在 ${esc(currentVehicleTypeId)} 的情境裡有 <b>${d.usage}</b> 筆輸入金額，會一起清掉。` : ''}被其他公式引用、或底下還有子科目時會被擋下來。${profitNote}`,
     '刪除', true).then(ok => {
     if (!ok) return;
     google.script.run
@@ -9440,6 +9551,725 @@ function restoreChartDefaults() {
       loadChartEditor_(true);
     })).withFailureHandler(err => toast(err.message, 'err')).restoreBuiltInLineItems(currentVehicleTypeId);
   });
+}
+
+/* ===== src/ui/32-formula-builder.js ===== */
+/* ================= 公式編輯器：一行一項 + 自由公式(膠囊) =================
+ *
+ * 科目設定頁 ② 公式 的編輯介面，取代原本「空白文字框 + 常用寫法按鈕」：
+ *   - 一行一項(預設)：損益表的公式大多是「幾個東西加加減減，每個東西再乘/除幾個比率」，
+ *     所以拆成一行一項：每行選一個來源(科目/參數/子科目合計/別的情境/固定金額)，後面可以接好幾個
+ *     × 或 ÷ 的係數(參數、固定 %/倍數、(1 + 參數)、科目)，每行右邊直接顯示這一行算出多少。
+ *   - 自由公式：有 IF/ROUND/括號巢狀等拆不成一行一項的公式，用一顆一顆膠囊編輯，每顆底下顯示目前的值；
+ *     點選單插入科目/參數/函式，鍵盤直接打數字與運算符號。還可以切成純文字輸入(進階、貼上用)。
+ * 兩種模式存的都是同一個「名稱版」公式文字(chartDraft.Formula)，存檔時後端照樣換成代碼。
+ * 每一行/每顆膠囊的值，是把那一段公式當成「探測公式」(Probes)跟著試算一起送給後端算的加權平均。
+ */
+let fxMode = 'rows';        // 'rows' 一行一項 / 'chips' 自由公式(膠囊) / 'text' 文字輸入
+let fxTerms = [];           // 一行一項：[{ sign: 1|-1, src: 原子, factors: [{ op: '*'|'/', a: 原子 }] }]
+let fxToks = [];            // 膠囊：公式拆成的 token
+let fxCaret = 0;            // 膠囊游標位置(第幾顆之前)
+let fxSelTok = -1;          // 選取中的膠囊
+let fxProbeVals = {};       // 公式片段 → 目前情境的加權平均值
+let fxDraftKey_ = null;     // 目前的編輯狀態屬於哪一個科目(換科目才重新判斷模式)
+let fxProbeScenario_ = null; // fxProbeVals 是哪一個情境算的(換情境就清掉，不顯示上一個情境的數字)
+let fxPicker_ = null;       // 選單狀態
+
+const FX_SPECIAL_FNS_ = { CHILDREN: '子科目合計', TAXDEDUCT: '可扣除貨物稅科目合計' };
+
+/* ---------------- 公式文字 ⇄ token ---------------- */
+/** 名稱版公式拆成 token；有引號字串等膠囊表達不了的寫法時回傳 null(只能用文字輸入) */
+function fxTokenize_(text) {
+  const s = String(text || '')
+    .replace(/[×＊]/g, '*').replace(/[÷／]/g, '/').replace(/[−–—－]/g, '-').replace(/＋/g, '+')
+    .replace(/（/g, '(').replace(/）/g, ')').replace(/，/g, ',').replace(/［/g, '[').replace(/］/g, ']')
+    .replace(/％/g, '%').replace(/＝/g, '=').replace(/＜/g, '<').replace(/＞/g, '>').replace(/[“”]/g, '"').replace(/^\s*=/, '');
+  const out = [];
+  let i = 0;
+  while (i < s.length) {
+    const ch = s.charAt(i), rest = s.slice(i);
+    let m;
+    if (/\s/.test(ch)) { i++; continue; }
+    if ((m = /^(\d+\.?\d*|\.\d+)(\s*%)?/.exec(rest))) {
+      out.push({ t: 'num', v: m[1] + (m[2] ? '%' : '') });
+      i += m[0].length; continue;
+    }
+    if (ch === '[') {
+      const end = s.indexOf(']', i);
+      if (end === -1) return null;
+      out.push({ t: 'name', v: s.slice(i + 1, end).trim() });
+      i = end + 1; continue;
+    }
+    if ((m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(rest))) {
+      const id = m[0], up = id.toUpperCase(), after = s.slice(i + id.length);
+      if (/^\s*\(/.test(after)) {
+        let mm;
+        if (FX_SPECIAL_FNS_[up] && (mm = /^\s*\(\s*\)/.exec(after))) { out.push({ t: 'fn0', v: up }); i += id.length + mm[0].length; continue; }
+        if (up === 'REF') {
+          mm = /^\s*\(\s*"([^"]*)"\s*,\s*"([^"]*)"\s*(?:,\s*"([^"]*)"\s*)?\)/.exec(after);
+          if (!mm) return null;
+          out.push({ t: 'ref', sc: mm[1], code: mm[2], vid: mm[3] || '' });
+          i += id.length + mm[0].length; continue;
+        }
+        const open = /^\s*\(/.exec(after)[0];
+        out.push({ t: 'fn', v: up });
+        i += id.length + open.length; continue;
+      }
+      out.push({ t: 'code', v: id });
+      i += id.length; continue;
+    }
+    const two = s.substr(i, 2);
+    if (two === '<=' || two === '>=' || two === '<>' || two === '!=') { out.push({ t: 'op', v: two === '!=' ? '<>' : two }); i += 2; continue; }
+    if ('+-*/^(),%<>='.indexOf(ch) !== -1) { out.push({ t: 'op', v: ch }); i++; continue; }
+    return null;
+  }
+  return out;
+}
+function fxTokText_(t) {
+  if (!t) return '';
+  if (t.t === 'name') return '[' + t.v + ']';
+  if (t.t === 'fn0') return t.v + '()';
+  if (t.t === 'fn') return t.v + '(';
+  if (t.t === 'ref') return `REF("${t.sc}", "${t.code}"${t.vid ? `, "${t.vid}"` : ''})`;
+  if (t.t === 'onePlus') return '(1 + ' + fxTokText_(t.a) + ')';
+  return String(t.v);
+}
+const FX_BIN_OPS_ = ['+', '-', '*', '/', '^', '<', '>', '<=', '>=', '=', '<>'];
+/** token → 公式文字：二元運算子前後空一格，負號、括號、逗號照一般寫法 */
+function fxToksToText_(toks) {
+  let out = '', prev = null;
+  toks.forEach(t => {
+    if (t.t === 'op' && FX_BIN_OPS_.indexOf(t.v) !== -1) {
+      const unary = (t.v === '-' || t.v === '+') && (!prev || prev.t === 'fn' || (prev.t === 'op' && prev.v !== ')' && prev.v !== '%'));
+      out += unary ? t.v : ' ' + t.v + ' ';
+    } else if (t.t === 'op' && t.v === ',') out += ', ';
+    else out += fxTokText_(t);
+    prev = t;
+  });
+  return out.replace(/\s+/g, ' ').replace(/\(\s+/g, '(').replace(/\s+\)/g, ')').trim();
+}
+
+/* ---------------- token ⇄ 一行一項 ---------------- */
+const FX_ATOM_TYPES_ = ['name', 'code', 'fn0', 'ref', 'num'];
+/** 拆得成「± 來源 (×÷ 係數)*」就回傳各行；拆不成(有函式、括號巢狀、比較…)回傳 null */
+function fxTermsFromToks_(toks) {
+  if (!toks) return null;
+  if (!toks.length) return [];
+  let i = 0;
+  const isOp = (v, k) => { const t = toks[k === undefined ? i : k]; return !!t && t.t === 'op' && t.v === v; };
+  const atom = () => { const t = toks[i]; if (t && FX_ATOM_TYPES_.indexOf(t.t) !== -1) { i++; return Object.assign({}, t); } return null; };
+  const terms = [];
+  let sign = 1;
+  if (isOp('-')) { sign = -1; i++; } else if (isOp('+')) i++;
+  for (;;) {
+    const src = atom();
+    if (!src) return null;
+    const factors = [];
+    while (isOp('*') || isOp('/')) {
+      const op = toks[i++].v;
+      let a = atom();
+      if (!a) {
+        // (1 + 參數)：常見的「÷ (1 + 營業稅率)」
+        const inner = toks[i + 3];
+        if (isOp('(') && toks[i + 1] && toks[i + 1].t === 'num' && toks[i + 1].v === '1' && isOp('+', i + 2) &&
+          inner && (inner.t === 'name' || inner.t === 'code') && isOp(')', i + 4)) {
+          a = { t: 'onePlus', a: Object.assign({}, inner) };
+          i += 5;
+        } else return null;
+      }
+      factors.push({ op, a });
+    }
+    terms.push({ sign, src, factors });
+    if (i >= toks.length) break;
+    if (isOp('+')) sign = 1; else if (isOp('-')) sign = -1; else return null;
+    i++;
+  }
+  return terms;
+}
+function fxAtomComplete_(a) { return !!a && (a.t !== 'num' || String(a.v).replace('%', '').trim() !== '' && !isNaN(Number(String(a.v).replace('%', '')))); }
+/** 一行的公式(不含正負號)；還沒選來源的行回傳空字串 */
+function fxTermCore_(t) {
+  if (!fxAtomComplete_(t.src)) return '';
+  return fxTokText_(t.src) + t.factors.filter(f => fxAtomComplete_(f.a.t === 'onePlus' ? f.a.a : f.a)).map(f => ` ${f.op} ${fxTokText_(f.a)}`).join('');
+}
+function fxTermsText_(terms) {
+  let out = '';
+  terms.forEach(t => {
+    const core = fxTermCore_(t);
+    if (!core) return;
+    out += out ? (t.sign < 0 ? ' - ' : ' + ') + core : (t.sign < 0 ? '-' : '') + core;
+  });
+  return out;
+}
+
+/* ---------------- 原子的顯示名稱、種類 ---------------- */
+function fxParamDef_(name) { return ((chartEditor && chartEditor.params) || []).find(p => p.ParamName === name); }
+function fxAtomInfo_(a) {
+  if (!a) return { label: '', kind: 'empty' };
+  if (a.t === 'onePlus') { const inner = fxAtomInfo_(a.a); return { label: '(1 + ' + inner.label + ')', kind: inner.kind }; }
+  if (a.t === 'num') return { label: a.v, kind: 'num' };
+  if (a.t === 'fn0') return { label: FX_SPECIAL_FNS_[a.v] || a.v, kind: 'special' };
+  if (a.t === 'fn') return { label: a.v + '(', kind: 'fn' };
+  if (a.t === 'ref') {
+    const sc = ((chartEditor && chartEditor.referenceScenarios) || []).find(r => r.ScenarioID === a.sc);
+    const line = chartLineByCode_(a.code);
+    return { label: `${sc ? sc.label : a.sc} 的 ${line ? line.LineName : a.code}`, kind: 'ref' };
+  }
+  if (a.t === 'code') {
+    const line = chartLineByCode_(a.code || a.v);
+    return line ? { label: line.LineName, kind: 'line' } : { label: a.v, kind: 'bad', hint: '找不到這個科目代碼' };
+  }
+  if (a.t === 'name') {
+    if (fxParamDef_(a.v)) return { label: a.v, kind: 'param' };
+    if (((chartEditor && chartEditor.variables) || []).some(v => v.name === a.v)) return { label: a.v, kind: 'var' };
+    if (/^[A-Za-z]{3}匯率$/.test(a.v)) return { label: a.v, kind: 'var' };
+    if (chartEditor && chartEditor.lines.some(l => l.LineName === a.v)) return { label: a.v, kind: 'line' };
+    return { label: a.v, kind: 'bad', hint: '找不到這個科目或參數' };
+  }
+  return { label: String(a.v || ''), kind: 'op' };
+}
+/** 值的顯示：% 參數顯示百分比；小數字留小數；金額取整 */
+function fxFmtVal_(v, a) {
+  if (v === undefined) return '…';
+  if (v === null || isNaN(v)) return '—';
+  const inner = a && a.t === 'onePlus' ? null : a;
+  const p = inner && inner.t === 'name' ? fxParamDef_(inner.v) : null;
+  if (p && p.Unit === '%') return fmt(v * 100, 3) + '%';
+  if (Math.abs(v) < 100 && Math.round(v) !== v) return fmt(v, 4);
+  return fmt(v);
+}
+/** 可以放進探測的公式片段(數字、函式開頭這類不需要問後端) */
+function fxProbeText_(a) { return a && (a.t !== 'num' && a.t !== 'fn' && a.t !== 'op') ? fxTokText_(a) : ''; }
+function fxProbeSpan_(text, a, cls) {
+  if (!text) return '';
+  return `<span class="${cls || 'v'}" data-probe="${esc(text)}" data-fmt="${esc(JSON.stringify(a || null))}">${fxFmtVal_(fxProbeVals[text], a)}</span>`;
+}
+
+/* ---------------- 試算：探測公式 ---------------- */
+function fxProbeList_() {
+  const set = [];
+  const add = s => { if (s && set.indexOf(s) === -1) set.push(s); };
+  if (!chartDraft || chartDraft.CalcType !== 'FORMULA') return set;
+  if (fxMode === 'rows') {
+    fxTerms.forEach(t => {
+      add(fxProbeText_(t.src));
+      t.factors.forEach(f => add(fxProbeText_(f.a)));
+      if (t.factors.length) add(fxTermCore_(t));
+    });
+  } else if (fxMode === 'chips') fxToks.forEach(t => add(fxProbeText_(t)));
+  return set;
+}
+/** 試算結果回來：算各探測公式的加權平均、更新畫面上的數字(不重畫，輸入框不會掉焦點) */
+function fxApplyProbes_(preview, probes) {
+  fxProbeScenario_ = currentScenarioId;
+  if (!preview || !preview.probes) {
+    probes.forEach(text => { fxProbeVals[text] = null; });   // 算不出來(沒有情境、試算失敗)：顯示 —，不留舊數字
+  } else {
+    probes.forEach((text, idx) => {
+      let sum = 0, w = 0, any = false;
+      Object.keys(preview.probes).forEach(vid => {
+        const v = preview.probes[vid][idx];
+        if (v === null || v === undefined) return;
+        const wt = num((preview.weights || {})[vid]);
+        sum += v * wt; w += wt; any = true;
+      });
+      fxProbeVals[text] = any && w ? sum / w : null;
+    });
+  }
+  fxRefreshValues_();
+}
+function fxRefreshValues_() {
+  if (typeof document === 'undefined') return;
+  document.querySelectorAll('#ce-calc-body [data-probe]').forEach(el => {
+    const text = el.getAttribute('data-probe');
+    let a = null;
+    try { a = JSON.parse(el.getAttribute('data-fmt') || 'null'); } catch (e) { a = null; }
+    const v = fxProbeVals[text];
+    el.textContent = el.hasAttribute('data-signed') && v !== undefined && v !== null ? fxSigned_(v * Number(el.getAttribute('data-signed'))) : fxFmtVal_(v, a);
+  });
+  const total = document.getElementById('ce-fx-total');
+  if (total) total.textContent = fxTotalText_();
+}
+function fxSigned_(v) { return (v < 0 ? '−' : '') + fxFmtVal_(Math.abs(v)); }
+function fxTotalText_() {
+  if (!chartDraft || !String(chartDraft.Formula || '').trim()) return '—';
+  const pv = chartPreview && chartPreview.preview;
+  if (!pv) return chartPreview && chartPreview.problems && chartPreview.problems.length ? '—' : '…';
+  const v = chartWeightedValue_(chartSelected === '__new__' ? '__NEW__' : chartDraft.LineCode, pv);
+  return v === null ? '—' : fmt(v);
+}
+
+/* ---------------- 模式 ---------------- */
+/** 換科目時：拆得成一行一項就用一行一項，否則自由公式；同一個科目重畫時保留使用者選的模式 */
+function fxInitForDraft_() {
+  const key = chartSelected + '|' + (chartDraft ? chartDraft.LineCode : '');
+  const text = chartDraft ? chartDraft.Formula || '' : '';
+  const toks = fxTokenize_(text);
+  const terms = fxTermsFromToks_(toks);
+  if (fxProbeScenario_ !== currentScenarioId) { fxProbeScenario_ = currentScenarioId; fxProbeVals = {}; }
+  if (fxDraftKey_ !== key) {
+    fxDraftKey_ = key;
+    fxProbeVals = {};
+    fxMode = terms ? 'rows' : toks ? 'chips' : 'text';
+  } else if (fxMode === 'rows' && !terms) fxMode = toks ? 'chips' : 'text';
+  else if (fxMode === 'chips' && !toks) fxMode = 'text';
+  fxTerms = terms || [];
+  fxToks = toks || [];
+  fxCaret = fxToks.length;
+  fxSelTok = -1;
+}
+function setFxMode(mode) {
+  if (!chartDraft || mode === fxMode) return;
+  const text = chartDraft.Formula || '';
+  const toks = fxTokenize_(text);
+  if (mode === 'rows') {
+    const terms = fxTermsFromToks_(toks);
+    if (!terms) { toast('這個公式有函式、括號或比較，拆不成一行一項，請用自由公式編輯', 'warn', 4000); return; }
+    fxTerms = terms;
+  } else if (mode === 'chips') {
+    if (!toks) { toast('公式裡有引號字串等寫法，膠囊沒辦法表示，請用文字輸入', 'warn', 4000); return; }
+    fxToks = toks; fxCaret = toks.length; fxSelTok = -1;
+  }
+  fxMode = mode;
+  fxRedraw_();
+  if (mode === 'text') { const ta = document.getElementById('ce-formula'); if (ta) ta.focus(); }
+  if (mode === 'chips') { const bar = document.getElementById('ce-chips'); if (bar) bar.focus(); }
+}
+function fxRedraw_() {
+  closeFxPicker_();
+  const body = document.getElementById('ce-fx-body');
+  if (body) body.innerHTML = fxModeBodyHtml_();
+  document.querySelectorAll('.fx-mode .seg-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-mode') === (fxMode === 'text' ? 'chips' : fxMode)));
+  fxRefreshValues_();
+}
+/** 一行一項/膠囊改了之後：寫回公式文字 → 未儲存 → 重新試算 */
+function fxCommit_(redraw) {
+  chartDraft.Formula = fxMode === 'rows' ? fxTermsText_(fxTerms) : fxToksToText_(fxToks);
+  chartDirty_();
+  if (redraw !== false) fxRedraw_();
+  schedulePreview_();
+}
+
+/* ---------------- 畫面 ---------------- */
+function fxEditorHtml_() {
+  closeFxPicker_();   // 編輯器整個重畫(存檔、換科目…)：舊選單記的行號已經不對，直接關掉
+  fxInitForDraft_();
+  const segMode = fxMode === 'text' ? 'chips' : fxMode;
+  return `<div class="ed-step-title"><span class="step-no">2</span>公式
+      <span class="seg fx-mode" style="margin-left:auto;">
+        <button type="button" class="seg-btn${segMode === 'rows' ? ' active' : ''}" data-mode="rows" onclick="setFxMode('rows')"
+          data-tip="每行一個科目或參數，可以再乘/除比率；大部分的公式都這樣寫">一行一項</button>
+        <button type="button" class="seg-btn${segMode === 'chips' ? ' active' : ''}" data-mode="chips" onclick="setFxMode('chips')"
+          data-tip="有 IF、ROUND、括號的公式用這個">自由公式</button>
+      </span></div>
+    <div id="ce-fx-body">${fxModeBodyHtml_()}</div>
+    <div class="formula-status" id="ce-status"></div>`;
+}
+function fxModeBodyHtml_() {
+  if (fxMode === 'rows') return fxRowsHtml_();
+  if (fxMode === 'chips') return fxChipsHtml_();
+  return fxTextHtml_();
+}
+
+/* --- 一行一項 --- */
+function fxSlotHtml_(a, onclick, placeholder) {
+  if (!a) return `<button type="button" class="fx-slot empty" onclick="${onclick}">${esc(placeholder)}</button>`;
+  const info = fxAtomInfo_(a);
+  return `<button type="button" class="fx-slot kind-${info.kind}" onclick="${onclick}"${info.hint ? ` data-tip="${esc(info.hint)}"` : ''}>
+    <span class="nm">${esc(info.label)}</span>${fxProbeSpan_(fxProbeText_(a), a)}</button>`;
+}
+function fxRowsHtml_() {
+  const name = chartDraft.LineName || '這個科目';
+  const rows = fxTerms.map((t, i) => {
+    const src = t.src;
+    let srcHtml;
+    if (src && src.t === 'num') {
+      // 固定金額，或像「15% × 某科目」這種寫在最前面的百分比(數字框不能放 %，單位另外切換)
+      const pct = /%$/.test(src.v);
+      srcHtml = `<span class="fx-inline">固定 <input type="number" step="any" class="fx-num" value="${esc(String(src.v).replace('%', ''))}" placeholder="${pct ? '百分比' : '金額'}"
+        oninput="fxSetNum_(${i}, -1, this.value)"><span class="seg fx-unit">
+        <button type="button" class="seg-btn${pct ? '' : ' active'}" onclick="fxSetPct_(${i}, -1, false)">元</button>
+        <button type="button" class="seg-btn${pct ? ' active' : ''}" onclick="fxSetPct_(${i}, -1, true)">%</button></span>
+        <button type="button" class="link-btn" onclick="fxPickSrc_(${i}, this)">換</button></span>`;
+    } else if (src && src.t === 'ref') {
+      const scs = chartEditor.referenceScenarios || [];
+      srcHtml = `<span class="fx-inline fx-ref">
+        <select onchange="fxSetRef_(${i}, 'sc', this.value)">${scs.map(r => `<option value="${esc(r.ScenarioID)}"${r.ScenarioID === src.sc ? ' selected' : ''}>${esc(r.label)}</option>`).join('')}
+          ${scs.some(r => r.ScenarioID === src.sc) ? '' : `<option selected>${esc(src.sc)}</option>`}</select> 的
+        <select onchange="fxSetRef_(${i}, 'code', this.value)">${chartEditor.lines.map(l => `<option value="${esc(l.LineCode)}"${l.LineCode === src.code ? ' selected' : ''}>${esc(l.LineName)}</option>`).join('')}</select>
+        ${fxProbeSpan_(fxProbeText_(src), src)} <button type="button" class="link-btn" onclick="fxPickSrc_(${i}, this)">換</button></span>`;
+    } else {
+      srcHtml = fxSlotHtml_(src, `fxPickSrc_(${i}, this)`, '選一個科目、參數…');
+    }
+    const factors = src ? t.factors.map((f, k) => {
+      const op = `<button type="button" class="fx-op" onclick="fxFlipOp_(${i}, ${k})" data-tip="點一下切換 × / ÷">${f.op === '/' ? '÷' : '×'}</button>`;
+      const rm = `<button type="button" class="fx-x" onclick="fxDelFactor_(${i}, ${k})" data-tip="拿掉這個係數">✕</button>`;
+      if (f.a.t === 'num') {
+        const pct = /%$/.test(f.a.v);
+        return `<span class="fx-factor">${op}<input type="number" step="any" class="fx-num sm" value="${esc(String(f.a.v).replace('%', ''))}"
+          oninput="fxSetNum_(${i}, ${k}, this.value)"><span class="seg fx-unit">
+          <button type="button" class="seg-btn${pct ? '' : ' active'}" onclick="fxSetPct_(${i}, ${k}, false)">倍</button>
+          <button type="button" class="seg-btn${pct ? ' active' : ''}" onclick="fxSetPct_(${i}, ${k}, true)">%</button></span>${rm}</span>`;
+      }
+      return `<span class="fx-factor">${op}${fxSlotHtml_(f.a, `fxPickFactor_(${i}, ${k}, this)`, '')}${rm}</span>`;
+    }).join('') : '';
+    return `<div class="fx-row">
+      <button type="button" class="fx-sign ${t.sign < 0 ? 'minus' : 'plus'}" onclick="fxToggleSign_(${i})" data-tip="點一下切換加 / 減">${t.sign < 0 ? '−' : '＋'}</button>
+      <div class="fx-row-main">${srcHtml}${factors}
+        ${src ? `<button type="button" class="fx-add-factor" onclick="fxPickFactor_(${i}, -1, this)">× 乘 / ÷ 除…</button>` : ''}</div>
+      ${fxRowValHtml_(t)}
+      <button type="button" class="fx-del" onclick="fxDelTerm_(${i})" data-tip="刪除這一行">✕</button>
+    </div>`;
+  }).join('');
+  return `<div class="fx-eq-head"><b>${esc(name)}</b> =</div>
+    ${fxTerms.length ? `<div class="fx-rows">${rows}</div>`
+      : '<div class="callout info"><div>按「＋ 加一項」開始，例如：材料成本-KD × 關稅率。要扣掉的東西用「− 減一項」。</div></div>'}
+    <div class="fx-add-row">
+      <button type="button" class="btn sm secondary" onclick="fxAddTerm_(1, this)">＋ 加一項</button>
+      <button type="button" class="btn sm secondary" onclick="fxAddTerm_(-1, this)">− 減一項</button>
+    </div>
+    ${fxTerms.length ? `<div class="fx-total"><span>${esc(name)}（目前情境加權平均）</span><b id="ce-fx-total">${fxTotalText_()}</b></div>` : ''}`;
+}
+
+/** 固定數字的值：15% → 0.15 */
+function fxNumValue_(v) { const s = String(v || ''); return /%$/.test(s) ? Number(s.replace('%', '')) / 100 : Number(s); }
+/** 一行右邊的小計：有乘除就問後端整行的值，沒有就是來源本身的值(固定金額直接顯示) */
+function fxRowValHtml_(t) {
+  const core = fxTermCore_(t);
+  if (!core) return '<span class="fx-row-val muted">—</span>';
+  const neg = t.sign < 0 ? ' neg' : '';
+  const key = t.factors.length ? core : fxProbeText_(t.src);
+  if (!key) return `<span class="fx-row-val${neg}">${fxSigned_(fxNumValue_(t.src.v) * t.sign)}</span>`;
+  const v = fxProbeVals[key];
+  return `<span class="fx-row-val${neg}" data-probe="${esc(key)}" data-signed="${t.sign}">${v === undefined ? '…' : v === null ? '—' : fxSigned_(v * t.sign)}</span>`;
+}
+
+/* --- 自由公式(膠囊) --- */
+function fxChipHtml_(t, i) {
+  const sel = i === fxSelTok ? ' sel' : '';
+  if (t.t === 'op') return `<span class="fx-chip op${sel}" data-i="${i}">${esc({ '*': '×', '/': '÷', '-': '−', '<>': '≠', '<=': '≤', '>=': '≥' }[t.v] || t.v)}</span>`;
+  if (t.t === 'num') return `<span class="fx-chip num${sel}" data-i="${i}">${esc(t.v)}</span>`;
+  if (t.t === 'fn') return `<span class="fx-chip fn${sel}" data-i="${i}">${esc(t.v)}(</span>`;
+  const info = fxAtomInfo_(t);
+  return `<span class="fx-chip kind-${info.kind}${sel}" data-i="${i}"${info.hint ? ` data-tip="${esc(info.hint)}"` : ''}>${esc(info.label)}${fxProbeSpan_(fxProbeText_(t), t, 'cv')}</span>`;
+}
+function fxChipsBarInner_() {
+  let h = '';
+  fxToks.forEach((t, i) => { if (i === fxCaret && fxSelTok < 0) h += '<span class="fx-caret"></span>'; h += fxChipHtml_(t, i); });
+  if (fxCaret >= fxToks.length && fxSelTok < 0) h += '<span class="fx-caret"></span>';
+  if (!fxToks.length) h += '<span class="muted fx-chips-ph">按下面的「＋ 科目 / 參數」開始，數字和 + − × ÷ ( ) 可以直接用鍵盤打</span>';
+  return h;
+}
+function fxChipsHtml_() {
+  const keys = [['+', '＋'], ['-', '−'], ['*', '×'], ['/', '÷'], ['(', '('], [')', ')'], [',', ','], ['>', '>'], ['<', '<'], ['=', '=']];
+  return `<div class="fx-eq-head"><b>${esc(chartDraft.LineName || '這個科目')}</b> =</div>
+    <div class="fx-chips" id="ce-chips" tabindex="0" onkeydown="fxChipKey_(event)" onmousedown="fxChipMouse_(event)">${fxChipsBarInner_()}</div>
+    <div class="fx-keys">
+      ${keys.map(k => `<button type="button" class="fx-key" onmousedown="event.preventDefault()" onclick="fxInsertTok_({ t: 'op', v: '${k[0]}' })">${k[1]}</button>`).join('')}
+      <button type="button" class="btn sm" onmousedown="event.preventDefault()" onclick="fxPickChip_(this, 'item')">＋ 科目 / 參數</button>
+      <button type="button" class="btn sm secondary" onmousedown="event.preventDefault()" onclick="fxPickChip_(this, 'fn')">ƒ 函式</button>
+    </div>
+    <div class="fx-chip-help muted">點膠囊可以選取，再插入會取代它、按 Backspace 刪除；← → 移動游標。
+      <button type="button" class="link-btn" onclick="setFxMode('text')">用文字輸入</button></div>`;
+}
+
+/* --- 文字輸入(進階) --- */
+function fxTextHtml_() {
+  const d = chartDraft;
+  return `<div class="formula-box" id="ce-formula-box">
+      <textarea id="ce-formula" rows="2" spellcheck="false"
+        oninput="onFormulaInput_(this)" onkeydown="onFormulaKeydown_(event)" onblur="onFormulaBlur_(this)"
+        placeholder="例：[廠價(未稅)] * [季Margin率]　　輸入 [ 會跳出科目與參數清單">${esc(d.Formula || '')}</textarea>
+      <div class="ac-list" id="ce-ac" hidden></div>
+    </div>
+    <div class="formula-tools">
+      <button type="button" class="link-btn" onclick="setFxMode('chips')">← 改回膠囊</button>
+      <span class="muted">運算：+ − × ÷ ( )，可以直接打 15%</span>
+      <details class="fx-help"><summary class="link-btn">函式與變數說明</summary>
+        <table class="grid-table"><tbody>
+          ${FORMULA_FUNCTIONS_UI.map(f => `<tr><td class="row-head"><code>${esc(f[0])}</code></td><td style="text-align:left;">${esc(f[1])}</td><td><button type="button" class="ins-chip fn" onclick="insertFormulaText('${esc(f[0].replace(/, …/, ''))}')">插入</button></td></tr>`).join('')}
+          ${(chartEditor.variables || []).map(v => `<tr><td class="row-head"><code>[${esc(v.name)}]</code></td><td style="text-align:left;">${esc(v.desc)}</td><td><button type="button" class="ins-chip var" onclick="insertFormulaText('[${esc(v.name)}]')">插入</button></td></tr>`).join('')}
+        </tbody></table>
+      </details>
+    </div>`;
+}
+
+/* ---------------- 一行一項：操作 ---------------- */
+function fxAddTerm_(sign, btn) {
+  fxTerms.push({ sign, src: null, factors: [] });
+  fxRedraw_();
+  const i = fxTerms.length - 1;
+  const slot = document.querySelectorAll('#ce-fx-body .fx-row')[i];
+  fxPickSrc_(i, slot ? slot.querySelector('.fx-slot') : btn);
+}
+function fxDelTerm_(i) { fxTerms.splice(i, 1); fxCommit_(); }
+function fxToggleSign_(i) { fxTerms[i].sign *= -1; fxCommit_(); }
+function fxFlipOp_(i, k) { const f = fxTerms[i].factors[k]; f.op = f.op === '/' ? '*' : '/'; fxCommit_(); }
+function fxDelFactor_(i, k) { fxTerms[i].factors.splice(k, 1); fxCommit_(); }
+function fxSetNum_(i, k, value) {
+  const a = k < 0 ? fxTerms[i].src : fxTerms[i].factors[k].a;
+  const pct = /%$/.test(a.v);
+  a.v = String(value).trim() + (pct ? '%' : '');
+  fxCommit_(false);   // 不重畫：游標留在輸入框，只換掉這一行的小計
+  const row = document.querySelectorAll('#ce-fx-body .fx-row')[i];
+  const cell = row && row.querySelector('.fx-row-val');
+  if (cell) cell.outerHTML = fxRowValHtml_(fxTerms[i]);
+}
+function fxSetPct_(i, k, pct) {
+  const a = k < 0 ? fxTerms[i].src : fxTerms[i].factors[k].a;
+  a.v = String(a.v).replace('%', '') + (pct ? '%' : '');
+  fxCommit_();
+}
+function fxSetRef_(i, field, value) { fxTerms[i].src[field] = value; fxCommit_(); }
+function fxPickSrc_(i, anchor) {
+  const row = fxTerms[i];
+  openFxPicker_(anchor, fxSourceSections_(), item => {
+    if (fxTerms[i] !== row) return;
+    if (item.special === 'const') { fxTerms[i].src = { t: 'num', v: '' }; fxCommit_(); fxFocusNum_(i, -1); return; }
+    if (item.special === 'ref') {
+      const sc = (chartEditor.referenceScenarios || []).find(r => r.ScenarioID !== currentScenarioId) || (chartEditor.referenceScenarios || [])[0];
+      if (!sc) { toast('還沒有其他情境可以參考', 'warn'); return; }
+      fxTerms[i].src = { t: 'ref', sc: sc.ScenarioID, code: chartDraft.LineCode || chartEditor.lines[0].LineCode, vid: '' };
+      fxCommit_();
+      return;
+    }
+    fxTerms[i].src = item.tok;
+    fxCommit_();
+  }, () => { if (fxTerms[i] === row && !row.src) { fxTerms.splice(i, 1); fxRedraw_(); } });
+}
+function fxPickFactor_(i, k, anchor) {
+  const row = fxTerms[i];
+  openFxPicker_(anchor, fxFactorSections_(), item => {
+    const t = fxTerms[i];
+    if (t !== row) return;
+    const set = a => { if (k < 0) t.factors.push({ op: item.op || '*', a }); else { t.factors[k].a = a; if (item.op) t.factors[k].op = item.op; } };
+    if (item.special === 'pct' || item.special === 'mul') {
+      set({ t: 'num', v: item.special === 'pct' ? '%' : '' });
+      fxCommit_();
+      fxFocusNum_(i, k < 0 ? t.factors.length - 1 : k);
+      return;
+    }
+    if (item.special === 'onePlus') {
+      openFxPicker_(anchor, fxParamSections_(), p => { set({ t: 'onePlus', a: p.tok }); fxCommit_(); });
+      return;
+    }
+    set(item.tok);
+    fxCommit_();
+  });
+}
+/** 第 i 行的數字輸入框(k = -1 是來源的固定金額，其餘是第 k 個係數) */
+function fxFocusNum_(i, k) {
+  const row = document.querySelectorAll('#ce-fx-body .fx-row')[i];
+  if (!row) return;
+  const el = k < 0 ? row.querySelector('.fx-inline .fx-num') : (row.querySelectorAll('.fx-factor')[k] || {}).querySelector && row.querySelectorAll('.fx-factor')[k].querySelector('.fx-num');
+  if (el) el.focus();
+}
+
+/* ---------------- 膠囊：操作 ---------------- */
+function fxRedrawChips_() {
+  const bar = document.getElementById('ce-chips');
+  if (bar) bar.innerHTML = fxChipsBarInner_();
+  fxRefreshValues_();
+}
+function fxInsertTok_(t) {
+  if (fxSelTok >= 0) { fxToks[fxSelTok] = t; fxCaret = fxSelTok + 1; fxSelTok = -1; }
+  else { fxToks.splice(fxCaret, 0, t); fxCaret++; }
+  fxCommit_(false);
+  fxRedrawChips_();
+  const bar = document.getElementById('ce-chips');
+  if (bar) bar.focus();
+}
+function fxChipMouse_(e) {
+  const el = e.target.closest('.fx-chip');
+  if (el) { const i = Number(el.getAttribute('data-i')); fxSelTok = fxSelTok === i ? -1 : i; fxCaret = i + 1; }
+  else { fxSelTok = -1; fxCaret = fxToks.length; }
+  fxRedrawChips_();
+}
+function fxChipKey_(e) {
+  const k = e.key;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (k === 'Backspace' || k === 'Delete') {
+    e.preventDefault();
+    if (fxSelTok >= 0) { fxToks.splice(fxSelTok, 1); fxCaret = fxSelTok; fxSelTok = -1; }
+    else if (k === 'Backspace' && fxCaret > 0) {
+      const t = fxToks[fxCaret - 1];
+      if (t.t === 'num' && String(t.v).length > 1) t.v = String(t.v).slice(0, -1);
+      else { fxToks.splice(fxCaret - 1, 1); fxCaret--; }
+    } else if (k === 'Delete' && fxCaret < fxToks.length) fxToks.splice(fxCaret, 1);
+    fxCommit_(false); fxRedrawChips_();
+  } else if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'Home' || k === 'End') {
+    e.preventDefault();
+    fxSelTok = -1;
+    fxCaret = k === 'Home' ? 0 : k === 'End' ? fxToks.length : Math.max(0, Math.min(fxToks.length, fxCaret + (k === 'ArrowLeft' ? -1 : 1)));
+    fxRedrawChips_();
+  } else if (/^[0-9.%]$/.test(k)) {
+    e.preventDefault();
+    const prev = fxToks[fxCaret - 1];
+    if (fxSelTok < 0 && prev && prev.t === 'num' && !/%$/.test(prev.v)) { prev.v += k; fxCommit_(false); fxRedrawChips_(); }
+    else if (k === '%') fxInsertTok_({ t: 'op', v: '%' });
+    else fxInsertTok_({ t: 'num', v: k });
+  } else if ('+-*/^(),<>='.indexOf(k) !== -1 && k.length === 1) {
+    e.preventDefault();
+    fxInsertTok_({ t: 'op', v: k });
+  } else if (k === 'Escape') {
+    fxSelTok = -1; fxRedrawChips_();
+  } else if (k.length === 1 && /\S/.test(k) || k === 'Process' || k === 'Enter') {
+    // 打字(含中文輸入法)：打開選單，字直接進搜尋框
+    e.preventDefault();
+    const btn = document.querySelector('#ce-fx-body .fx-keys .btn');
+    fxPickChip_(btn, 'item', k.length === 1 && k !== '[' ? k : '');
+  }
+}
+function fxPickChip_(anchor, what, query) {
+  const sections = what === 'fn' ? fxFunctionSections_() : fxSourceSections_(true).concat(fxFunctionSections_());
+  openFxPicker_(anchor, sections, item => {
+    if (item.fn) { fxInsertTok_({ t: 'fn', v: item.fn }); return; }
+    if (item.special === 'ref') { fxRefModal_().then(t => { if (t) fxInsertTok_(t); }); return; }
+    if (item.special === 'const') { fxInsertTok_({ t: 'num', v: '0' }); return; }
+    fxInsertTok_(item.tok);
+  }, null, query);
+}
+function fxRefModal_() {
+  const lineOpts = chartEditor.lines.map(l => [l.LineCode, l.LineName]);
+  return openModal({
+    title: '另一個情境（或車型）的科目',
+    body: '<p class="help">例：一般材料以 DE 實績為 BASE。對方情境有同一個車系就取同一個車系，否則取它的加權平均；對方的數字改了，這裡會跟著變。</p>',
+    fields: [
+      { name: 'sc', label: '參考的情境', type: 'select', options: (chartEditor.referenceScenarios || []).map(r => [r.ScenarioID, r.label]) },
+      { name: 'code', label: '參考的科目', type: 'select', options: lineOpts, value: chartDraft.LineCode || (lineOpts[0] || [''])[0] }
+    ], okText: '插入'
+  }).then(v => v ? { t: 'ref', sc: v.sc, code: v.code, vid: '' } : null);
+}
+
+/* ---------------- 選單內容 ---------------- */
+function fxLineTok_(l) { return chartNameUsable_(l) ? { t: 'name', v: l.LineName } : { t: 'code', v: l.LineCode }; }
+function fxLineSections_() {
+  const depth = {};
+  const lines = chartEditor.lines.filter(l => !chartDraft || l.LineCode !== chartDraft.LineCode);
+  chartEditor.lines.forEach(l => { let n = 0, cur = l, g = 0; while (cur && cur.ParentLine && g++ < 20) { n++; cur = chartLineByCode_(cur.ParentLine); } depth[l.LineCode] = n; });
+  const isGroup = code => chartEditor.lines.some(x => x.ParentLine === code);
+  const item = l => ({ label: l.LineName, hint: chartShowCodes ? l.LineCode : '', search: l.LineCode, value: fxFmtVal_(chartWeightedValue_(l.LineCode)),
+    indent: depth[l.LineCode] || 0, strong: isGroup(l.LineCode) || l.isProtected, tok: fxLineTok_(l), kind: 'line' });
+  return [
+    { g: '售價結構', items: lines.filter(l => l.Category === '售價結構').map(item) },
+    { g: '損益表科目', items: lines.filter(l => l.Category !== '售價結構').map(item) }
+  ];
+}
+function fxParamSections_() {
+  const pv = chartEditor.paramValues || {};
+  return [
+    { g: '參數（參數與比率頁）', items: (chartEditor.params || []).map(p => ({ label: p.ParamName, hint: p.Description || '', kind: 'param',
+      value: pv[p.ParamName] === undefined ? (p.Unit === '%' ? '%' : '') : fxFmtVal_(pv[p.ParamName], { t: 'name', v: p.ParamName }), tok: { t: 'name', v: p.ParamName } })) },
+    { g: '系統變數（每個車系各自的值）', items: (chartEditor.variables || []).map(v => ({ label: v.name, hint: v.desc, kind: 'var', tok: { t: 'name', v: v.name } }))
+      .concat((chartEditor.currencies || ['CNY', 'USD', 'JPY', 'EUR']).map(c => ({ label: c + '匯率', hint: '1 ' + c + ' = ? 元', kind: 'var', tok: { t: 'name', v: c + '匯率' } }))) }
+  ];
+}
+function fxSourceSections_(forChips) {
+  // 新增中的科目還沒有代碼，也不會有子科目(否則 ParentLine 空白的頂層科目全部會被當成它的子科目)
+  const kids = chartDraft && chartDraft.LineCode ? chartEditor.lines.filter(l => l.ParentLine === chartDraft.LineCode) : [];
+  const kidsSum = kids.reduce((s, l) => s + (chartWeightedValue_(l.LineCode) || 0), 0);
+  const special = { g: '特殊', items: [
+    { label: '子科目合計', kind: 'special', tok: { t: 'fn0', v: 'CHILDREN' },
+      hint: kids.length ? kids.map(l => l.LineName).join('、') : '把其他科目的「計入」選成這個科目，就會加進來', value: kids.length ? fxFmtVal_(kidsSum) : '' },
+    { label: '可扣除貨物稅科目合計', kind: 'special', tok: { t: 'fn0', v: 'TAXDEDUCT' }, hint: '進階設定勾了「貨物稅完稅價格可以扣除」的科目' },
+    { label: '另一個情境（或車型）的科目…', kind: 'special', special: 'ref', hint: '例：DE 實績的一般材料' },
+    { label: forChips ? '數字' : '固定金額…', kind: 'special', special: 'const', hint: forChips ? '也可以直接用鍵盤打' : '每台固定 N 元' }
+  ] };
+  return fxLineSections_().concat(fxParamSections_(), [special]);
+}
+function fxFactorSections_() {
+  const fixed = { g: '固定數字', items: [
+    { label: '固定百分比…', hint: '例：× 15%', kind: 'num', special: 'pct' },
+    { label: '固定倍數…', hint: '例：× 1.2', kind: 'num', special: 'mul' },
+    { label: '÷ (1 + 參數)…', hint: '例：含稅 ÷ (1 + 營業稅率) = 未稅', kind: 'special', special: 'onePlus', op: '/' }
+  ] };
+  return fxParamSections_().concat([fixed], fxLineSections_());
+}
+function fxFunctionSections_() {
+  // 跟文字輸入的「函式與變數說明」同一份清單(30-chart.js 的 FORMULA_FUNCTIONS_UI)；REF 用「另一個情境的科目…」插入
+  const fns = FORMULA_FUNCTIONS_UI.map(f => ({ fn: (/^([A-Z]+)\(/.exec(f[0]) || [])[1], usage: f[0], desc: f[1] }))
+    .filter(f => f.fn && !FX_SPECIAL_FNS_[f.fn] && f.fn !== 'REF');
+  return [{ g: '函式', items: fns.map(f => ({ label: f.fn + '(　)', hint: f.usage + '：' + f.desc, kind: 'fn', fn: f.fn, search: f.desc })) }];
+}
+
+/* ---------------- 選單(可搜尋、方向鍵、Enter) ---------------- */
+function openFxPicker_(anchor, sections, onPick, onCancel, query) {
+  closeFxPicker_();
+  const box = document.createElement('div');
+  box.className = 'fx-picker';
+  box.innerHTML = `<input type="text" class="fx-picker-q" placeholder="搜尋科目、參數…（可以打代碼）"><div class="fx-picker-list"></div>`;
+  document.body.appendChild(box);
+  fxPicker_ = { box, sections, onPick, onCancel, hl: 0, flat: [] };
+  const r = (anchor && anchor.getBoundingClientRect) ? anchor.getBoundingClientRect() : { left: 100, bottom: 100, top: 100 };
+  const w = Math.min(360, window.innerWidth - 24);
+  box.style.width = w + 'px';
+  box.style.left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12)) + 'px';
+  const below = window.innerHeight - r.bottom;
+  if (below < 300 && r.top > below) { box.style.bottom = (window.innerHeight - r.top + 4) + 'px'; } else { box.style.top = (r.bottom + 4) + 'px'; }
+  const q = box.querySelector('.fx-picker-q');
+  q.value = query || '';
+  q.addEventListener('input', () => { fxPicker_.hl = 0; drawFxPicker_(); });
+  q.addEventListener('keydown', e => {
+    const n = fxPicker_.flat.length;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (n) fxPicker_.hl = (fxPicker_.hl + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+      drawFxPicker_();
+    } else if (e.key === 'Enter') { e.preventDefault(); if (n) pickFx_(fxPicker_.hl); }
+    else if (e.key === 'Escape') { e.preventDefault(); cancelFxPicker_(); }
+  });
+  box.addEventListener('mousedown', e => {
+    const el = e.target.closest('.fx-pk-item');
+    if (el) { e.preventDefault(); pickFx_(Number(el.getAttribute('data-i'))); }
+  });
+  drawFxPicker_();
+  q.focus();
+  setTimeout(() => document.addEventListener('mousedown', fxPickerOutside_), 0);
+}
+function fxPickerOutside_(e) { if (fxPicker_ && !fxPicker_.box.contains(e.target)) cancelFxPicker_(); }
+function drawFxPicker_() {
+  const p = fxPicker_;
+  const q = p.box.querySelector('.fx-picker-q').value.trim().toLowerCase();
+  p.flat = [];
+  const html = p.sections.map(g => {
+    const items = g.items.filter(it => !q || it.label.toLowerCase().indexOf(q) !== -1 || String(it.search || '').toLowerCase() === q ||
+      String(it.hint || '').toLowerCase().indexOf(q) !== -1);
+    if (!items.length) return '';
+    return `<div class="fx-pk-group">${esc(g.g)}</div>` + items.map(it => {
+      const i = p.flat.length;
+      p.flat.push(it);
+      return `<div class="fx-pk-item kind-${it.kind || ''}${i === p.hl ? ' hl' : ''}${it.strong ? ' strong' : ''}" data-i="${i}" style="padding-left:${10 + (q ? 0 : (it.indent || 0) * 14)}px;">
+        <div class="fx-pk-text"><span>${esc(it.label)}</span>${it.hint ? `<small>${esc(it.hint)}</small>` : ''}</div><span class="fx-pk-v">${esc(it.value || '')}</span></div>`;
+    }).join('');
+  }).join('');
+  const list = p.box.querySelector('.fx-picker-list');
+  list.innerHTML = html || '<div class="muted" style="padding:10px;">找不到符合的項目</div>';
+  scrollListTo_(list, list.querySelector('.hl'));
+}
+/** 只捲清單本身讓選到的項目看得到(scrollIntoView 會連外層的框、整頁一起捲) */
+function scrollListTo_(list, item) {
+  if (!list || !item) return;
+  const lr = list.getBoundingClientRect(), ir = item.getBoundingClientRect();
+  if (ir.top < lr.top) list.scrollTop -= lr.top - ir.top;
+  else if (ir.bottom > lr.bottom) list.scrollTop += ir.bottom - lr.bottom;
+}
+function pickFx_(i) {
+  const p = fxPicker_;
+  const item = p && p.flat[i];
+  if (!item) return;
+  closeFxPicker_();
+  p.onPick(item);
+}
+function cancelFxPicker_() {
+  const p = fxPicker_;
+  closeFxPicker_();
+  if (p && p.onCancel) p.onCancel();
+}
+function closeFxPicker_() {
+  if (!fxPicker_) return;
+  document.removeEventListener('mousedown', fxPickerOutside_);
+  if (fxPicker_.box.parentNode) fxPicker_.box.parentNode.removeChild(fxPicker_.box);
+  fxPicker_ = null;
 }
 
 /* ===== src/ui/40-report.js ===== */
@@ -9559,6 +10389,10 @@ function rAmt_(v) { return v === undefined || v === null ? '' : fmt(Number(v) / 
 function rSigned_(v) { return v === undefined || v === null ? '' : signed_(Number(v) / reportUnit, reportUnit === 1000 ? 1 : 0); }
 function rUnit_() { return reportUnit === 1000 ? '千元/台' : '元/台'; }
 function rPct_(v, base) { return base ? (Number(v) / base * 100).toFixed(1) + '%' : ''; }
+/** 目標情境的營業淨利科目(預設 K；K 被刪掉時後端指定損益表最底下的總計) */
+function rK_() { return profitCodeOf_(reportData); }
+/** 某個情境(目標/現況/前回)的營業淨利：各看自己車型的淨利科目，不同車型可能不是同一個代碼 */
+function rProfit_(block) { return block ? (block.weighted[block.profitCode || rK_()] || 0) : 0; }
 function reportLineName_(code) { const l = reportData.lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : code; }
 function reportCodeNameMap_() { const m = {}; reportData.lines.forEach(l => { m[l.LineCode] = shortLineName(l.LineName); }); return m; }
 function noteFor_(block, code) {
@@ -9636,7 +10470,7 @@ function drawReport_() {
 
 function reportSummaryHtml_() {
   const R = reportData, T = R.target, B = R.base;
-  const tK = T.weighted.K || 0, bK = B ? (B.weighted.K || 0) : null;
+  const tK = rProfit_(T), bK = B ? rProfit_(B) : null;
   const tRev = T.weighted.P8 || T.weighted.A || 0, bRev = B ? (B.weighted.P8 || B.weighted.A || 0) : 0;
   const tVol = T.volume.monthlyVolume || 0;
   const gap = B ? tK - bK : null;
@@ -9646,7 +10480,7 @@ function reportSummaryHtml_() {
   reportActions.forEach(a => { byStatus[a.Status] = (byStatus[a.Status] || 0) + num(a.Effect); });
   const statusColors = { '已結案': '#6a3dbd', '已確認': '#1c8a59', '進行中': '#3157d5', '規劃中': '#a3acc0' };
   const hero = (cls, label, numV, sub) => `<div class="hero ${cls}"><div class="hero-label">${label}</div><div class="hero-num${numV < 0 ? ' negative' : ''}">${rAmt_(numV)}</div><div class="hero-sub">${sub}</div></div>`;
-  const keyCodes = ['A', 'B', 'C', 'E', 'G', 'I', 'K'].filter(c => T.weighted[c] !== undefined);
+  const keyCodes = ['A', 'B', 'C', 'E', 'G', 'I'].concat([rK_()]).filter((c, i, a) => a.indexOf(c) === i && T.weighted[c] !== undefined);
   return `
     <div class="kpi-hero">
       ${B ? hero('base', '現況 營業淨利/台', bK, `淨利率 ${rPct_(bK, bRev)}・月 ${fmt((B.volume.monthlyVolume || 0))} 台・月淨利 ${fmt(bK * (B.volume.monthlyVolume || 0) / 10000, 0)} 萬`) : ''}
@@ -9664,11 +10498,12 @@ function reportSummaryHtml_() {
     <div class="grid-scroll"><table class="rpt-table">
       <thead><tr><th style="text-align:left;">重點科目（加權平均）</th>${B ? '<th>現況</th><th>%</th>' : ''}<th>目標</th><th>%</th>${B ? '<th>差距</th>' : ''}<th style="text-align:left;">說明</th></tr></thead>
       <tbody>${keyCodes.map(c => {
-        const line = R.lines.find(l => l.LineCode === c) || { LineCode: c };
-        const d = B ? (T.weighted[c] || 0) - (B.weighted[c] || 0) : 0;
+        // 營業淨利這一行：現況看自己車型的淨利科目(可能跟目標的代碼不同)
+        const bv = B ? (c === rK_() ? bK : B.weighted[c]) : undefined;
+        const d = B ? (T.weighted[c] || 0) - (bv || 0) : 0;
         const good = (c === 'B' ? -d : d) > 0.5, bad = (c === 'B' ? -d : d) < -0.5;
-        return `<tr class="${c === 'K' ? 'key' : 'subtotal'}"><td class="name">${esc(reportLineName_(c))}</td>
-          ${B ? `<td>${rAmt_(B.weighted[c])}</td><td class="pct">${rPct_(B.weighted[c], bRev)}</td>` : ''}
+        return `<tr class="${c === rK_() ? 'key' : 'subtotal'}"><td class="name">${esc(reportLineName_(c))}</td>
+          ${B ? `<td>${rAmt_(bv)}</td><td class="pct">${rPct_(bv, bRev)}</td>` : ''}
           <td>${rAmt_(T.weighted[c])}</td><td class="pct">${rPct_(T.weighted[c], tRev)}</td>
           ${B ? `<td class="${good ? 'gap-good' : bad ? 'gap-bad' : ''}">${rSigned_(d)}</td>` : ''}
           ${noteCellHtml_(T, c)}</tr>`;
@@ -9687,7 +10522,7 @@ function reportBridgeHtml_() {
     const d = ((T.weighted[l.LineCode] || 0) - (B.weighted[l.LineCode] || 0)) * sign;
     return Math.abs(d) >= 0.5 ? { code: l.LineCode, label: shortLineName(l.LineName), value: d } : null;
   }).filter(x => x).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
-  const start = B.weighted.K || 0, end = T.weighted.K || 0;
+  const start = rProfit_(B), end = rProfit_(T);
   const top = contribs.slice(0, 10);
   const rest = contribs.slice(10).reduce((s, c) => s + c.value, 0);
   const explained = top.reduce((s, c) => s + c.value, 0) + rest;
@@ -9762,7 +10597,7 @@ function reportCompareHtml_() {
       const eff = d * sign;
       const cls = !sign || Math.abs(eff) < 0.5 ? '' : eff > 0 ? 'gap-good' : 'gap-bad';
       const acts = actionsByCode[l.LineCode] || [];
-      return head + `<tr class="${l.LineCode === 'K' ? 'key' : l.isSubtotal ? 'subtotal' : ''}">
+      return head + `<tr class="${l.LineCode === rK_() ? 'key' : l.isSubtotal ? 'subtotal' : ''}">
         <td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
         <td>${rAmt_(bv)}</td><td class="pct">${l.isPriceStructure ? '' : rPct_(bv, bRev)}</td>
         <td>${rAmt_(tv)}</td><td class="pct">${l.isPriceStructure ? '' : rPct_(tv, tRev)}</td>
@@ -9782,7 +10617,7 @@ function reportFsHtml_(block, tableId) {
     <thead><tr><th style="text-align:left;">車型</th>${vehicles.map(v => `<th>${esc(v.VehicleCode)}</th>`).join('')}<th>${esc(R.vehicleTypeId)} 加權平均</th><th>%</th><th style="text-align:left;">說明</th></tr>
       <tr class="sub"><th style="text-align:left;">銷售構成比</th>${vehicles.map(v => `<th>${fmt(v.salesMixPct, 1)}%</th>`).join('')}<th>100%</th><th></th><th></th></tr>
       <tr class="sub"><th style="text-align:left;">預估銷售台數(月)</th>${vehicles.map(v => `<th>${fmt(v.monthlyVolume)}</th>`).join('')}<th>${fmt(block.volume.monthlyVolume)}</th><th></th><th style="text-align:left;">L/C ${esc(String(block.volume.lifeCycleYears || ''))} 年，合計 ${fmt(block.volume.units)} 台</th></tr></thead>
-    <tbody>${rows.map(l => `<tr class="${l.LineCode === 'K' ? 'key' : l.isSubtotal ? 'subtotal' : ''}">
+    <tbody>${rows.map(l => `<tr class="${l.LineCode === rK_() ? 'key' : l.isSubtotal ? 'subtotal' : ''}">
       <td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
       ${vehicles.map(v => { const x = v.amounts[l.LineCode]; return `<td class="${x < 0 ? 'negative' : ''}">${x === undefined ? '' : rAmt_(x)}</td>`; }).join('')}
       <td class="${block.weighted[l.LineCode] < 0 ? 'negative' : ''}" style="font-weight:700;">${rAmt_(block.weighted[l.LineCode])}</td>
@@ -9800,7 +10635,7 @@ function reportActionsHtml_() {
 }
 function reportActionsTableHtml_() {
   const R = reportData, T = R.target, B = R.base;
-  const gap = B ? (T.weighted.K || 0) - (B.weighted.K || 0) : null;
+  const gap = B ? rProfit_(T) - rProfit_(B) : null;
   const vol = T.volume.monthlyVolume || 0;
   const lineOpts = R.lines.filter(l => !l.isPriceStructure && !l.isSubtotal);
   const total = reportActions.reduce((s, a) => s + num(a.Effect), 0);
@@ -9834,7 +10669,7 @@ function reportActionsTableHtml_() {
 function reportActionWfSteps_() {
   const R = reportData, T = R.target, B = R.base;
   if (!B) return [];
-  const start = B.weighted.K || 0, end = T.weighted.K || 0;
+  const start = rProfit_(B), end = rProfit_(T);
   let acts = reportActions.filter(a => String(a.Title || '').trim() && num(a.Effect))
     .map(a => ({ label: a.Title, value: num(a.Effect), kind: 'delta', tip: `${a.Title}\n${[a.LineCode ? reportLineName_(a.LineCode) : '', a.Owner, a.Status].filter(x => x).join('｜')}\n${signed_(num(a.Effect))} 元/台` }));
   if (acts.length > 10) {
@@ -9843,10 +10678,10 @@ function reportActionWfSteps_() {
     acts = acts.filter(a => drop.indexOf(a) === -1);
     acts.push({ label: `其他 ${drop.length} 項作法`, value: drop.reduce((s, a) => s + a.value, 0), kind: 'delta' });
   }
-  const steps = [{ label: `現況 ${reportLineName_('K')}`, value: start, kind: 'total' }].concat(acts);
+  const steps = [{ label: `現況 ${reportLineName_(B.profitCode || rK_())}`, value: start, kind: 'total' }].concat(acts);
   const remain = (end - start) - acts.reduce((s, a) => s + a.value, 0);
   if (Math.abs(remain) >= 0.5) steps.push({ label: remain > 0 ? '其他改善（沒有寫成作法）' : '作法高估或其他惡化', value: remain, kind: 'delta', remain: true });
-  steps.push({ label: `目標 ${reportLineName_('K')}`, value: end, kind: 'total' });
+  steps.push({ label: `目標 ${reportLineName_(rK_())}`, value: end, kind: 'total' });
   return steps;
 }
 function reportActionWaterfallHtml_() {
@@ -9878,7 +10713,7 @@ function updateReportActionTotals_() {
   const t = document.getElementById('rpt-act-total'); if (t) t.textContent = fmt(total);
   const tm = document.getElementById('rpt-act-total-m'); if (tm) tm.textContent = fmt(total * vol / 10000, 1);
   if (R.base) {
-    const gap = (R.target.weighted.K || 0) - (R.base.weighted.K || 0);
+    const gap = rProfit_(R.target) - rProfit_(R.base);
     const r = document.getElementById('rpt-act-remain');
     if (r) { r.textContent = fmt(gap - total); r.className = gap - total > 0.5 ? 'negative' : 'good'; }
   }
@@ -9920,10 +10755,10 @@ function reportPrevHtml_() {
         const d = (tv || 0) - (pv || 0);
         const sign = l.isSubtotal ? (l.LineCode === 'B' ? -1 : 1) : profitSign_(l);
         const cls = !sign || Math.abs(d) < 0.5 ? '' : d * sign > 0 ? 'gap-good' : 'gap-bad';
-        return `<tr class="${l.LineCode === 'K' ? 'key' : l.isSubtotal ? 'subtotal' : ''}"><td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
+        return `<tr class="${l.isProfit ? 'key' : l.isSubtotal ? 'subtotal' : ''}"><td class="name" style="padding-left:${8 + (l.Depth || 0) * 14}px;">${esc(shortLineName(l.LineName))}</td>
           <td>${rAmt_(pv)}</td><td>${rAmt_(tv)}</td><td class="${cls}">${Math.abs(d) < 0.5 ? '' : rSigned_(d)}</td>${noteCellHtml_(T, l.LineCode)}</tr>`;
       }).join('')}
-      <tr class="key"><td class="name">營業淨利(每月)</td><td>${fmt((P.weighted.K || 0) * vol(P) / 10000, 0)} 萬</td><td>${fmt((T.weighted.K || 0) * vol(T) / 10000, 0)} 萬</td><td>${signed_(((T.weighted.K || 0) * vol(T) - (P.weighted.K || 0) * vol(P)) / 10000, 0)} 萬</td><td class="note"></td></tr>
+      <tr class="key"><td class="name">營業淨利(每月)</td><td>${fmt(rProfit_(P) * vol(P) / 10000, 0)} 萬</td><td>${fmt(rProfit_(T) * vol(T) / 10000, 0)} 萬</td><td>${signed_((rProfit_(T) * vol(T) - rProfit_(P) * vol(P)) / 10000, 0)} 萬</td><td class="note"></td></tr>
     </tbody></table></div>`;
 }
 
@@ -9947,7 +10782,7 @@ function reportDevHtml_() {
 /** 科目對營業淨利的方向(對帳用)：收入/毛利/淨利 +1；成本與費用(含自訂群組) −1；售價結構 0 */
 function reconSign_(l) {
   if (!l || l.isPriceStructure) return 0;
-  if (['A', 'C', 'E', 'G', 'I', 'K'].indexOf(l.LineCode) !== -1) return 1;
+  if (l.isProfit || ['A', 'C', 'E', 'G', 'I', 'K'].indexOf(l.LineCode) !== -1) return 1;
   let cur = l, guard = 0;
   while (cur && cur.ParentLine && guard++ < 20) {
     if (cur.ParentLine === 'A') return 1;
@@ -10108,9 +10943,10 @@ function drawWhatIf_() {
   const g = whatIfPrefs.goal, s = whatIfPrefs.sens;
   const body = document.getElementById('whatif-body');
   if (!body || !whatIfOptions) return;
-  // 營業淨利(K)等預設科目可能被刪掉或換掉：記住的指標不存在時改用最後一個科目(通常是最底下的淨利)
+  // 營業淨利(K)等預設科目可能被刪掉或換掉：記住的指標不存在時改看營業淨利(K 被刪掉時是損益表最後一行總計)
   const metrics = whatIfOptions.metrics || [];
-  const fallback = metrics.length ? metrics[metrics.length - 1].code : 'K';
+  const profit = profitCodeOf_(whatIfOptions);
+  const fallback = metrics.some(m => m.code === profit) ? profit : metrics.length ? metrics[metrics.length - 1].code : 'K';
   [g, s, whatIfPrefs.multi].forEach(p => { if (!metrics.some(m => m.code === p.metric)) p.metric = fallback; });
   const basisSeg = (scope, cur) => `<div class="seg">
       <button type="button" class="seg-btn${cur === 'unit' ? ' active' : ''}" onclick="whatIfPrefs.${scope}.basis='unit';saveWhatIfPrefs_();drawWhatIf_()">單台</button>
@@ -10160,11 +10996,12 @@ function drawWhatIf_() {
 
 function whatIfPreset_(kind) {
   const g = whatIfPrefs.goal;
-  if (kind === 'breakeven-volume') Object.assign(g, { metric: 'K', basis: 'unit', target: 0, driver: 'volume' });
-  if (kind === 'breakeven-price') Object.assign(g, { metric: 'K', basis: 'unit', target: 0, driver: 'price' });
+  const profit = profitCodeOf_(whatIfOptions);
+  if (kind === 'breakeven-volume') Object.assign(g, { metric: profit, basis: 'unit', target: 0, driver: 'volume' });
+  if (kind === 'breakeven-price') Object.assign(g, { metric: profit, basis: 'unit', target: 0, driver: 'price' });
   if (kind === 'material') {
     const lines = whatIfOptions.drivers.filter(d => d.driver.type === 'line').sort((a, b) => Math.abs(b.base) - Math.abs(a.base));
-    Object.assign(g, { metric: 'K', basis: 'unit', target: Math.max(0, Math.round((whatIfOptions.metrics.find(m => m.code === 'K') || {}).value || 0)), driver: lines.length ? driverKey_(lines[0].driver) : 'volume' });
+    Object.assign(g, { metric: profit, basis: 'unit', target: Math.max(0, Math.round((whatIfOptions.metrics.find(m => m.code === profit) || {}).value || 0)), driver: lines.length ? driverKey_(lines[0].driver) : 'volume' });
   }
   saveWhatIfPrefs_();
   drawWhatIf_();
@@ -10614,12 +11451,19 @@ function wfTrim_(deltas) {
 function wfBridgeSteps_(cmp) {
   const [cf, ct] = cmp.columns;
   const lines = cmp.lines;
-  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : 'K';
-  const endLine = lines.find(l => l.LineCode === end) || { LineName: end };
+  const chosen = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : '';
+  // 畫到營業淨利時，兩欄各看自己車型的淨利科目(不同車型可能一個還是 K、一個已經換成別的科目)
+  const pf = profitCodeOf_(cf), pt = profitCodeOf_(ct);
+  const toProfit = !chosen || chosen === pf || chosen === pt;
+  const endFrom = toProfit ? pf : chosen, endTo = toProfit ? pt : chosen;
+  const rootOrder = wfStructure_(lines).roots.map(r => r.LineCode);
+  const end = rootOrder.indexOf(endTo) >= rootOrder.indexOf(endFrom) ? endTo : endFrom;   // 扣除項列到比較後面的那一個
+  const lineOf = code => lines.find(l => l.LineCode === code) || { LineName: code };
+  const endLine = lineOf(end);
   const items = wfItems_(lines, end, wfPrefs.level).filter(it => !it.isResult);
   const ff = wfFactor_(cf, wfPrefs.basis), ft = wfFactor_(ct, wfPrefs.basis);
   const splitVolume = wfPrefs.basis !== 'unit' && wfPrefs.volumeEffect;
-  const mFrom = (Number(cf.amounts[end]) || 0), mTo = (Number(ct.amounts[end]) || 0);
+  const mFrom = (Number(cf.amounts[endFrom]) || 0), mTo = (Number(ct.amounts[endTo]) || 0);
   const start = mFrom * ff, finish = mTo * ft;
   const deltas = [];
   if (splitVolume && Math.abs(ft - ff) > 1e-9) {
@@ -10634,16 +11478,15 @@ function wfBridgeSteps_(cmp) {
   });
   const residual = (finish - start) - deltas.reduce((s, d) => s + d.value, 0);
   if (Math.abs(residual) >= 0.5) deltas.push({ label: '其他（公式交互/尾差）', value: residual, kind: 'delta', pinned: true, tip: '不能直接歸到單一科目的差異（例如自訂公式的交互作用、四捨五入）' });
-  const name = shortLineName(endLine.LineName);
-  return [{ label: `${wfColName_(cf, ct)} ${name}`, value: start, kind: 'total' }]
+  return [{ label: `${wfColName_(cf, ct)} ${shortLineName(lineOf(endFrom).LineName)}`, value: start, kind: 'total' }]
     .concat(wfTrim_(deltas))
-    .concat([{ label: `${wfColName_(ct, cf)} ${name}`, value: finish, kind: 'total' }]);
+    .concat([{ label: `${wfColName_(ct, cf)} ${shortLineName(lineOf(endTo).LineName)}`, value: finish, kind: 'total' }]);
 }
 
 function wfStructureSteps_(cmp) {
   const col = cmp.columns[0];
   const lines = cmp.lines;
-  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : 'K';
+  const end = wfEndOptions_(lines).some(l => l.LineCode === wfPrefs.end) ? wfPrefs.end : profitCodeOf_(cmp.columns[0]);
   const f = wfFactor_(col, wfPrefs.basis);
   const items = wfItems_(lines, end, wfPrefs.level);
   const steps = [];
@@ -10669,7 +11512,7 @@ function wfStructureSteps_(cmp) {
 
 function wfActionSteps_(cmp, actions) {
   const [cf, ct] = cmp.columns;
-  const mFrom = Number(cf.amounts.K) || 0, mTo = Number(ct.amounts.K) || 0;
+  const mFrom = Number(cf.amounts[profitCodeOf_(cf)]) || 0, mTo = Number(ct.amounts[profitCodeOf_(ct)]) || 0;
   const nameOf = code => { const l = cmp.lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : ''; };
   const deltas = actions.filter(a => String(a.Title || '').trim() && num(a.Effect)).map(a => ({
     label: a.Title, value: num(a.Effect), kind: 'delta',
@@ -10807,7 +11650,7 @@ function runWaterfall_() {
       })).getActions(p.to.scenarioId);
       return;
     }
-    const endLine = cmp.lines.find(l => l.LineCode === p.end) || cmp.lines.find(l => l.LineCode === 'K') || {};
+    const endLine = cmp.lines.find(l => l.LineCode === p.end) || cmp.lines.find(l => l.LineCode === profitCodeOf_(cmp.columns[0])) || {};
     const basis = wfBasisLabel_(p.basis);
     if (p.mode === 'bridge') {
       wfLast = { steps: wfBridgeSteps_(cmp), title: `${shortLineName(endLine.LineName || '')}差異：${colName(cmp.columns[0])} → ${colName(cmp.columns[1])}（${basis}）` };
@@ -11512,7 +12355,7 @@ function tableMetaText_(cols) {
  */
 function lineBetter_(line) {
   if (!line || line.isPriceStructure) return null;
-  if (['A', 'C', 'E', 'G', 'I', 'K'].indexOf(line.LineCode) !== -1) return 'high';
+  if (line.isProfit || ['A', 'C', 'E', 'G', 'I', 'K'].indexOf(line.LineCode) !== -1) return 'high';
   if (line.ParentLine === 'A') return 'high';
   if (line.ParentLine || line.LineCode === 'B' || line.LineCode === 'J') return 'low';
   return null;
@@ -11584,11 +12427,12 @@ function kpiStripHtml(cols, lines) {
   if (!showKpi || !cols.length) return '';
   const nameOf = code => { const l = lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : code; };
   const base = baselineCol_(cols);
-  const kLine = lines.find(l => l.LineCode === 'K');
-  const maxAbsPct = Math.max.apply(null, cols.map(c => Math.abs(pctOf_(c, 'K'))).concat([0.0001]));
+  const maxAbsPct = Math.max.apply(null, cols.map(c => Math.abs(pctOf_(c, profitCodeOf_(c)))).concat([0.0001]));
   const cards = cols.map((c, i) => {
-    const k = c.amounts.K;
-    const kPct = pctOf_(c, 'K');
+    const kCode = profitCodeOf_(c);
+    const kLine = lines.find(l => l.LineCode === kCode);
+    const k = c.amounts[kCode];
+    const kPct = pctOf_(c, kCode);
     const isBase = base && colKey_(base) === colKey_(c);
     const rows = ['A', 'C', 'E', 'G'].map(code => {
       const v = c.amounts[code];
@@ -11598,8 +12442,9 @@ function kpiStripHtml(cols, lines) {
         <span class="kpi-pct">${code === 'A' ? '' : pctOf_(c, code).toFixed(1) + '%'}</span></div>`;
     }).join('');
     let vsBase = '';
-    if (base && !isBase && k !== undefined && k !== null && base.amounts.K !== undefined && base.amounts.K !== null) {
-      const baseShown = displayAmount_(base.amounts.K, base);
+    const baseK = base ? base.amounts[profitCodeOf_(base)] : undefined;
+    if (base && !isBase && k !== undefined && k !== null && baseK !== undefined && baseK !== null) {
+      const baseShown = displayAmount_(baseK, base);
       const delta = displayAmount_(k, c) - baseShown;
       const tone = deltaTone_(kLine, delta);
       // 百分比的分母要用畫面上實際顯示的基準金額：基準欄的月銷量/總台數是 0 時，
@@ -11614,7 +12459,7 @@ function kpiStripHtml(cols, lines) {
         <span class="kpi-vehicle" title="${esc(c.vehicleLabel)}">${esc(c.vehicleLabel)}</span>
         <button type="button" class="star${isBase ? ' on' : ''}" data-tip="${isBase ? '目前的比較基準（再點一次取消）' : '設為比較基準'}"
           onclick="setBaselineColumnAt(${i})">★</button></div>
-      <div class="kpi-main"><span class="kpi-main-label">${esc(nameOf('K'))}</span>
+      <div class="kpi-main"><span class="kpi-main-label">${esc(nameOf(kCode))}</span>
         <span class="kpi-main-num${k < 0 ? ' negative' : ''}">${k === undefined || k === null ? '—' : fmt(displayAmount_(k, c))}</span>
         <span class="kpi-main-pct${kPct < 0 ? ' negative' : ''}">${kPct.toFixed(1)}%</span></div>
       <div class="kpi-bar"><div class="kpi-bar-fill${kPct < 0 ? ' negative' : ''}" style="width:${barW.toFixed(1)}%"></div></div>
@@ -11966,7 +12811,8 @@ function structureParts_(col, lines) {
   if (has('E') && has('G')) parts.push({ name: SUM_GROUP_NAMES_.G, value: a.E - a.G, color: '#d69e2e', sum: 'G' });
   if (has('G') && has('I')) parts.push({ name: SUM_GROUP_NAMES_.I, value: a.G - a.I, color: '#805ad5', sum: 'I' });
   if (has('J')) parts.push({ name: nameOf('J'), value: a.J, color: '#718096', line: lines.find(l => l.LineCode === 'J') });
-  if (has('K')) parts.push({ name: nameOf('K'), value: a.K, color: a.K < 0 ? '#e53e3e' : '#2f855a', line: lines.find(l => l.LineCode === 'K'), isProfit: true });
+  const k = profitCodeOf_(col);
+  if (has(k)) parts.push({ name: nameOf(k), value: a[k], color: a[k] < 0 ? '#e53e3e' : '#2f855a', line: lines.find(l => l.LineCode === k), isProfit: true });
   return parts;
 }
 
@@ -12021,6 +12867,7 @@ function waterfallChartsHtml_(cols, lines) {
   ];
   const charts = cols.map(c => {
     const a = c.amounts;
+    const kCode = profitCodeOf_(c);
     const has = code => a[code] !== undefined && a[code] !== null;
     const base = isPct ? (Number(c.revenue) || 0) : 1;
     const toV = v => isPct ? (base ? v / base * 100 : 0) : displayAmount_(v, c);
@@ -12033,8 +12880,9 @@ function waterfallChartsHtml_(cols, lines) {
         if (!has(parent) || !has(prev)) return;
         raw = a[prev] - a[parent]; name = SUM_GROUP_NAMES_[parent];
       } else {
-        if (!has(st.code)) return;
-        raw = a[st.code]; name = nameOf(st.code);
+        const code = st.code === 'K' ? kCode : st.code;   // 最後一根是營業淨利(K 被刪掉時是替代的淨利科目)
+        if (!has(code)) return;
+        raw = a[code]; name = nameOf(code);
       }
       const v = toV(raw);
       const g = groups.length;
@@ -12095,7 +12943,7 @@ function chartLinePickerHtml_(lines) {
   return `
     <div class="chart-picker-box">
       <div class="toolbar-block-title">要畫的科目
-        <button type="button" class="link-btn" onclick="setChartLines(['A','C','E','G','I','K'])">只留小計</button>
+        <button type="button" class="link-btn" onclick="setChartLines(${esc(JSON.stringify(['A', 'C', 'E', 'G', 'I', 'K'].concat(lines.filter(l => l.isProfit).map(l => l.LineCode))))})">只留小計</button>
         <button type="button" class="link-btn" onclick="setChartLines([])">清除</button></div>
       <div class="legend-list" id="chart-lines">
         ${chartable.map(l => {
@@ -12429,7 +13277,8 @@ function colTipText_(el) {
     parts.push(`月銷量 ${fmt(v.monthlyVolume)} 台 × 12 × LC ${fmt(v.lifeCycleYears)} 年 = ${fmt(v.units)} 台・構成比 ${fmt(v.salesMixPct, 1)}%`);
   }
   parts.push(`廠價(未稅) ${fmt(col.exFactoryPrice)}　收入 ${fmt(col.revenue)}`);
-  if (col.amounts.K !== undefined && col.amounts.K !== null) parts.push(`營業淨利 ${fmt(col.amounts.K)}（對廠價 ${pctText_(col.amounts.K, col.exFactoryPrice)}）`);
+  const k = col.amounts[profitCodeOf_(col)];
+  if (k !== undefined && k !== null) parts.push(`營業淨利 ${fmt(k)}（對廠價 ${pctText_(k, col.exFactoryPrice)}）`);
   if (volumeBasis !== 'unit') {
     parts.push(`表上金額 = ${basisFormula_(col)}`);
     const warn = weightedTotalCaveat_(col);

@@ -220,7 +220,8 @@ function structureParts_(col, lines) {
   if (has('E') && has('G')) parts.push({ name: SUM_GROUP_NAMES_.G, value: a.E - a.G, color: '#d69e2e', sum: 'G' });
   if (has('G') && has('I')) parts.push({ name: SUM_GROUP_NAMES_.I, value: a.G - a.I, color: '#805ad5', sum: 'I' });
   if (has('J')) parts.push({ name: nameOf('J'), value: a.J, color: '#718096', line: lines.find(l => l.LineCode === 'J') });
-  if (has('K')) parts.push({ name: nameOf('K'), value: a.K, color: a.K < 0 ? '#e53e3e' : '#2f855a', line: lines.find(l => l.LineCode === 'K'), isProfit: true });
+  const k = profitCodeOf_(col);
+  if (has(k)) parts.push({ name: nameOf(k), value: a[k], color: a[k] < 0 ? '#e53e3e' : '#2f855a', line: lines.find(l => l.LineCode === k), isProfit: true });
   return parts;
 }
 
@@ -275,6 +276,7 @@ function waterfallChartsHtml_(cols, lines) {
   ];
   const charts = cols.map(c => {
     const a = c.amounts;
+    const kCode = profitCodeOf_(c);
     const has = code => a[code] !== undefined && a[code] !== null;
     const base = isPct ? (Number(c.revenue) || 0) : 1;
     const toV = v => isPct ? (base ? v / base * 100 : 0) : displayAmount_(v, c);
@@ -287,8 +289,9 @@ function waterfallChartsHtml_(cols, lines) {
         if (!has(parent) || !has(prev)) return;
         raw = a[prev] - a[parent]; name = SUM_GROUP_NAMES_[parent];
       } else {
-        if (!has(st.code)) return;
-        raw = a[st.code]; name = nameOf(st.code);
+        const code = st.code === 'K' ? kCode : st.code;   // 最後一根是營業淨利(K 被刪掉時是替代的淨利科目)
+        if (!has(code)) return;
+        raw = a[code]; name = nameOf(code);
       }
       const v = toV(raw);
       const g = groups.length;
@@ -349,7 +352,7 @@ function chartLinePickerHtml_(lines) {
   return `
     <div class="chart-picker-box">
       <div class="toolbar-block-title">要畫的科目
-        <button type="button" class="link-btn" onclick="setChartLines(['A','C','E','G','I','K'])">只留小計</button>
+        <button type="button" class="link-btn" onclick="setChartLines(${esc(JSON.stringify(['A', 'C', 'E', 'G', 'I', 'K'].concat(lines.filter(l => l.isProfit).map(l => l.LineCode))))})">只留小計</button>
         <button type="button" class="link-btn" onclick="setChartLines([])">清除</button></div>
       <div class="legend-list" id="chart-lines">
         ${chartable.map(l => {

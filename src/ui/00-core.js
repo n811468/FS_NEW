@@ -8,6 +8,8 @@ const GATE_OPTIONS = ['GATE F', 'GATE E', 'GATE D', 'GATE C', 'GATE B', 'GATE A'
 const SCENARIO_TYPES = ['現況', '目標'];
 // 結構科目與自動計算科目不能刪、父科目也不能改，否則損益鏈會接錯段（後端也會擋，這裡只是不畫按鈕）
 const PROTECTED_LINE_CODES = ['A', 'B', 'C', 'E', 'G', 'I', 'K'];
+/** 營業淨利是哪個科目：後端在比較欄位/報告/科目表上附 profitCode(預設 K；K 被刪掉時是損益表最後一行總計) */
+function profitCodeOf_(obj) { return (obj && obj.profitCode) || 'K'; }
 const PL_LINE_PARENT_OPTIONS = [
   ['B', 'B 銷貨成本'],
   ['E', 'E 銷售費用(銷貨毛利前)'],

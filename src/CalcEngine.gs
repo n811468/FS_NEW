@@ -148,7 +148,12 @@ function systemVariables_(scenarioId, salesMixRow, salesMix, params, vehicleId) 
  * 公式之間的相依順序由求值時遞迴決定(用到誰就先算誰)，循環引用會被擋下並記錄在 errors。
  * 單一科目的公式出錯不會讓整張損益表掛掉：那一格以 0 計，錯誤訊息放在 errors 給畫面顯示。
  */
-function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
+/**
+ * probe(選用，科目設定頁的公式編輯器用)：{ code, formulas: [...] } —— 整張損益算完之後，
+ * 用 code 這個科目的計算環境(CHILDREN() 指它的子科目)另外算每一段公式，回傳在 probes(算不出來是 null)。
+ * 公式編輯器靠它顯示「每一行」「每一顆膠囊」目前是多少。
+ */
+function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs, probe) {
   var salesMix = calcSalesMix_(scenarioId);
   var salesMixRow = salesMix.filter(function (r) { return r.VehicleID === vehicleId; })[0];
   if (!salesMixRow) throw new Error('找不到 SalesMix 資料：' + scenarioId + ' / ' + vehicleId);
@@ -221,7 +226,13 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
   function evalLineFormula_(code, formula) {
     var ast = parseFormula_(formula);
     var refs = {};
-    var env = {
+    var v = evalFormulaAst_(ast, formulaEnv_(code, refs));
+    traces[code] = { kind: 'formula', formula: formula, refs: refs };
+    return num_(v);
+  }
+
+  function formulaEnv_(code, refs) {
+    return {
       code: function (c) { var x = valueOf(c); refs[c] = x; return x; },
       name: function (n) {
         var x;
@@ -249,14 +260,17 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
         return x;
       }
     };
-    var v = evalFormulaAst_(ast, env);
-    traces[code] = { kind: 'formula', formula: formula, refs: refs };
-    return num_(v);
   }
 
+  var probes = null;
   REF_STACK_.push(String(scenarioId) + '|' + String(vehicleId));
   try {
     defs.forEach(function (d) { valueOf(d.LineCode); });
+    if (probe && probe.formulas) {
+      probes = probe.formulas.map(function (f) {
+        try { return num_(evalFormulaAst_(parseFormula_(f), formulaEnv_(probe.code, {}))); } catch (e) { return null; }
+      });
+    }
   } finally {
     REF_STACK_.pop();
   }
@@ -273,6 +287,7 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs) {
     lineValues: lineValues,
     errors: errors,
     traces: traces,
+    probes: probes,
     lines: buildResultLines_(lineValues, revenue, exFactory, defs)
   };
 }
@@ -419,12 +434,18 @@ function calculateComparison(selections) {
       amounts: amounts,
       revenue: amounts.A || 0,
       exFactoryPrice: amounts.P8 || 0,
-      checks: subtotalChecks_(amounts, lineDefs)
+      checks: subtotalChecks_(amounts, lineDefs),
+      profitCode: profitLineCode_(lineDefs)
     };
   });
 
   var allDefs = unionLineDefs_(columns.map(function (c) { return c.snapshotLines || defsOf(c.vehicleTypeId); }));
-  columns.forEach(function (c) { delete c.snapshotLines; });
+  columns.forEach(function (c) {
+    if (c.snapshotLines) c.profitCode = profitLineCode_(c.snapshotLines);
+    delete c.snapshotLines;
+  });
+  var profitCodes = {};
+  columns.forEach(function (c) { if (c.profitCode) profitCodes[c.profitCode] = true; });
   var depth = lineDepths_(allDefs);
   // 只列出至少有一個比較欄位真的算出數字的科目(不同車型科目不同時，表格才不會塞滿空列)
   var usedLines = allDefs.filter(function (def) {
@@ -440,12 +461,48 @@ function calculateComparison(selections) {
       Formula: def.CalcType === CALC_TYPES.FORMULA ? def.Formula : '',
       AutoSource: resultAutoSource_(def),
       Depth: depth[def.LineCode] || 0,
-      isSubtotal: PROTECTED_LINE_CODES.indexOf(def.LineCode) !== -1 || isGroupLine_(def, allDefs),
+      isSubtotal: PROTECTED_LINE_CODES.indexOf(def.LineCode) !== -1 || !!profitCodes[def.LineCode] || isGroupLine_(def, allDefs),
+      isProfit: !!profitCodes[def.LineCode],
       isPriceStructure: String(def.Category || '') === '售價結構'
     };
   });
 
   return { columns: columns, lines: usedLines, subtotalCodes: PROTECTED_LINE_CODES };
+}
+
+/**
+ * 哪一個科目是「營業淨利」：預設是 K。K 被刪掉時(例如另外新增一個淨利科目、再把原本的刪掉)，
+ * 改用損益表最底下的總計：頂層、不是售價結構、用公式算、而且沒有被其他科目的公式引用的科目，
+ * 有好幾個就取損益表上最後一個。不看位置挑「最後一行」，否則最後一行是手動輸入的費用(例如前瞻費用)
+ * 時會把費用當成淨利。儀表板重點指標、GATE 報告、損益兩平、目標反推的預設指標都看這裡，不寫死 K。
+ */
+function profitLineCode_(defs) {
+  defs = defs || [];
+  if (defs.some(function (d) { return d.LineCode === 'K'; })) return 'K';
+  var top = displayOrderDefs_(defs.slice()).filter(function (d) {
+    return !d.ParentLine && String(d.Category || '') !== '售價結構';
+  });
+  if (!top.length) return '';
+  var referenced = {};
+  defs.forEach(function (d) {
+    var formulas = [];
+    if (d.CalcType === CALC_TYPES.FORMULA && d.Formula) formulas.push(d.Formula);
+    var vf = parseVehicleFormulas_(d.VehicleFormulas);
+    Object.keys(vf).forEach(function (k) { if (vf[k]) formulas.push(vf[k]); });
+    formulas.forEach(function (f) {
+      var info = inspectFormula_(f);
+      if (!info.ok) return;
+      info.refs.codes.forEach(function (c) { if (c !== d.LineCode) referenced[c] = true; });
+      info.refs.names.forEach(function (n) {
+        defs.forEach(function (x) { if (x.LineName === n && x.LineCode !== d.LineCode) referenced[x.LineCode] = true; });
+      });
+    });
+  });
+  var isFormula = function (d) { return d.CalcType === CALC_TYPES.FORMULA; };
+  var pick = top.filter(function (d) { return isFormula(d) && !referenced[d.LineCode]; });
+  if (!pick.length) pick = top.filter(isFormula);
+  if (!pick.length) pick = top;
+  return pick[pick.length - 1].LineCode;
 }
 
 /** 科目的縮排層級(父科目鏈長度) */

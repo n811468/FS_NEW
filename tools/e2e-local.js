@@ -85,6 +85,15 @@ async function main() {
   await page.click('nav button[data-tab="lineitems"]');
   await page.waitForSelector('.tree-row:has-text("季Margin")');
   await page.click('.tree-row:has-text("季Margin")');
+  // 拆得成一行一項的公式預設用一行一項：一行「廠價(未稅) × 季Margin率」，每行旁邊有試算值
+  await page.waitForSelector('.fx-rows .fx-row');
+  assert((await page.$$('.fx-rows .fx-row')).length === 1 && /廠價\(未稅\)/.test(await page.textContent('.fx-rows')) && /季Margin率/.test(await page.textContent('.fx-rows')),
+    '季Margin 應該顯示成一行：廠價(未稅) × 季Margin率');
+  await page.waitForFunction(() => /\d/.test((document.querySelector('.fx-row-val') || {}).textContent || ''));
+  // 自由公式 → 文字輸入
+  await page.click('.fx-mode [data-mode="chips"]');
+  await page.waitForSelector('#ce-chips .fx-chip');
+  await page.click('button:has-text("用文字輸入")');
   await page.waitForSelector('#ce-formula');
   await page.fill('#ce-formula', 'P8 * 1%');
   await page.waitForFunction(() => /✔/.test((document.getElementById('ce-status') || {}).textContent || ''));
@@ -97,7 +106,7 @@ async function main() {
 
   // v2.1：公式用科目名稱顯示；輸入 [ 會跳出清單，選了之後存成代碼
   await page.click('.tree-row:has-text("季Margin")');
-  await page.waitForSelector('#ce-formula');
+  await page.waitForSelector('#ce-formula');   // 同一個科目重畫時保留使用者選的模式(文字輸入)
   assert((await page.inputValue('#ce-formula')) === '[廠價(未稅)] * 1%', '公式應該用科目名稱顯示：' + await page.inputValue('#ce-formula'));
   await page.fill('#ce-formula', '');
   await page.click('#ce-formula');
@@ -110,6 +119,33 @@ async function main() {
   await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'));
   const d4b = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DA')));
   assert(d4b.find(l => l.LineCode === 'd4').Formula === 'P8 * [季Margin率]', '自動完成選的科目應存成代碼：' + d4b.find(l => l.LineCode === 'd4').Formula);
+
+  // v2.2：一行一項從頭組公式 —— 加一項 → 搜尋選科目 → 乘參數 → 減一項選子科目合計，存成代碼
+  await page.click('.fx-mode [data-mode="chips"]');
+  await page.click('.fx-mode [data-mode="rows"]');
+  await page.waitForSelector('.fx-rows');
+  await page.click('.fx-row .fx-del');
+  await page.click('button:has-text("＋ 加一項")');
+  await page.waitForSelector('.fx-picker');
+  await page.keyboard.type('廠價');
+  await page.keyboard.press('Enter');
+  await page.click('.fx-add-factor');
+  await page.waitForSelector('.fx-picker');
+  await page.keyboard.type('季Margin率');
+  await page.keyboard.press('Enter');
+  await page.click('button:has-text("− 減一項")');
+  await page.waitForSelector('.fx-picker');
+  await page.click('.fx-pk-item:has-text("固定金額")');
+  await page.fill('.fx-row:nth-child(2) .fx-num', '100');
+  await page.waitForFunction(() => /✔/.test((document.getElementById('ce-status') || {}).textContent || ''));
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'));
+  const d4c = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DA')));
+  assert(d4c.find(l => l.LineCode === 'd4').Formula === 'P8 * [季Margin率] - 100', '一行一項組的公式應存成代碼：' + d4c.find(l => l.LineCode === 'd4').Formula);
+  // 拆不成一行一項的公式(貨物稅)自動用自由公式(膠囊)，每顆膠囊底下有目前的值
+  await page.click('.tree-row:has-text("貨物稅")');
+  await page.waitForSelector('#ce-chips .fx-chip.kind-param');
+  await page.waitForFunction(() => /%/.test((document.querySelector('#ce-chips .fx-chip.kind-param .cv') || {}).textContent || ''));
 
   // v2.1：從 Excel 貼上一整塊數字到銷貨成本
   await page.click('nav button[data-tab="costofsales"]');
