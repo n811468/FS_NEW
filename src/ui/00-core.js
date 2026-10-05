@@ -46,7 +46,7 @@ const ENTITIES = {
     label: '車系設定', pk: 'VehicleID',
     getFn: 'getVehicles', saveGridFn: 'saveVehicleGrid', deleteFn: 'deleteVehicle',
     renameFn: 'renameVehicle', scopedBy: 'vehicleType', sortable: 'setVehicleOrder',
-    intro: '車系是車型底下的細車型（如 3人貨車、9人客貨車）。拖曳 ⠿ 調整順序，放開就生效 —— 所有頁面的車系欄位都照這個順序排。',
+    intro: '車系是車型底下的細車型（如 標準型、豪華型、長軸版）。拖曳 ⠿ 調整順序，放開就生效 —— 所有頁面的車系欄位都照這個順序排。',
     columns: [
       { name: 'VehicleID', label: '車系代號', lockAfterCreate: true, width: 140 },
       { name: 'VehicleCode', label: '車系名稱', width: 240 },

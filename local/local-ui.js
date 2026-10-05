@@ -113,11 +113,11 @@
     var s = host.state;
     userBtn.textContent = window.FSLocal.getUser();
     var parts = [];
-    parts.push(s.lastExportAt ? '上次整份匯出：' + fmtTime(s.lastExportAt) : '尚未匯出過');
+    parts.push(s.lastExportAt ? '上次整份備份：' + fmtTime(s.lastExportAt) : '還沒整份備份過');
     statusEl.textContent = parts.join(' · ');
     if (s.changesSinceExport > 0) {
-      statusEl.appendChild(el('span', { class: 'fsl-warn', text: ' · ' + s.changesSinceExport + ' 次修改尚未匯出',
-        title: '資料暫存在這個瀏覽器裡，清除瀏覽資料或換電腦就會消失。請定期「匯出全部」備份。' }));
+      statusEl.appendChild(el('span', { class: 'fsl-warn', text: ' · ' + s.changesSinceExport + ' 次修改還沒整份備份',
+        title: '資料暫存在這個瀏覽器裡，清除瀏覽資料或換電腦就會消失。請定期「匯出 ▾ → 匯出全部」備份。\n「匯出車型」「匯出情境」是交給同事用的，只包含一部分資料，所以不算備份（瀏覽器裡只有這個車型時例外）。' }));
     }
     banner.innerHTML = '';
     if (s.stale) {

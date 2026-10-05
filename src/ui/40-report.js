@@ -180,7 +180,7 @@ function drawReport_() {
   const no = () => String(++n).padStart(2, '0');
   slides.push(slideHtml_(no(), '損益目標與差距摘要', `${esc(R.vehicleTypeId)}　${B ? '現況 ' + esc(B.meta.label) + ' → ' : ''}目標 ${esc(T.meta.label)}`, reportSummaryHtml_()));
   if (B) slides.push(slideHtml_(no(), '現況 → 目標：營業淨利差距拆解', '每一根長條 = 該科目讓營業淨利增加(綠)或減少(紅)多少', '<div id="rpt-bridge">' + reportBridgeHtml_() + '</div>'));
-  if (B) slides.push(slideHtml_(no(), '現況與目標對照（加權平均）', '差距 = 目標 − 現況；對淨利影響已依科目方向換算', reportCompareHtml_(), 'rpt-compare'));
+  if (B) slides.push(slideHtml_(no(), '現況與目標對照（加權平均）', '差距 = 目標 − 現況；綠色 = 對營業淨利有利、紅色 = 不利', reportCompareHtml_(), 'rpt-compare'));
   slides.push(slideHtml_(no(), '目標成本作法', '差距由哪些作法補起來、擔當單位與進度', reportActionsHtml_(), 'rpt-actions'));
   if (B) slides.push(slideHtml_(no(), '現況 → 作法 → 目標', '營業淨利：每一項作法補了多少，還差多少', '<div id="rpt-act-wf">' + reportActionWaterfallHtml_() + '</div>'));
   if (B) slides.push(slideHtml_(no(), '作法對帳', '作法寫的效果，跟現況 → 目標的實際數字對得起來嗎？', '<div id="rpt-recon-wrap">' + reportReconHtml_() + '</div>', 'rpt-recon'));
@@ -363,11 +363,11 @@ function reportCompareHtml_() {
   const rows = R.lines.filter(l => reportShowPrice || !l.isPriceStructure);
   let section = '';
   return `<div class="grid-scroll"><table class="rpt-table" id="rpt-compare">
-    <thead><tr><th style="text-align:left;">科目</th><th>現況</th><th>%</th><th>目標</th><th>%</th><th>差距</th><th>對淨利影響</th><th style="text-align:left;">對應作法</th><th style="text-align:left;">說明（目標）</th></tr></thead>
+    <thead><tr><th style="text-align:left;">科目</th><th>現況</th><th>%</th><th>目標</th><th>%</th><th data-tip="目標 − 現況。綠色 = 對營業淨利有利（成本降、收入增），紅色 = 不利">差距</th><th style="text-align:left;">對應作法</th><th style="text-align:left;">說明（目標）</th></tr></thead>
     <tbody>${rows.map(l => {
       let head = '';
       const sec = l.isPriceStructure ? '售價結構' : '損益';
-      if (sec !== section) { section = sec; head = `<tr class="section"><td colspan="9">${sec}</td></tr>`; }
+      if (sec !== section) { section = sec; head = `<tr class="section"><td colspan="8">${sec}</td></tr>`; }
       const tv = T.weighted[l.LineCode], bv = B.weighted[l.LineCode];
       const d = (tv || 0) - (bv || 0);
       const sign = l.isSubtotal ? (l.LineCode === 'B' ? -1 : 1) : profitSign_(l);
@@ -379,7 +379,6 @@ function reportCompareHtml_() {
         <td>${rAmt_(bv)}</td><td class="pct">${l.isPriceStructure ? '' : rPct_(bv, bRev)}</td>
         <td>${rAmt_(tv)}</td><td class="pct">${l.isPriceStructure ? '' : rPct_(tv, tRev)}</td>
         <td class="${cls}">${Math.abs(d) < 0.5 ? '' : rSigned_(d)}</td>
-        <td class="${cls}">${!sign || Math.abs(eff) < 0.5 ? '' : rSigned_(eff)}</td>
         <td class="actions-cell">${acts.map(a => `• ${esc(a.Title)}`).join('<br>')}</td>
         ${noteCellHtml_(T, l.LineCode)}</tr>`;
     }).join('')}</tbody></table></div>`;
@@ -407,7 +406,7 @@ function reportActionsHtml_() {
     <div class="toolbar no-print" style="margin-top:10px;">
       <button type="button" class="btn secondary" onclick="addReportAction()">＋ 新增作法</button>
       <span class="spacer"></span>
-      <span class="muted">效果 = 對營業淨利的單台改善金額（正數 = 改善）</span>
+      <span class="muted">效果 = 對營業淨利的單台金額（正數 = 改善、負數 = 惡化，例：規格追加）</span>
     </div>`;
 }
 function reportActionsTableHtml_() {
@@ -608,13 +607,14 @@ function reportReconHtml_() {
   const bad = rows.filter(r => r.tone !== 'ok').length;
   return `${bad ? `<div class="callout warn">有 ${bad} 個科目的作法效果跟實際數字對不起來，審議時容易被追問，建議先釐清。</div>` : '<div class="callout ok">每個科目的作法效果都跟實際數字吻合。</div>'}
     <div class="grid-scroll"><table class="rpt-table" id="rpt-recon">
-    <thead><tr><th style="text-align:left;">科目</th><th>作法數</th><th>作法效果合計</th><th>實際改善（目標 − 現況）</th><th>差異</th><th style="text-align:left;">判讀</th></tr></thead>
+    <thead><tr><th style="text-align:left;">科目</th><th>作法數</th><th>作法效果合計</th><th>實際改善（目標 − 現況）</th><th>差異</th><th style="text-align:left;">判讀</th><th class="no-print"></th></tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td class="name">${esc(r.name)}</td><td>${r.count || ''}</td>
       <td>${r.count ? fmt(r.effect) : '—'}</td>
       <td class="${r.actual === null ? '' : r.actual > 0.5 ? 'gap-good' : r.actual < -0.5 ? 'gap-bad' : ''}">${r.actual === null ? '—' : signed_(r.actual)}</td>
       <td>${r.diff === null ? '—' : signed_(r.diff)}</td>
-      <td class="note recon-${r.tone}">${r.tone === 'ok' ? '✔ ' : '⚠ '}${esc(r.status)}</td></tr>`).join('')}</tbody>
+      <td class="note recon-${r.tone}">${r.tone === 'ok' ? '✔ ' : '⚠ '}${esc(r.status)}</td>
+      <td class="no-print">${r.code ? `<button type="button" class="btn ghost sm" onclick="openWaterfallTool_('actions', { scenarioId: reportSel.base }, { scenarioId: reportSel.target }, { actionLine: '${esc(r.code)}' })" data-tip="在瀑布圖工具看這個科目：現況 → 每一個原因 → 目標，也可以直接補原因">瀑布</button>` : ''}</td></tr>`).join('')}</tbody>
   </table></div>
   <p class="help">實際改善 = 該科目從現況到目標的變動，換算成對營業淨利的影響（成本降 = 正）。容差 500 元或 5%。</p>`;
 }

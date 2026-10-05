@@ -134,14 +134,21 @@
     /** 匯出資料包：vehicleTypeIds 有值 = 只匯出這幾個車型；opts2.scenarioIds 有值 = 只匯出這幾個情境；都沒有 = 整份 */
     function exportPack(vehicleTypeIds, opts2) {
       var scenarioIds = opts2 && opts2.scenarioIds && opts2.scenarioIds.length ? opts2.scenarioIds : null;
-      var pack = Pack.buildPack(readTables(), {
+      var tables = readTables();
+      var pack = Pack.buildPack(tables, {
         vehicleTypeIds: vehicleTypeIds && vehicleTypeIds.length ? vehicleTypeIds : null,
         scenarioIds: scenarioIds,
         exportedBy: opts.getUser ? opts.getUser() : ''
       });
       if (scenarioIds && !pack.tables.Scenarios.length) throw new Error('找不到要匯出的情境。');
-      // 只有整份匯出才算「備份過了」；只匯出某個車型/情境不代表其他資料也有備份
-      if ((!vehicleTypeIds || !vehicleTypeIds.length) && !scenarioIds) {
+      // 整份匯出才算「備份過了」；只匯出某個車型/情境不代表其他資料也有備份 ——
+      // 但資料庫裡本來就只有這個車型(或只有這幾個情境)時，匯出的就是全部，也算備份過了
+      var ids = function (rows, key) { return (rows || []).map(function (r) { return String(r[key]); }); };
+      var coversAll = function (picked, all) { return all.every(function (x) { return picked.indexOf(x) !== -1; }); };
+      var whole = scenarioIds
+        ? coversAll(scenarioIds.map(String), ids(tables.Scenarios, 'ScenarioID')) && coversAll(ids(pack.tables.VehicleTypes, 'VehicleTypeID'), ids(tables.VehicleTypes, 'VehicleTypeID'))
+        : !vehicleTypeIds || !vehicleTypeIds.length || coversAll(vehicleTypeIds.map(String), ids(tables.VehicleTypes, 'VehicleTypeID'));
+      if (whole) {
         state.changesSinceExport = 0;
         state.lastExportAt = pack.exportedAt;
         persist();

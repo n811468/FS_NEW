@@ -2,7 +2,8 @@
  * 全系統的瀑布圖都集中在這裡(儀表板、GATE 報告、目標反推都有按鈕帶過來)：
  *   兩個情境的差異  現況 → 目標(或任兩個 車型×情境×車系)的營業淨利，差在哪些科目
  *   單一情境損益    一個欄位從收入一路扣到指定的小計，可以看到明細
- *   作法拆解        現況 → 每一項改善作法的效果 → 目標，沒寫作法的差異單獨一根
+ *   作法拆解        現況 → 每一項作法/原因的效果 → 目標，沒寫作法的差異單獨一根；
+ *                   可以看營業淨利，也可以只看某一個科目(例：材料成本-KD F → E 惡化 50，其中座椅低減 +30、規格追加 −80)
  *   自訂            自己輸入每一根(也可以把上面任何一張圖「轉成自訂」再改名稱、合併)
  * 圖是純 SVG(跟儀表板同一套)，可以下載 PNG / SVG、複製表格貼到 Excel / PPT。
  */
@@ -11,6 +12,8 @@ let wfPrefs = {
   mode: 'bridge',
   from: { scenarioId: '', vehicleId: '' }, to: { scenarioId: '', vehicleId: '' },
   end: 'K', level: 'major', basis: 'unit', volumeEffect: true, unit: 1,
+  actionLine: '',          // 作法拆解看哪個科目：空白 = 營業淨利
+  manualLowerBetter: false, // 自訂：數字變大是變差(成本/費用的瀑布轉成自訂時會帶過來)
   sort: 'pl', topN: 0, minAbs: 0, subtotals: true, labels: true, titles: {},
   manual: [
     { label: '現況營業淨利', value: -100000, kind: 'total' },
@@ -42,7 +45,7 @@ function saveWfPrefs_() {
 /**
  * steps = [{ label, value, kind: 'total' | 'delta', tip }]
  *   total = 從 0 畫到 value 的整根(起點、小計、終點)；delta = 從目前累計往上/往下的一段
- * opts = { width, height, fmtV, labels, title }
+ * opts = { width, height, fmtV, labels, title, lowerBetter }
  * 增加綠色、減少紅色、整根深色(負數紅底深框)；每根之間有虛線連接，看得出累計的走向。
  */
 function wfSvg_(steps, opts) {
@@ -94,7 +97,9 @@ function wfSvg_(steps, opts) {
     const x = xOf(i);
     const v = b.y1 - b.y0;
     const isTotal = b.st.kind === 'total';
-    const color = isTotal ? (b.y1 < 0 ? '#c53030' : '#2d3748') : (v >= 0 ? '#38a169' : '#e53e3e');
+    // 成本/費用科目的瀑布(opts.lowerBetter)：數字變大是變差，紅綠反過來
+    const good = opts.lowerBetter ? v <= 0 : v >= 0;
+    const color = isTotal ? (b.y1 < 0 ? '#c53030' : '#2d3748') : (good ? '#38a169' : '#e53e3e');
     out += `<rect class="bar wf-bar" x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${color}" data-tip="${esc(b.st.tip || (b.st.label + '\n' + (isTotal ? '' : (v >= 0 ? '+' : '')) + fmt(isTotal ? b.y1 : v)))}"/>`;
     // 連接線：這一根的終點 → 下一根的起點
     if (i < n - 1) {
@@ -278,19 +283,163 @@ function wfStructureSteps_(cmp) {
   return steps;
 }
 
-function wfActionSteps_(cmp, actions) {
+/**
+ * 某個科目的變動對營業淨利是加還是減：收入、小計/毛利/淨利 +1；成本、費用 −1。
+ * 群組底下的明細跟著群組(「X − CHILDREN()」型小計底下的明細是 −1)。
+ */
+function wfLineSign_(lines, code) {
+  const by = {};
+  lines.forEach(l => { by[l.LineCode] = l; });
+  const l = by[code];
+  if (!l) return 1;
+  const S = wfStructure_(lines);
+  let root = l, guard = 0;
+  while (root.ParentLine && by[root.ParentLine] && root.ParentLine !== root.LineCode && guard++ < 20) root = by[root.ParentLine];
+  const income = r => r.LineCode === 'A' || r.Category === '收入';
+  if (root === l) return S.isResult(l) || income(l) ? 1 : -1;
+  if (S.isResult(root)) return /-\s*CHILDREN\s*\(/i.test(root.Formula || '') ? -1 : 1;
+  return income(root) ? 1 : -1;
+}
+/** 作法拆解可以看的科目：營業淨利(空白) + 售價結構以外的科目，依損益表順序 */
+function wfActionLineOptions_(lines) {
+  return lines.filter(l => !l.isPriceStructure);
+}
+function wfFillActionLineOptions_(lines) {
+  const sel = document.getElementById('wf-act-line');
+  if (!sel) return;
+  const opts = wfActionLineOptions_(lines);
+  if (wfPrefs.actionLine && !opts.some(o => o.LineCode === wfPrefs.actionLine)) wfPrefs.actionLine = '';
+  sel.innerHTML = `<option value="">營業淨利（全部作法）</option>` + opts.map(o =>
+    `<option value="${esc(o.LineCode)}"${o.LineCode === wfPrefs.actionLine ? ' selected' : ''}>${esc((o.ParentLine ? '　' : '') + shortLineName(o.LineName))}</option>`).join('');
+}
+/**
+ * 作法拆解。actionLine 空白：營業淨利 現況 → 每一項作法 → 目標。
+ * 指定科目：只看那個科目(含底下的明細)自己的數字 F → E，每一根是掛在這個科目的作法/原因，
+ * 作法的效果是「對營業淨利」的(正數 = 改善)，成本/費用科目換算成科目本身的變動(效果 +30 = 成本少 30)。
+ * 回傳 { steps, lowerBetter, lineName }
+ */
+function wfActionSteps_(cmp, actions, actionLine) {
   const [cf, ct] = cmp.columns;
-  const mFrom = Number(cf.amounts[profitCodeOf_(cf)]) || 0, mTo = Number(ct.amounts[profitCodeOf_(ct)]) || 0;
   const nameOf = code => { const l = cmp.lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : ''; };
-  const deltas = actions.filter(a => String(a.Title || '').trim() && num(a.Effect)).map(a => ({
-    label: a.Title, value: num(a.Effect), kind: 'delta',
-    tip: `${a.Title}\n${[nameOf(a.LineCode), a.Owner, a.Status].filter(x => x).join('｜')}\n效果 ${fmt(num(a.Effect))} 元/台`
-  }));
+  const line = actionLine ? cmp.lines.find(l => l.LineCode === actionLine) : null;
+  let codes = null, sign = 1, mFrom, mTo, label;
+  if (line) {
+    codes = new Set([line.LineCode]);
+    let grew = true;
+    while (grew) { grew = false; cmp.lines.forEach(l => { if (l.ParentLine && codes.has(l.ParentLine) && !codes.has(l.LineCode)) { codes.add(l.LineCode); grew = true; } }); }
+    sign = wfLineSign_(cmp.lines, line.LineCode);
+    mFrom = Number(cf.amounts[line.LineCode]) || 0; mTo = Number(ct.amounts[line.LineCode]) || 0;
+    label = shortLineName(line.LineName);
+  } else {
+    mFrom = Number(cf.amounts[profitCodeOf_(cf)]) || 0; mTo = Number(ct.amounts[profitCodeOf_(ct)]) || 0;
+    label = '營業淨利';
+  }
+  const deltas = actions.filter(a => String(a.Title || '').trim() && num(a.Effect) && (!codes || codes.has(a.LineCode))).map(a => {
+    const v = num(a.Effect) * sign;   // 對科目本身的變動
+    return { label: a.Title, value: v, kind: 'delta',
+      tip: `${a.Title}\n${[nameOf(a.LineCode), a.Owner, a.Status].filter(x => x).join('｜')}\n效果 ${fmt(num(a.Effect))} 元/台（對營業淨利${num(a.Effect) >= 0 ? '改善' : '惡化'}）${line ? `\n${label} ${v >= 0 ? '+' : ''}${fmt(v)}` : ''}` };
+  });
   const residual = (mTo - mFrom) - deltas.reduce((s, d) => s + d.value, 0);
-  if (Math.abs(residual) >= 0.5) deltas.push({ label: '其他差異（沒有對應作法）', value: residual, kind: 'delta', pinned: true, tip: '目標與現況的營業淨利差異中，沒有寫成作法的部分' });
-  return [{ label: `${wfColName_(cf, ct)} 營業淨利`, value: mFrom, kind: 'total' }]
-    .concat(wfTrim_(deltas))
-    .concat([{ label: `${wfColName_(ct, cf)} 營業淨利`, value: mTo, kind: 'total' }]);
+  if (Math.abs(residual) >= 0.5) deltas.push({ label: line ? '其他（沒有對應的作法/原因）' : '其他差異（沒有對應作法）', value: residual, kind: 'delta', pinned: true,
+    tip: line ? `${label}的變動中，沒有寫成作法/原因的部分` : '目標與現況的營業淨利差異中，沒有寫成作法的部分' });
+  return {
+    lowerBetter: sign < 0, lineName: label,
+    steps: [{ label: `${wfColName_(cf, ct)} ${label}`, value: mFrom, kind: 'total' }]
+      .concat(wfTrim_(deltas))
+      .concat([{ label: `${wfColName_(ct, cf)} ${label}`, value: mTo, kind: 'total' }])
+  };
+}
+
+/* ---------------- 原因拆解：原因直接在瀑布圖工具填 ----------------
+ * 原因存在終點情境的作法清單(跟 GATE 報告「目標成本作法」同一份)，效果 = 對營業淨利的影響(正 = 優化、負 = 惡化)。
+ * 這裡用「優化 / 惡化 + 金額」填，不必想正負號；看成本科目時，優化 30 = 成本少 30。 */
+let wfActions = [];      // 終點情境的全部作法/原因(編輯中)
+let wfActCmp = null;     // 起點、終點兩欄的計算結果
+function wfActRecalc_(redrawEditor) {
+  if (!wfActCmp) return;
+  const cmp = wfActCmp;
+  const colName = c => wfColName_(c, cmp.columns.find(x => x !== c));
+  const r = wfActionSteps_(cmp, wfActions, wfPrefs.actionLine);
+  wfLast = { steps: r.steps, lowerBetter: r.lowerBetter, title: `${r.lineName}：${colName(cmp.columns[0])} → ${colName(cmp.columns[1])}（原因拆解，元/台）` };
+  wfRedraw_();
+  if (redrawEditor) wfActEditorDraw_();
+}
+/** 這個科目(含底下明細)的代碼集合；營業淨利 = null(全部) */
+function wfActCodes_() {
+  if (!wfPrefs.actionLine || !wfActCmp) return null;
+  const codes = new Set([wfPrefs.actionLine]);
+  let grew = true;
+  while (grew) { grew = false; wfActCmp.lines.forEach(l => { if (l.ParentLine && codes.has(l.ParentLine) && !codes.has(l.LineCode)) { codes.add(l.LineCode); grew = true; } }); }
+  return codes;
+}
+function wfActEditorDraw_() {
+  const box = document.getElementById('wf-act-editor');
+  if (!box || !wfActCmp) return;
+  if (String(wfPrefs.to.scenarioId).indexOf('snap:') === 0) { box.innerHTML = '<p class="muted">終點是情境快照，不能填原因；請選一般情境。</p>'; return; }
+  const codes = wfActCodes_();
+  const lineOpts = wfActCmp.lines.filter(l => !l.isPriceStructure);
+  const rows = wfActions.map((a, i) => ({ a, i })).filter(x => !codes || codes.has(x.a.LineCode));
+  const lineName = wfPrefs.actionLine ? shortLineName((wfActCmp.lines.find(l => l.LineCode === wfPrefs.actionLine) || {}).LineName || '') : '營業淨利';
+  box.innerHTML = `<div class="wf-act-box">
+    <div class="toolbar-block-title">${esc(lineName)}的原因（存在終點情境，GATE 報告「目標成本作法」也看得到）</div>
+    <table class="grid-table lever-table wf-act-table"><thead><tr><th>原因 / 作法</th><th>科目</th><th>優化 / 惡化</th><th>金額（元/台）</th><th></th></tr></thead>
+    <tbody>${rows.length ? rows.map(({ a, i }) => {
+      const eff = num(a.Effect), good = a.Effect === '' || a.Effect === undefined ? true : eff >= 0;
+      return `<tr>
+        <td><input type="text" value="${esc(a.Title)}" placeholder="例：座椅低減、規格追加" oninput="wfActions[${i}].Title=this.value;wfActDirty_()"></td>
+        <td><select onchange="wfActions[${i}].LineCode=this.value;wfActDirty_(true)"><option value="">（不指定）</option>${lineOpts.map(l =>
+          `<option value="${esc(l.LineCode)}"${a.LineCode === l.LineCode ? ' selected' : ''}>${esc(shortLineName(l.LineName))}</option>`).join('')}</select></td>
+        <td><select onchange="wfActSetSign_(${i}, this.value === 'good')"><option value="good"${good ? ' selected' : ''}>優化</option><option value="bad"${good ? '' : ' selected'}>惡化</option></select></td>
+        <td><input type="number" min="0" step="any" value="${a.Effect === '' || a.Effect === undefined ? '' : esc(Math.abs(eff))}" oninput="wfActSetAmount_(${i}, this.value, this)"></td>
+        <td><button type="button" class="btn ghost icon sm" onclick="wfActions.splice(${i},1);wfActDirty_(true)" aria-label="刪除">✕</button></td></tr>`;
+    }).join('') : '<tr><td colspan="5" class="muted" style="text-align:center;padding:12px;">還沒有原因，按「＋ 新增原因」</td></tr>'}</tbody></table>
+    <div class="field-row" style="margin-top:8px;">
+      <button type="button" class="btn secondary sm" onclick="wfActAdd_()">＋ 新增原因</button>
+      <span class="help">優化 = 對營業淨利有利（成本少、收入多），惡化相反。</span>
+      <span class="spacer"></span>
+      <button type="button" class="btn sm" onclick="wfActSave_()">儲存原因</button>
+    </div></div>`;
+}
+function wfActDirty_(redrawEditor) {
+  markDirty('waterfall', wfActSave_, () => { clearDirty(); runWaterfall_(); });
+  wfActRecalc_(!!redrawEditor);
+}
+function wfActSetSign_(i, good) {
+  const a = wfActions[i];
+  if (a.Effect !== '' && a.Effect !== undefined) a.Effect = (good ? 1 : -1) * Math.abs(num(a.Effect));
+  a.__bad = !good;
+  wfActDirty_();
+}
+function wfActSetAmount_(i, value, el) {
+  const a = wfActions[i];
+  const sel = el && el.closest('tr') && el.closest('tr').querySelector('td:nth-child(3) select');
+  const good = sel ? sel.value === 'good' : !a.__bad;
+  a.Effect = value === '' ? '' : (good ? 1 : -1) * Math.abs(num(value));
+  wfActDirty_();
+}
+function wfActAdd_() {
+  wfActions.push({ ActionID: '', Title: '', LineCode: wfPrefs.actionLine || '', Effect: '', Owner: '', Status: '', DueDate: '' });
+  wfActDirty_(true);
+  const inputs = document.querySelectorAll('#wf-act-editor tbody tr:last-child input[type=text]');
+  if (inputs[0]) inputs[0].focus();
+}
+function wfActSave_() {
+  const sid = wfPrefs.to.scenarioId;
+  google.script.run
+    .withSuccessHandler(safeHandler(list => {
+      clearDirty();
+      wfActions = list.map(a => Object.assign({}, a));
+      Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+      toast('已儲存原因', 'ok');
+      wfActRecalc_(true);
+    }))
+    .withFailureHandler(err => toast(err.message, 'err'))
+    .saveActions(sid, wfActions.map(a => { const c = Object.assign({}, a); delete c.__bad; return c; }));
+}
+/** 換科目/情境前，原因還沒存就先問 */
+function wfConfirmLeaveActions_(go, sel) {
+  if (!isDirty_()) { go(); return; }
+  confirmLeave_().then(ok => { if (ok) go(); else if (sel) sel.value = wfPrefs.actionLine; });
 }
 
 /* ---------------- 頁面 ---------------- */
@@ -341,7 +490,7 @@ function drawWaterfallTool_() {
   const body = document.getElementById('wf-body');
   if (!body || !wfLists) return;
   const p = wfPrefs;
-  const modes = [['bridge', '兩個欄位的差異'], ['structure', '單一欄位損益'], ['actions', '作法拆解'], ['manual', '自訂']];
+  const modes = [['bridge', '兩個欄位的差異'], ['structure', '單一欄位損益'], ['actions', '原因拆解'], ['manual', '自訂']];
   const seg = (key, opts, cur) => `<div class="seg">${opts.map(([v, t]) => `<button type="button" class="seg-btn${String(cur) === String(v) ? ' active' : ''}" onclick="wfPrefs.${key}=${typeof v === 'number' ? v : `'${v}'`};saveWfPrefs_();drawWaterfallTool_()">${t}</button>`).join('')}</div>`;
   const chk = (key, label) => `<label class="chk"><input type="checkbox" ${p[key] ? 'checked' : ''} onchange="wfPrefs.${key}=this.checked;saveWfPrefs_();runWaterfall_()"> ${label}</label>`;
   let source = '';
@@ -354,9 +503,11 @@ function drawWaterfallTool_() {
     source = `<div class="field-row"><label class="field"><span>欄位</span><div class="inline">${wfScenarioSelectHtml_('to')}</div></label></div>`;
   } else if (p.mode === 'actions') {
     source = `<div class="field-row">
-      <label class="field"><span>現況情境</span><div class="inline">${wfScenarioSelectHtml_('from', true)}</div></label>
-      <label class="field"><span>目標情境（作法掛在這個情境）</span><div class="inline">${wfScenarioSelectHtml_('to', true)}</div></label></div>
-      <p class="help">加權平均營業淨利（元/台）：現況 → 目標情境每一項作法的效果 → 目標；作法加總跟實際差異對不起來的部分單獨一根。</p>`;
+      <label class="field"><span>起點情境</span><div class="inline">${wfScenarioSelectHtml_('from', true)}</div></label>
+      <label class="field"><span>終點情境（原因存在這個情境）</span><div class="inline">${wfScenarioSelectHtml_('to', true)}</div></label>
+      <label class="field"><span>看哪個科目</span><select id="wf-act-line" onchange="wfConfirmLeaveActions_(() => { wfPrefs.actionLine=this.value;saveWfPrefs_();runWaterfall_(); }, this)"><option value="">營業淨利（全部作法）</option></select></label></div>
+      <p class="help">起點、終點是這個科目在兩個情境的數字（加權平均，元/台）；中間每一根是下面自己填的原因，原因加總跟實際變動對不起來的部分自動變成「其他」。</p>
+      <div id="wf-act-editor"></div>`;
   }
   const lineOpts = p.mode === 'bridge' || p.mode === 'structure';
   // 不常改的選項收在「進階」；改過(不是預設值)就展開，才不會忘了自己設過
@@ -373,6 +524,7 @@ function drawWaterfallTool_() {
         <label class="field" data-tip="全系統共用：儀表板、GATE 報告、瀑布圖工具用同一個金額單位"><span>金額單位</span>${seg('unit', [[1, '元'], [1000, '千元'], [10000, '萬元']], p.unit)}</label>
         ${p.mode === 'bridge' && p.basis !== 'unit' ? chk('volumeEffect', '拆出「銷量影響」') : ''}
         ${p.mode === 'structure' ? chk('subtotals', '顯示中間小計（生產毛利、銷貨毛利…）') : ''}
+        ${p.mode === 'manual' ? chk('manualLowerBetter', '數字變大是變差（成本、費用的瀑布）') : ''}
       </div>
       <details class="ed-adv wf-adv"${advOpen ? ' open' : ''}>
         <summary>進階（排序、顯示幾項、數字標籤、圖表標題）</summary>
@@ -406,7 +558,7 @@ function runWaterfall_() {
   const p = wfPrefs;
   const box = document.getElementById('wf-chart');
   if (!box) return;
-  if (p.mode === 'manual') { wfLast = { steps: wfManualSteps_(p.manual), title: '' }; wfRedraw_(); return; }
+  if (p.mode === 'manual') { wfLast = { steps: wfManualSteps_(p.manual), title: '', lowerBetter: !!p.manualLowerBetter }; wfRedraw_(); return; }
   const sels = p.mode === 'structure' ? [p.to] : [p.from, p.to];
   if (sels.some(s => !s.scenarioId)) { box.innerHTML = '<p class="muted">請先選擇情境。</p>'; return; }
   const selections = sels.map(s => ({ ScenarioID: s.scenarioId, VehicleID: p.mode === 'actions' ? '' : (s.vehicleId || '') }));
@@ -414,12 +566,14 @@ function runWaterfall_() {
   const fail = err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; };
   google.script.run.withFailureHandler(fail).withSuccessHandler(safeHandler(cmp => {
     if (p.mode !== 'manual') wfFillEndOptions_(cmp.lines);
+    if (p.mode === 'actions') wfFillActionLineOptions_(cmp.lines);
     const colName = c => wfColName_(c, cmp.columns.find(x => x !== c));
     if (p.mode === 'actions') {
+      wfActCmp = cmp;
+      if (String(p.to.scenarioId).indexOf('snap:') === 0) { wfActions = []; wfActRecalc_(true); return; }
       google.script.run.withFailureHandler(fail).withSuccessHandler(safeHandler(actions => {
-        if (!actions.some(a => num(a.Effect))) toast('目標情境還沒有填效果的改善作法（GATE 報告「目標成本作法」可以填）', 'warn', 3000);
-        wfLast = { steps: wfActionSteps_(cmp, actions), title: `營業淨利：${colName(cmp.columns[0])} → ${colName(cmp.columns[1])}（作法拆解，元/台）` };
-        wfRedraw_();
+        wfActions = actions.map(a => Object.assign({}, a));
+        wfActRecalc_(true);
       })).getActions(p.to.scenarioId);
       return;
     }
@@ -459,7 +613,7 @@ function wfRedraw_() {
   const heading = document.getElementById('wf-heading');
   if (heading) heading.textContent = title || '瀑布圖';
   const u = num(wfPrefs.unit) || 1;
-  box.innerHTML = wfSvg_(wfLast.steps, { title, labels: wfPrefs.labels, fmtV: wfShortFmt_(wfLast.steps) });
+  box.innerHTML = wfSvg_(wfLast.steps, { title, labels: wfPrefs.labels, fmtV: wfShortFmt_(wfLast.steps), lowerBetter: !!wfLast.lowerBetter });
   const tbl = document.getElementById('wf-table');
   if (!tbl) return;
   let run = 0;
@@ -470,7 +624,7 @@ function wfRedraw_() {
     <tbody>${wfLast.steps.map(s => {
       if (s.kind === 'total') run = s.value; else run += s.value;
       return `<tr class="${s.kind === 'total' ? 'subtotal' : ''}"><td>${esc(s.label)}</td>
-        <td class="amt${s.value < 0 ? ' negative' : ''}">${s.kind === 'delta' && s.value > 0 ? '+' : ''}${wfFmt_(s.value)}</td>
+        <td class="amt${(s.kind === 'delta' && wfLast.lowerBetter ? s.value > 0 : s.value < 0) ? ' negative' : ''}">${s.kind === 'delta' && s.value > 0 ? '+' : ''}${wfFmt_(s.value)}</td>
         <td class="amt${run < 0 ? ' negative' : ''}">${wfFmt_(run)}</td>
         ${total ? `<td class="amt">${s.kind === 'delta' ? (s.value / total * 100).toFixed(1) + '%' : ''}</td>` : ''}</tr>`;
     }).join('')}</tbody></table></div>`;
@@ -530,6 +684,7 @@ function wfToManual_() {
   wfPrefs.manual = wfLast.steps.map((s, i) => ({ label: s.label, value: s.kind === 'total' && i > 0 && i === wfLast.steps.length - 1 ? '' : Math.round(s.value), kind: s.kind }));
   const t = String(wfTitle_()).trim() || wfLast.title || '';
   wfPrefs.mode = 'manual';
+  wfPrefs.manualLowerBetter = !!wfLast.lowerBetter;
   wfSetTitle_(t);
   saveWfPrefs_();
   drawWaterfallTool_();
@@ -555,6 +710,7 @@ function openInWaterfallTool_(steps, title) {
   loadWfPrefs_();
   wfPrefs.manual = steps.map((s, i) => ({ label: s.label, value: s.kind === 'total' && i === steps.length - 1 && i > 0 ? '' : Math.round(s.value), kind: s.kind }));
   wfPrefs.mode = 'manual';
+  wfPrefs.manualLowerBetter = false;
   wfSetTitle_(title || '');
   saveWfPrefs_();
   switchTab('waterfall');

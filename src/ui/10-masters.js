@@ -272,7 +272,7 @@ function createVehicleTypeDialog() {
     title: '新增車型',
     body: '<p class="help">科目表會依每個車型各自一份。可以從標準範本開始，或複製一個科目結構比較接近的既有車型，之後再到「科目與公式」調整。</p>',
     fields: [
-      { name: 'id', label: '車型代號', placeholder: '例：DA' },
+      { name: 'id', label: '車型代號', placeholder: '例：K5' },
       { name: 'notes', label: '備註', placeholder: '選填' },
       { name: 'source', label: '科目表從哪裡開始', type: 'select', value: '',
         options: [['', '標準範本']].concat(others.map(id => [id, '複製「' + id + '」的科目表'])) }

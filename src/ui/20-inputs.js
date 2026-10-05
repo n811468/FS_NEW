@@ -348,7 +348,7 @@ function importMatrixDialog(key) {
     body: `<p class="help">在 Excel 選取「科目名稱那一欄 + 各車系的金額」(標題列可以一起選)，複製後貼在下面。<br>
       科目依名稱對應（空白、全形半形括號不影響）；車系依標題列的名稱對應，沒有標題列就依畫面上的車系順序：
       ${data.vehicles.map(v => esc(v.VehicleCode || v.VehicleID)).join('、')}。</p>`,
-    fields: [{ name: 'text', label: '貼上', type: 'textarea', placeholder: '科目 → 3人貨車 → 9人客貨車(商用) …（直接從 Excel 複製貼上）' }],
+    fields: [{ name: 'text', label: '貼上', type: 'textarea', placeholder: '科目 → 標準型 → 豪華型 …（直接從 Excel 複製貼上）' }],
     okText: '下一步：檢查對應'
   }).then(v => {
     if (!v || !v.text.trim()) return;
@@ -554,7 +554,7 @@ function renderDevInvestmentPanel() {
   if (!requireScope('devinvestment', true)) return;
   document.getElementById('panel-devinvestment').innerHTML = gridShell('devinvestment', '開發總投',
     '每一列：部門 → 大類(設備/模具/費用) → 攤提落點科目。低減後金額 ÷ 攤提台數 = 單台攤提。' +
-    '<b>「分攤車系」</b>可以讓某筆投資只攤給部分車系（例如中低規式樣、TNCAP 只有部分車系要），其他車系不分攤。拖曳 ⠿ 調整列的順序。');
+    '<b>「分攤車系」</b>可以讓某筆投資只攤給部分車系（例如某個式樣、某項法規認證只有部分車系要），其他車系不分攤。拖曳 ⠿ 調整列的順序。');
 
   const cacheKey = panelCacheKey_('devinvestment', 'scenario');
   if (panelDataCache_[cacheKey]) {
@@ -784,7 +784,7 @@ function addDevAmortTarget() {
     body: `<p class="help">新增到車型 <b>${esc(currentVehicleTypeId)}</b> 的科目表。設備/模具會放在銷貨成本底下，費用放在產品貢獻前費用底下。</p>`,
     fields: [
       { name: 'category', label: '大類', type: 'select', options: DEV_AMORT_CATEGORIES, value: '模具' },
-      { name: 'name', label: '科目名稱', placeholder: '例：TNCAP 模具' }
+      { name: 'name', label: '科目名稱', placeholder: '例：法規認證模具' }
     ],
     okText: '新增', validate: v => !v.name.trim() ? '請輸入科目名稱' : ''
   }).then(v => {

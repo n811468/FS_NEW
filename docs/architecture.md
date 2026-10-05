@@ -19,7 +19,7 @@ local/host.js：google.script.run 替身，直接呼叫同一頁裡的後端函�
    ▼
 記憶體試算表 (local/gas-shim.js，每個分頁 = 一張表)
    │  有改到資料(PLResult 計算快照除外) → 整份存進瀏覽器 localStorage
-   │                                     → 工具列記「N 次修改尚未匯出」
+   │                                     → 工具列記「N 次修改還沒整份備份」
    ▼
 CalcEngine.gs 計算：讀 SalesMix / CostOfSales / DevInvestment / OperatingExpense / Parameters，
    依 PLLineItems 科目鏈逐項 rollup (A→B→C→...→K)
@@ -266,7 +266,7 @@ v2 新頁面：「科目與公式」(`renderChartPanel`：科目樹 + 編輯器 
     整張表都是下拉選單（`comparisonBuilderHtml_`），改哪一列就直接換那一欄要比的資料 ——
     跟系統其他頁面「表格式編輯」的慣例一致，不再另外用一組獨立的挑選器 + 卡片列表。
     最後一列固定是「新增」列；改成跟別欄重複的組合會被擋下來並還原。
-    可同時加入**不同車型**的欄位並排比較（如 DA GATE F 目標 vs DE GATE F 現況），可用箭頭或拖曳排序。
+    可同時加入**不同車型**的欄位並排比較（如 K5 GATE F 目標 vs S3 GATE F 現況），可用箭頭或拖曳排序。
     加入新欄位只把「還沒算過」的欄位送後端（`calculateComparison(missing)`），算回來後在前端併進手上的結果
     （`mergeComparison_` 取科目聯集、`reorderComparison_` 依選擇順序重排）；調整順序、移除欄位完全不打後端。
     進儀表板與按「重新計算」一律整份重算，避免其他分頁剛改過的資料被舊結果蓋掉。

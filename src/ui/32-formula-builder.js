@@ -577,7 +577,7 @@ function fxRefModal_() {
   const lineOpts = chartEditor.lines.map(l => [l.LineCode, l.LineName]);
   return openModal({
     title: '另一個情境（或車型）的科目',
-    body: '<p class="help">例：一般材料以 DE 實績為 BASE。對方情境有同一個車系就取同一個車系，否則取它的加權平均；對方的數字改了，這裡會跟著變。</p>',
+    body: '<p class="help">例：一般材料以前代車型的實績為基準。對方情境有同一個車系就取同一個車系，否則取它的加權平均；對方的數字改了，這裡會跟著變。</p>',
     fields: [
       { name: 'sc', label: '參考的情境', type: 'select', options: (chartEditor.referenceScenarios || []).map(r => [r.ScenarioID, r.label]) },
       { name: 'code', label: '參考的科目', type: 'select', options: lineOpts, value: chartDraft.LineCode || (lineOpts[0] || [''])[0] }
@@ -616,7 +616,7 @@ function fxSourceSections_(forChips) {
     { label: '子科目合計', kind: 'special', tok: { t: 'fn0', v: 'CHILDREN' },
       hint: kids.length ? kids.map(l => l.LineName).join('、') : '把其他科目的「計入」選成這個科目，就會加進來', value: kids.length ? fxFmtVal_(kidsSum) : '' },
     { label: '可扣除貨物稅科目合計', kind: 'special', tok: { t: 'fn0', v: 'TAXDEDUCT' }, hint: '進階設定勾了「貨物稅完稅價格可以扣除」的科目' },
-    { label: '另一個情境（或車型）的科目…', kind: 'special', special: 'ref', hint: '例：DE 實績的一般材料' },
+    { label: '另一個情境（或車型）的科目…', kind: 'special', special: 'ref', hint: '例：前代車型實績的一般材料' },
     { label: forChips ? '數字' : '固定金額…', kind: 'special', special: 'const', hint: forChips ? '也可以直接用鍵盤打' : '每台固定 N 元' }
   ] };
   return fxLineSections_().concat(fxParamSections_(), [special]);
