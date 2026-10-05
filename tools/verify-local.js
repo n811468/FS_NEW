@@ -224,6 +224,25 @@ assert(same(numbers(apiM.calculateComparison(selH), true), hAfter), '第二次�
 assert(hostM.readTables().CostOfSales.filter(r => r.ScenarioID === dxSc.ScenarioID).length === 3, '重複合併後 DX 的成本列重複了');
 assert(same(numbers(apiM.calculateComparison(selM), true), mBefore), '第二次合併後 DA 的數字變了');
 
+// 兩個人都有「關稅率」但預設值不同：合併進來的車型要算出跟對方電腦上一樣的數字(沒填的情境直接填上對方的預設值)
+{
+  const hostP = newHost(memoryStorage());
+  const apiP = apiOf(hostP);
+  apiP.getBootstrap('');
+  apiP.saveParamDef({ ParamName: '關稅率', Unit: '%', DefaultValue: 1, Description: '本機自己的' });
+  const r = hostP.mergePack(Pack.parsePack(JSON.stringify(hostH.exportPack(['DX']))));
+  const pinned = (r.paramDefaultsPinned || [])[0];
+  const hDef = apiH.getParamDefs().find(d => d.ParamName === '關稅率');
+  {
+    assert(Number(hDef.DefaultValue) === 13 && pinned && pinned.ParamName === '關稅率', '預設值不同的參數應該列在合併報告：' + JSON.stringify(r.paramDefaultsPinned));
+    assert(/預設值不同/.test(Pack.describeMerge(r)), '合併說明沒有提到預設值不同');
+  }
+  const row = hostP.readTables().Parameters.find(x => x.ScenarioID === dxSc.ScenarioID && x.ParamName === '關稅率' && !x.VehicleID);
+  assert(row && Number(row.Value) === 13, '資料包裡沒填關稅率的情境，應該直接填上對方的預設值 13（公式用到時才會跟對方一樣）：' + JSON.stringify(row));
+  assert(same(numbers(apiP.calculateComparison(selH), true), hAfter), '參數預設值不同時，合併進來的車型數字要跟對方一樣');
+  assert(apiP.getParamDefs().find(d => d.ParamName === '關稅率').DefaultValue == 1, '同名參數保留本機的定義');
+}
+
 // 舊版資料包(只有一份全域科目表、沒有 LineID)合併進來：科目表視為資料包裡那個車型自己的
 {
   const legacyTables = JSON.parse(JSON.stringify(hostH.exportPack(['DX']).tables));
@@ -233,6 +252,24 @@ assert(same(numbers(apiM.calculateComparison(selM), true), mBefore), '第二次�
   hostL.mergePack(Pack.parsePack({ format: Pack.FORMAT, formatVersion: 1, tables: legacyTables }));
   assert(same(numbers(apiOf(hostL).calculateComparison(selH), true), hAfter), '舊版資料包合併後 DX 的數字不同');
   assert(apiOf(hostL).getPLLineItems('DX').some(d => d.LineName === '關稅'), '舊版資料包的自訂科目沒有成為 DX 的科目');
+}
+
+// 暫存空間快滿：先縮短稽核紀錄再存，真正的資料要存得進去
+{
+  const big = memoryStorage();
+  const hostQ = newHost(big);
+  const apiQ = apiOf(hostQ);
+  apiQ.getBootstrap('');
+  apiQ.createVehicleType('QT', '', '');
+  for (let i = 0; i < 40; i++) apiQ.saveVehicleGrid('QT', [{ VehicleID: 'QT1', VehicleCode: '名稱' + i }]);   // 灌一堆稽核紀錄
+  const full = big.map[Object.keys(big.map)[0]].length;
+  const audit = hostQ.readTables().AuditLog.length;
+  const limit = full - 2000;   // 再多存一點就爆，但拿掉稽核紀錄就放得下
+  big.setItem = (k, v) => { if (String(v).length > limit) { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; } big.map[k] = String(v); };
+  apiQ.saveVehicleGrid('QT', [{ VehicleID: 'QT1', VehicleCode: '空間快滿' }]);
+  assert(hostQ.state.storageOk && hostQ.state.auditTrimmed, '暫存快滿時應該縮短稽核紀錄後存成功：' + JSON.stringify({ ok: hostQ.state.storageOk, trimmed: hostQ.state.auditTrimmed, audit }));
+  const hostQ2 = newHost(big);
+  assert(apiOf(hostQ2).getVehicles('QT')[0].VehicleCode === '空間快滿', '縮短稽核紀錄後，資料要真的存進暫存');
 }
 
 // 合併結果要能存進暫存、重開後還在

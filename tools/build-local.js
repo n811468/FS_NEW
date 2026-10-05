@@ -24,7 +24,7 @@ const OUT_FILE = path.join(REPO, 'dist', 'FS-local.html');
 const BACKEND_FILES = ['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs'];
 // .gs 用到的 Apps Script 全域物件，由 local/gas-shim.js 的 createGlobals() 提供
 const GAS_GLOBALS = ['SpreadsheetApp', 'LockService', 'CacheService', 'Utilities', 'Session', 'Logger'];
-const EXPORTED_CONSTS = ['SCHEMA', 'TEXT_COLUMNS', 'PL_LINE_ITEMS', 'LINE_CODE_PREFIX'];
+const EXPORTED_CONSTS = ['SCHEMA', 'TEXT_COLUMNS', 'PL_LINE_ITEMS', 'LINE_CODE_PREFIX', 'DEFAULT_PARAMS'];
 
 function read(file) { return fs.readFileSync(file, 'utf8'); }
 

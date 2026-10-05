@@ -1327,11 +1327,39 @@
         .forEach(function (r) { local.PLLineItems.push(r); });
     }
     var localParams = set_(local.ParamDefs.map(function (r) { return r.ParamName; }));
+    var localDefByName = {};
+    local.ParamDefs.forEach(function (r) { localDefByName[str_(r.ParamName)] = r; });
+    report.paramDefaultsPinned = [];
+    report.paramUnitConflicts = [];
+    var builtIn = (ctx && ctx.defaultParams) || {};
+    var effDefault = function (d) {
+      var v = d ? d.DefaultValue : '';
+      if (v === '' || v === null || v === undefined) v = builtIn[str_(d && d.ParamName)];
+      return v === '' || v === null || v === undefined ? 0 : Number(v);
+    };
     incoming.ParamDefs.forEach(function (r) {
-      if (localParams[str_(r.ParamName)]) return;
-      localParams[str_(r.ParamName)] = true;
+      var name = str_(r.ParamName);
+      var mine = localDefByName[name];
+      if (mine) {
+        // 同名參數保留本機的定義；但兩邊的預設值不同時，資料包裡「沒填這個參數」的情境在本機會用本機的預設值算，
+        // 跟對方電腦上的數字就不一樣了 —— 直接幫那些情境填上資料包的預設值，數字才跟對方一致
+        if (str_(mine.Unit || '%') !== str_(r.Unit || '%')) report.paramUnitConflicts.push({ ParamName: name, local: str_(mine.Unit || '%'), incoming: str_(r.Unit || '%') });
+        else if (effDefault(mine) !== effDefault(r)) {
+          var pinned = 0;
+          incoming.Scenarios.forEach(function (sc) {
+            var sid = str_(sc.ScenarioID);
+            var has = incoming.Parameters.some(function (p) { return str_(p.ScenarioID) === sid && str_(p.ParamName) === name && !str_(p.VehicleID); });
+            if (has) return;
+            incoming.Parameters.push({ ParamID: 'PA-' + sid + '-' + name, ScenarioID: sid, VehicleID: '', ParamName: name, Currency: '', Value: effDefault(r), EffectiveDate: '' });
+            pinned++;
+          });
+          if (pinned) report.paramDefaultsPinned.push({ ParamName: name, local: effDefault(mine), incoming: effDefault(r), scenarios: pinned });
+        }
+        return;
+      }
+      localParams[name] = true;
       local.ParamDefs.push(r);
-      report.paramDefsAdded.push(str_(r.ParamName));
+      report.paramDefsAdded.push(name);
     });
 
     // ---- 情境：拿掉本機要被取代的，放進資料包的 ----
@@ -1430,6 +1458,13 @@
     if (report.paramDefsAdded.length) {
       lines.push('・新增自訂參數：' + report.paramDefsAdded.join('、'));
     }
+    (report.paramDefaultsPinned || []).forEach(function (p) {
+      lines.push('・參數「' + p.ParamName + '」兩邊的預設值不同（本機 ' + p.local + '、資料包 ' + p.incoming + '）：保留本機的定義；資料包裡沒填這個參數的 ' +
+        p.scenarios + ' 個情境直接填上 ' + p.incoming + '，數字跟對方電腦上一致');
+    });
+    (report.paramUnitConflicts || []).forEach(function (p) {
+      lines.push('・⚠ 參數「' + p.ParamName + '」兩邊的單位不同（本機「' + p.local + '」、資料包「' + p.incoming + '」），資料包情境填的數值會照本機的單位解讀，算出來可能不同，請跟對方確認');
+    });
     report.globalParamsKept.forEach(function (p) {
       lines.push('・全域參數「' + p.ParamName + '」兩邊不同，保留本機的值 ' + p.local + '（資料包是 ' + p.incoming + '）');
     });
@@ -6536,7 +6571,7 @@ function reportMaintenance_(message) {
 
   return {
     fns: { getSheet_: getSheet_, validateCode_: validateCode_, sheetExists_: sheetExists_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, deleteScenarioData_: deleteScenarioData_, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, updateSnapshots_: updateSnapshots_, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, assertUniqueScenarioNames_: assertUniqueScenarioNames_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, validateLineName_: validateLineName_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, snapshotReportBlock_: snapshotReportBlock_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, metricGoodDir_: metricGoodDir_, solveGoalPlan: solveGoalPlan, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
-    consts: { SCHEMA: SCHEMA, TEXT_COLUMNS: TEXT_COLUMNS, PL_LINE_ITEMS: PL_LINE_ITEMS, LINE_CODE_PREFIX: LINE_CODE_PREFIX },
+    consts: { SCHEMA: SCHEMA, TEXT_COLUMNS: TEXT_COLUMNS, PL_LINE_ITEMS: PL_LINE_ITEMS, LINE_CODE_PREFIX: LINE_CODE_PREFIX, DEFAULT_PARAMS: DEFAULT_PARAMS },
     // 模擬 Apps Script「每次 google.script.run 都是全新執行」：單次執行內的快取要清掉
     beginExecution: function () { SHEET_CACHE_ = {}; resetCalcMemo_(); LOCK_DEPTH_ = 0; }
   };
@@ -6614,16 +6649,28 @@ function reportMaintenance_(message) {
     function persist() {
       if (!storage) return true;
       var tables = readTables();
-      tables[Pack.AUDIT_TABLE] = tables[Pack.AUDIT_TABLE].slice(-AUDIT_KEEP_ROWS);
+      var audit = tables[Pack.AUDIT_TABLE];
       state.savedAt = new Date().toISOString();
-      try {
-        storage.setItem(STORAGE_KEY, JSON.stringify({
-          savedAt: state.savedAt, changesSinceExport: state.changesSinceExport, firstUnsavedAt: state.firstUnsavedAt,
-          lastExportAt: state.lastExportAt, tables: tables
-        }));
-        state.storageOk = true;
-      } catch (e) {
-        state.storageOk = false;   // 無痕模式、空間不足等：資料還在這個分頁的記憶體裡，但關掉就沒了
+      // 稽核紀錄佔暫存的大半：空間不夠時先把它縮短(最後整個不存)再試，真正的資料能存進去比較重要
+      var keeps = [AUDIT_KEEP_ROWS, 300, 0];
+      state.storageOk = false;
+      state.auditTrimmed = false;
+      for (var i = 0; i < keeps.length && !state.storageOk; i++) {
+        tables[Pack.AUDIT_TABLE] = keeps[i] ? audit.slice(-keeps[i]) : [];
+        try {
+          storage.setItem(STORAGE_KEY, JSON.stringify({
+            savedAt: state.savedAt, changesSinceExport: state.changesSinceExport, firstUnsavedAt: state.firstUnsavedAt,
+            lastExportAt: state.lastExportAt, tables: tables
+          }));
+          state.storageOk = true;
+          state.auditTrimmed = i > 0;
+        } catch (e) {
+          // 無痕模式、空間不足等：資料還在這個分頁的記憶體裡，但關掉就沒了
+        }
+      }
+      if (state.auditTrimmed) {
+        // 存進去的是縮短後的稽核紀錄；記憶體裡也跟著縮，下次存檔不用再試一次
+        spreadsheet.replaceTable(Pack.AUDIT_TABLE, Pack.AUDIT_HEADERS, tables[Pack.AUDIT_TABLE], []);
       }
       return state.storageOk;
     }
@@ -6721,7 +6768,7 @@ function reportMaintenance_(message) {
     }
 
     function mergeContext() {
-      return { lineCodePrefix: C.LINE_CODE_PREFIX, builtInLineCodes: C.PL_LINE_ITEMS.map(function (d) { return d.LineCode; }) };
+      return { lineCodePrefix: C.LINE_CODE_PREFIX, builtInLineCodes: C.PL_LINE_ITEMS.map(function (d) { return d.LineCode; }), defaultParams: C.DEFAULT_PARAMS || {} };
     }
     /** 合併匯入的預覽：不改資料，回傳要給使用者確認的報告 */
     function previewMerge(pack) { return Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope); }
