@@ -14601,7 +14601,20 @@ window.addEventListener('DOMContentLoaded', () => {
     var a = el('a', { href: url, download: 'FS資料包_' + safeName(label) + '_' + stamp() + '.json' });
     document.body.appendChild(a);
     a.click();
-    window.parent.postMessage({ type: 'fs:exported', payload: { exportType: pack.scope && pack.scope.kind === 'all' ? 'all' : 'vehicle', vehicleModelCode: pack.scope ? (pack.scope.vehicleTypeIds || []).join(', ') : '', filename: a.download, dataScope: JSON.stringify(pack.scope || {}), dataPackageVersion: String(pack.formatVersion || ''), iframeDisplayUser: window.FSLocal && window.FSLocal.getUser ? window.FSLocal.getUser() : '', content: json } }, 'https://16019-ai-hub.china-motor.com.tw');
+    // 嵌在內部平台時把這次匯出交給外層頁面(記錄歷程、備份檔案)；直接開檔案時沒有外層，瀏覽器會丟掉這則訊息
+    var scope = pack.scope || {};
+    var scenarios = scope.kind === 'scenarios' ? (pack.tables.Scenarios || []) : [];
+    window.parent.postMessage({ type: 'fs:exported', payload: {
+      exportType: scope.kind === 'all' ? 'all' : 'vehicle',
+      vehicleModelCode: (scope.vehicleTypeIds || []).join(', '),
+      scenarioCode: scenarios.map(function (r) { return r.ScenarioID; }).join(', '),
+      scenarioName: scenarios.map(function (r) { return [r.Gate, r.ScenarioName].filter(Boolean).join(' '); }).join(', '),
+      filename: a.download,
+      dataScope: JSON.stringify(scope),
+      dataPackageVersion: String(pack.formatVersion || ''),
+      iframeDisplayUser: window.FSLocal && window.FSLocal.getUser ? window.FSLocal.getUser() : '',
+      content: json
+    } }, 'https://16019-ai-hub.china-motor.com.tw');
     setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1000);
   }
 

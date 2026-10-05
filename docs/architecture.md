@@ -333,7 +333,8 @@ v2 新頁面：「科目與公式」(`renderChartPanel`：科目樹 + 編輯器 
 - 嵌在內部平台(`https://16019-ai-hub.china-motor.com.tw`)的 iframe 裡時，每次匯出資料包除了下載，也會用 `postMessage`
   把檔案交給外層頁面，由外層存成備份(例如 NocoBase 的 `storage/uploads/FS_JSON`)。工具本身仍不連網，只送給這一個網址；
   直接開檔案時沒有外層頁面，這則訊息會被瀏覽器丟掉。格式：
-  `{ type: 'fs:exported', payload: { exportType, vehicleModelCode, filename, dataScope, dataPackageVersion, iframeDisplayUser, content } }`，
+  `{ type: 'fs:exported', payload: { exportType, vehicleModelCode, scenarioCode, scenarioName, filename, dataScope, dataPackageVersion, iframeDisplayUser, content } }`，
+  `scenarioCode` / `scenarioName` 只有「匯出情境」時有值(情境代號、Gate + 情境名稱)，
   `content` 是跟下載檔一模一樣的 JSON 文字，`filename` 是下載檔名，`dataScope` 是資料包 `scope` 的 JSON 文字(`kind` 為 all / vehicleTypes / scenarios)。
 - 同一份暫存被兩個分頁同時編輯時，後存檔的一方會讓另一方停止寫入並提示重新整理，避免互相覆蓋。
 
