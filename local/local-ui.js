@@ -61,6 +61,7 @@
     var a = el('a', { href: url, download: 'FS資料包_' + safeName(label) + '_' + stamp() + '.json' });
     document.body.appendChild(a);
     a.click();
+    window.parent.postMessage({ type: 'fs:exported', payload: { exportType: pack.scope && pack.scope.kind === 'all' ? 'all' : 'vehicle', vehicleModelCode: pack.scope && pack.scope.kind === 'vehicleTypes' ? (pack.scope.vehicleTypeIds || []).join(', ') : '', filename: a.download, dataScope: JSON.stringify(pack.scope || {}), dataPackageVersion: String(pack.formatVersion || ''), iframeDisplayUser: window.FSLocal && window.FSLocal.getUser ? window.FSLocal.getUser() : '' } }, 'https://16019-ai-hub.china-motor.com.tw');
     setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1000);
   }
 
