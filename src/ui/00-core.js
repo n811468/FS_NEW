@@ -27,7 +27,7 @@ const SCENARIO_COPY_PARTS = [
   { key: 'devinvestment', label: '開發總投' },
   { key: 'operatingexpense', label: '營業費用' },
   { key: 'parameters', label: '費率/匯率' },
-  { key: 'linenotes', label: '科目說明' },
+  { key: 'linenotes', label: '報告說明' },
   { key: 'actions', label: '改善作法' }
 ];
 
@@ -85,8 +85,7 @@ function isDeletableAutoLineItem(row) {
 // 表格編輯頁：key -> 渲染函式名稱
 const GRID_PANELS = {
   salesmix: 'renderSalesMixPanel',
-  costofsales: 'renderCostOfSalesPanel',
-  operatingexpense: 'renderOperatingExpensePanel',
+  costs: 'renderCostsPanel',          // 銷貨成本 / 營業費用 兩個子頁籤
   devinvestment: 'renderDevInvestmentPanel',
   paramrates: 'renderRatePanel'      // 匯率(renderFxPanel)畫在同一頁下半部
 };
@@ -487,16 +486,17 @@ function dragHandleHtml(label) {
 
 const PAGE_META = {
   dashboard: ['結果呈現', '損益儀表板'], report: ['結果呈現', 'GATE 審議報告'], whatif: ['結果呈現', '目標反推與敏感度分析'], waterfall: ['結果呈現', '瀑布圖工具'],
-  salesmix: ['輸入資料', '銷售構成與售價'], costofsales: ['輸入資料', '銷貨成本'],
-  devinvestment: ['輸入資料', '開發總投'], operatingexpense: ['輸入資料', '營業費用'],
+  salesmix: ['輸入資料', '銷售構成與售價'], costs: ['輸入資料', '成本與費用'], devinvestment: ['輸入資料', '開發總投'],
   lineitems: ['計算設定', '科目與公式'], paramrates: ['計算設定', '參數與匯率'],
   masters: ['主檔', '車型與情境']
 };
 /** 已經併到別頁的舊分頁(記在瀏覽器裡的上次位置、其他頁的「前往」按鈕)：導到新的那一頁 */
-const MERGED_TABS_ = { vehicletypes: 'masters', vehicles: 'masters', scenarios: 'masters', paramfx: 'paramrates' };
+const MERGED_TABS_ = { vehicletypes: 'masters', vehicles: 'masters', scenarios: 'masters', paramfx: 'paramrates',
+  costofsales: 'costs', operatingexpense: 'costs' };
 
 /* ---------------- 頁籤 / 上方選單 ---------------- */
 function switchTab(key, force) {
+  if (MATRIX_CONFIG[key]) costsView = key;   // 「前往銷貨成本/營業費用」：到成本與費用頁的那個子頁籤
   key = MERGED_TABS_[key] || key;
   if (!force && key !== currentTab && isDirty_()) {
     confirmLeave_().then(ok => { if (ok) switchTab(key, true); });

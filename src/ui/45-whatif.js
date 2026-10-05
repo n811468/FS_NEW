@@ -4,9 +4,9 @@
  */
 let whatIfOptions = null;
 const WHATIF_PREFS_KEY_ = 'plWhatIf.prefs.v1';
-// 目標反推只有一張卡片(multi)：只選一項 = 單項反推；加到兩項以上 = 組合拳。以前單項(goal)、多項(multi)是兩張卡片。
+// 目標反推只有一張卡片(multi)：每一列選一種方式(已知調整 / 負責金額 / 補足缺口)；只有一列補足缺口 = 單項反推。
 let whatIfPrefs = {
-  multi: { metric: 'K', basis: 'unit', target: 0, mode: 'share', levers: null },
+  multi: { metric: 'K', basis: 'unit', target: 0, levers: null },
   sens: { metric: 'K', basis: 'unit', row: 'volume', rowSteps: '-20,-10,0,10,20', col: 'price', colSteps: '-10,-5,0,5,10', inReport: true,
     rowMode: 'pct', rowValues: '', colMode: 'pct', colValues: '' }
 };
@@ -18,9 +18,24 @@ function loadWhatIfPrefs_() {
     // 舊版的單項反推設定：組合拳還沒設定過時，沿用它當成唯一的一項
     if (p && p.goal && !(p.multi && Array.isArray(p.multi.levers) && p.multi.levers.length)) {
       Object.assign(whatIfPrefs.multi, { metric: p.goal.metric || 'K', basis: p.goal.basis || 'unit', target: p.goal.target || 0,
-        levers: [{ driver: p.goal.driver || 'volume', share: '', capPct: '', fixed: '' }] });
+        levers: [{ driver: p.goal.driver || 'volume', mode: 'fill' }] });
     }
   } catch (e) { /* 用預設 */ }
+  if (Array.isArray(whatIfPrefs.multi.levers)) whatIfPrefs.multi.levers = whatIfPrefs.multi.levers.map(normLever_);
+}
+/**
+ * 一列調整項目：{ driver, mode: 'known' | 'amount' | 'fill', by: 'pct' | 'abs' | 'to', known, amount, capPct }
+ * 舊版的「固定為」= 已知調整(調到)；舊版的分攤比例拿掉了，其他舊列都當成補足缺口。
+ */
+function normLever_(l) {
+  l = Object.assign({}, l);
+  if (!l.mode) l.mode = l.fixed !== '' && l.fixed !== undefined && l.fixed !== null ? 'known' : 'fill';
+  if (l.mode === 'known' && l.fixed !== undefined && (l.known === undefined || l.known === '')) { l.by = 'to'; l.known = l.fixed; }
+  if (['known', 'amount', 'fill'].indexOf(l.mode) === -1) l.mode = 'fill';
+  if (['pct', 'abs', 'to'].indexOf(l.by) === -1) l.by = 'pct';
+  ['known', 'amount', 'capPct'].forEach(k => { if (l[k] === undefined || l[k] === null) l[k] = ''; });
+  delete l.fixed; delete l.share;
+  return l;
 }
 function saveWhatIfPrefs_() {
   try { localStorage.setItem(WHATIF_PREFS_KEY_, JSON.stringify(whatIfPrefs)); } catch (e) { /* 存不了就算了 */ }
@@ -82,7 +97,7 @@ function drawWhatIf_() {
     <div class="card">
       <div class="card-head"><h3>敏感度分析</h3><span class="muted">兩項假設同時變動時，結果會落在哪裡（中間框起來的是目前的數字）</span>
         <span class="spacer"></span>
-        <label class="chk"><input type="checkbox" ${s.inReport ? 'checked' : ''} onchange="whatIfPrefs.sens.inReport=this.checked;saveWhatIfPrefs_()"> 放進 GATE 報告</label></div>
+        <span class="muted">${s.inReport ? 'GATE 報告會附這張表' : 'GATE 報告目前不附這張表'}（在 GATE 報告頁勾選）</span></div>
       <div class="field-row">
         <label class="field"><span>看哪個結果</span><select onchange="whatIfPrefs.sens.metric=this.value;saveWhatIfPrefs_()">${metricOptionsHtml_(s.metric)}</select></label>
         <label class="field"><span>&nbsp;</span>${basisSeg('sens', s.basis)}</label>
@@ -101,7 +116,7 @@ function drawWhatIf_() {
 function whatIfPreset_(kind) {
   const m = whatIfPrefs.multi;
   const profit = profitCodeOf_(whatIfOptions);
-  const one = driver => [{ driver, share: '', capPct: '', fixed: '' }];
+  const one = driver => [normLever_({ driver, mode: 'fill' })];
   if (kind === 'breakeven-volume') Object.assign(m, { metric: profit, basis: 'unit', target: 0, levers: one('volume') });
   if (kind === 'breakeven-price') Object.assign(m, { metric: profit, basis: 'unit', target: 0, levers: one('price') });
   if (kind === 'material') {
@@ -109,7 +124,7 @@ function whatIfPreset_(kind) {
     Object.assign(m, { metric: profit, basis: 'unit', target: Math.max(0, Math.round((whatIfOptions.metrics.find(x => x.code === profit) || {}).value || 0)),
       levers: one(lines.length ? driverKey_(lines[0].driver) : 'volume') });
   }
-  if (kind === 'combo') Object.assign(m, { metric: profit, mode: 'share', levers: defaultLevers_() });
+  if (kind === 'combo') Object.assign(m, { metric: profit, levers: defaultLevers_() });
   saveWhatIfPrefs_();
   drawWhatIf_();
   if (kind !== 'combo') runMultiGoal_();
@@ -272,35 +287,66 @@ function sensitivityTableHtml_(t, rows, cols, s, opts) {
   <p class="help">表內數字：${esc(metric)}${s.basis === 'month' ? '（月總額，元）' : '（加權平均，元/台）'}。綠色 = 正、紅色 = 負，顏色越深絕對值越大。</p>`;
 }
 
-/* ---------------- 目標反推(單項 / 組合拳) ----------------
- * 只選一項 = 單項反推(後端 solveGoal)。營業淨利的缺口通常不會只指派一個項目：售價、材料、銷量、開發總投…各負責一部分，
- * 加到兩項以上就是組合拳：每一項可以設「分攤比例」「最多調 ±%」或「固定值」(已經確定的數字)，後端 solveGoalMulti 一次算出每一項要調多少。
+/* ---------------- 目標反推(組合拳) ----------------
+ * 照會議上實際的講法，每一列選一種方式(後端 solveGoalPlan)：
+ *   已知調整  「材料再降 3%」「售價加 5,000」「銷量就是 120 台」—— 直接套用
+ *   負責金額  「採購負責 8,000 元/台」—— 算出這一項要調到多少
+ *   補足缺口  「剩下的先靠材料(最多 5%)，不夠再漲價」—— 依列表順序補，前一項碰到上限才輪到下一項
  */
+const LEVER_MODES_ = { known: '已知調整', amount: '負責金額', fill: '補足缺口' };
+/** 組合拳範例：三種方式各一(最大的成本科目降 3%、開發總投負責 2,000、剩下先漲價最多 3%，不夠看銷量) */
 function defaultLevers_() {
   const lines = whatIfOptions.drivers.filter(d => d.driver.type === 'line').sort((a, b) => Math.abs(b.base) - Math.abs(a.base));
-  const out = [{ driver: 'price', share: 40, capPct: 3, fixed: '' }];
-  if (lines[0]) out.push({ driver: driverKey_(lines[0].driver), share: 40, capPct: 5, fixed: '' });
-  out.push({ driver: 'dev', share: 20, capPct: '', fixed: '' });
-  return out;
+  const out = [];
+  if (lines[0]) out.push({ driver: driverKey_(lines[0].driver), mode: 'known', by: 'pct', known: -3 });
+  out.push({ driver: 'dev', mode: 'amount', amount: 2000 });
+  out.push({ driver: 'price', mode: 'fill', capPct: 3 });
+  out.push({ driver: 'volume', mode: 'fill' });
+  return out.map(normLever_);
+}
+function leverUnit_(info) { return info && info.unit ? info.unit : ''; }
+/** 已知調整套用後的值(畫面上即時提示用) */
+function knownValue_(l, info) {
+  const k = Number(l.known);
+  if (!info || l.known === '' || isNaN(k)) return null;
+  return l.by === 'to' ? k : l.by === 'abs' ? info.base + k : info.base * (1 + k / 100);
+}
+function leverSettingHtml_(l, i, amountUnit) {
+  const set = (field, redraw) => `whatIfPrefs.multi.levers[${i}].${field}=this.value;saveWhatIfPrefs_()${redraw ? ';drawWhatIf_()' : ''}`;
+  const info = whatIfDriverInfo_(l.driver);
+  const cap = `<span class="lever-inline">最多調 ±<input type="number" min="0" step="any" value="${esc(l.capPct)}" placeholder="不限" oninput="${set('capPct')}"> %</span>`;
+  if (l.mode === 'known') {
+    const kv = knownValue_(l, info);
+    const dg = info && Math.abs(info.base) < 100 ? 2 : 0;
+    return `<span class="lever-inline"><select onchange="${set('by', true)}">
+        <option value="pct"${l.by === 'pct' ? ' selected' : ''}>調 %</option>
+        <option value="abs"${l.by === 'abs' ? ' selected' : ''}>加減</option>
+        <option value="to"${l.by === 'to' ? ' selected' : ''}>調到</option></select>
+      <input type="number" step="any" value="${esc(l.known)}" placeholder="${l.by === 'pct' ? '例 -3' : l.by === 'abs' ? '例 -5000' : '例 120'}" onchange="${set('known', true)}">
+      ${l.by === 'pct' ? '%' : esc(leverUnit_(info))}
+      ${kv !== null ? `<span class="muted">→ ${fmt(kv, dg)} ${esc(leverUnit_(info))}</span>` : ''}</span>`;
+  }
+  if (l.mode === 'amount') {
+    return `<span class="lever-inline">改善 <input type="number" min="0" step="any" value="${esc(l.amount)}" placeholder="例 8000" oninput="${set('amount')}"> ${amountUnit}</span>${cap}`;
+  }
+  return cap;
 }
 function multiGoalCardHtml_() {
   const m = whatIfPrefs.multi;
   const known = k => whatIfDriverInfo_(k);
-  m.levers = (Array.isArray(m.levers) ? m.levers : []).filter(l => known(l.driver));
-  if (!m.levers.length) m.levers = [{ driver: 'volume', share: '', capPct: '', fixed: '' }];
-  const single = m.levers.length === 1;
-  const shareMode = !single && m.mode !== 'equal';
+  m.levers = (Array.isArray(m.levers) ? m.levers : []).map(normLever_).filter(l => known(l.driver));
+  if (!m.levers.length) m.levers = [normLever_({ driver: 'volume', mode: 'fill' })];
+  const amountUnit = m.basis === 'month' ? '元/月' : '元/台';
   const basisSeg = `<div class="seg">
       <button type="button" class="seg-btn${m.basis === 'unit' ? ' active' : ''}" onclick="whatIfPrefs.multi.basis='unit';saveWhatIfPrefs_();drawWhatIf_()">單台</button>
       <button type="button" class="seg-btn${m.basis === 'month' ? ' active' : ''}" onclick="whatIfPrefs.multi.basis='month';saveWhatIfPrefs_();drawWhatIf_()">月總額</button></div>`;
-  const totalShare = m.levers.filter(l => l.fixed === '' || l.fixed === undefined).reduce((s, l) => s + num(l.share), 0);
   return `<div class="card" id="wi-multi">
-    <div class="card-head"><h3>目標反推</h3><span class="muted">要讓某個結果達到目標值，要調哪些項目、調多少？只選一項 = 單項反推；多加幾項 = 缺口由好幾項一起分擔（組合拳）</span></div>
+    <div class="card-head"><h3>目標反推</h3><span class="muted">已經談好的調整先放進去，剩下的缺口誰負責、怎麼補？</span></div>
     <div class="tpl-row"><span class="muted">常見問題：</span>
       <button type="button" class="tpl-btn" onclick="whatIfPreset_('breakeven-volume')">損益兩平要賣幾台？</button>
       <button type="button" class="tpl-btn" onclick="whatIfPreset_('breakeven-price')">損益兩平要賣多少錢？</button>
       <button type="button" class="tpl-btn" onclick="whatIfPreset_('material')">營業淨利要達目標，材料成本要降到多少？</button>
-      <button type="button" class="tpl-btn" onclick="whatIfPreset_('combo')">缺口由售價、材料、開發總投一起分擔</button>
+      <button type="button" class="tpl-btn" onclick="whatIfPreset_('combo')">組合拳範例（三種方式各一）</button>
     </div>
     <div class="goal-sentence">
       <span>要讓</span>
@@ -308,25 +354,23 @@ function multiGoalCardHtml_() {
       ${basisSeg}
       <span>等於</span>
       <input id="wi-multi-target" type="number" step="any" value="${esc(m.target)}" style="width:140px;" oninput="whatIfPrefs.multi.target=this.value;saveWhatIfPrefs_()">
-      <span>元，${single ? '下面這一項要調到多少？' : '由下面幾項'}</span>
-      ${single ? '' : `<div class="seg">
-        <button type="button" class="seg-btn${shareMode ? ' active' : ''}" onclick="whatIfPrefs.multi.mode='share';saveWhatIfPrefs_();drawWhatIf_()" data-tip="每一項負責一定比例的缺口（例：售價 40%、材料 40%、開發 20%）">依比例分攤</button>
-        <button type="button" class="seg-btn${!shareMode ? ' active' : ''}" onclick="whatIfPrefs.multi.mode='equal';saveWhatIfPrefs_();drawWhatIf_()" data-tip="所有項目都往有利方向調同樣的 %，算出要調幾 %">同幅度調整</button>
-      </div>`}
+      <span>元</span>
     </div>
     <div class="grid-scroll"><table class="grid-table lever-table">
-      <thead><tr>${single ? '' : '<th style="width:28px;"></th>'}<th>調整項目（目前值）</th>${shareMode ? '<th>分攤比例 %</th>' : ''}${single ? '' : `<th data-tip="例：售價最多只能漲 3%；碰到上限後剩下的缺口由其他項目吸收">最多調 ±%</th><th data-tip="已經確定的數字直接填，不參與反推">固定為</th><th style="width:40px;"></th>`}</tr></thead>
+      <thead><tr><th style="width:28px;"></th><th>調整項目（目前值）</th>
+        <th data-tip="已知調整：已經談好、或想試試看的調整，直接套用&#10;負責金額：這一項要讓結果改善多少，算出要調到多少&#10;補足缺口：剩下的缺口依列表順序補，前一項碰到上限才輪到下一項">方式</th>
+        <th>設定</th><th style="width:40px;"></th></tr></thead>
       <tbody id="wi-lever-body">${m.levers.map((l, i) => `<tr data-key="${i}">
-        ${single ? '' : `<td>${dragHandleHtml('拖曳調整順序（貢獻依這個順序逐項計算）')}</td>`}
+        <td>${dragHandleHtml('拖曳調整順序（負責金額、補足缺口依這個順序計算）')}</td>
         <td><select onchange="whatIfPrefs.multi.levers[${i}].driver=this.value;saveWhatIfPrefs_();drawWhatIf_()">${driverOptionsHtml_(l.driver)}</select></td>
-        ${shareMode ? `<td><input type="number" min="0" step="any" value="${esc(l.share)}" placeholder="平均" ${l.fixed !== '' && l.fixed !== undefined ? 'disabled' : ''} oninput="whatIfPrefs.multi.levers[${i}].share=this.value;saveWhatIfPrefs_()"></td>` : ''}
-        ${single ? '' : `<td><input type="number" min="0" step="any" value="${esc(l.capPct)}" placeholder="不限" ${l.fixed !== '' && l.fixed !== undefined ? 'disabled' : ''} oninput="whatIfPrefs.multi.levers[${i}].capPct=this.value;saveWhatIfPrefs_()"></td>
-        <td><input type="number" step="any" value="${esc(l.fixed)}" placeholder="反推" onchange="whatIfPrefs.multi.levers[${i}].fixed=this.value;saveWhatIfPrefs_();drawWhatIf_()"></td>
-        <td><button type="button" class="btn ghost icon sm" onclick="whatIfPrefs.multi.levers.splice(${i},1);saveWhatIfPrefs_();drawWhatIf_()" aria-label="刪除">✕</button></td>`}
+        <td><select class="lever-mode" onchange="whatIfPrefs.multi.levers[${i}].mode=this.value;saveWhatIfPrefs_();drawWhatIf_()">
+          ${Object.keys(LEVER_MODES_).map(k => `<option value="${k}"${l.mode === k ? ' selected' : ''}>${LEVER_MODES_[k]}</option>`).join('')}</select></td>
+        <td>${leverSettingHtml_(l, i, amountUnit)}</td>
+        <td><button type="button" class="btn ghost icon sm" onclick="whatIfPrefs.multi.levers.splice(${i},1);saveWhatIfPrefs_();drawWhatIf_()" aria-label="刪除">✕</button></td>
       </tr>`).join('')}</tbody></table></div>
     <div class="field-row" style="margin-top:8px;">
-      <button type="button" class="btn secondary sm" onclick="addLever_()"${single ? ' data-tip="多加幾項 = 缺口由這幾項一起分擔（組合拳）"' : ''}>＋ 加一個項目</button>
-      ${shareMode ? `<span class="help">分攤比例合計 ${fmt(totalShare)}%${totalShare && Math.abs(totalShare - 100) > 0.01 ? '（會自動換算成 100%）' : totalShare ? '' : '（都沒填 = 平均分攤）'}</span>` : ''}
+      <button type="button" class="btn secondary sm" onclick="addLever_()">＋ 加一個項目</button>
+      <span class="help">先套用「已知調整」，再依序算「負責金額」，剩下的缺口由「補足缺口」依列表順序補。拖曳 ⠿ 調整順序。</span>
       <span class="spacer"></span>
       <button type="button" class="btn" onclick="runMultiGoal_()">計算</button>
     </div>
@@ -337,7 +381,7 @@ function addLever_() {
   const used = whatIfPrefs.multi.levers.map(l => l.driver);
   const next = whatIfOptions.drivers.find(d => used.indexOf(driverKey_(d.driver)) === -1);
   if (!next) return;
-  whatIfPrefs.multi.levers.push({ driver: driverKey_(next.driver), share: '', capPct: '', fixed: '' });
+  whatIfPrefs.multi.levers.push(normLever_({ driver: driverKey_(next.driver), mode: 'fill' }));
   saveWhatIfPrefs_();
   drawWhatIf_();
 }
@@ -353,44 +397,51 @@ function installLeverSort_() {
 let lastMultiResult_ = null;
 function runMultiGoal_() {
   const m = whatIfPrefs.multi;
-  if (m.levers.length === 1) { runGoalSeek_(); return; }
+  // 只有一列補足缺口、沒有上限 = 單項反推：用 solveGoal，答案寫成一句話
+  if (m.levers.length === 1 && m.levers[0].mode === 'fill' && String(m.levers[0].capPct).trim() === '') { runGoalSeek_(); return; }
   const box = document.getElementById('wi-multi-result');
   box.innerHTML = '<p class="muted">計算中...（每一項都要反覆試算，項目多時會花幾秒）</p>';
-  const levers = m.levers.map(l => ({ driver: driverFromKey_(l.driver), share: l.share, capPct: l.capPct, fixed: l.fixed }));
+  const levers = m.levers.map(l => ({ driver: driverFromKey_(l.driver), mode: l.mode, by: l.by, known: l.known, amount: l.amount, capPct: l.capPct }));
   google.script.run
     .withSuccessHandler(safeHandler(r => { lastMultiResult_ = r; box.innerHTML = multiGoalResultHtml_(r); }))
     .withFailureHandler(err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; })
-    .solveGoalMulti(currentScenarioId, { code: m.metric, basis: m.basis }, num(m.target), levers, m.mode);
+    .solveGoalPlan(currentScenarioId, { code: m.metric, basis: m.basis }, num(m.target), levers);
 }
 function multiGoalSteps_(r) {
   const metric = whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis);
   return [{ label: '目前 ' + metric, value: r.metricBase, kind: 'total' }]
-    .concat(r.levers.map(l => ({ label: l.label, value: l.contribution, kind: 'delta',
-      tip: `${l.label}\n${fmt(l.base, Math.abs(l.base) < 100 ? 2 : 0)} → ${fmt(l.value, Math.abs(l.base) < 100 ? 2 : 0)} ${l.unit || ''}\n貢獻 ${l.contribution >= 0 ? '+' : ''}${fmt(l.contribution)}` })))
-    .concat([{ label: (r.feasible ? '達成 ' : '最多做到 ') + metric, value: r.achieved, kind: 'total' }]);
+    .concat(r.levers.filter(l => Math.abs(l.contribution) >= 0.5 || l.value !== l.base).map(l => ({ label: l.label, value: l.contribution, kind: 'delta',
+      tip: `${l.label}（${LEVER_MODES_[l.mode] || ''}）\n${fmt(l.base, Math.abs(l.base) < 100 ? 2 : 0)} → ${fmt(l.value, Math.abs(l.base) < 100 ? 2 : 0)} ${l.unit || ''}\n貢獻 ${l.contribution >= 0 ? '+' : ''}${fmt(l.contribution)}` })))
+    .concat([{ label: (r.feasible ? '達成 ' : '做到 ') + metric, value: r.achieved, kind: 'total' }]);
 }
 function multiGoalResultHtml_(r) {
   const total = r.achieved - r.metricBase;
   const dg = v => Math.abs(v) < 100 ? 2 : 0;
-  const head = r.feasible
-    ? `<div class="callout ok">可以達成：${esc(whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))} ${fmt(r.metricBase)} → <b>${fmt(r.achieved)}</b>（目標 ${fmt(r.target)}）${r.mode === 'equal' ? `，每一項都調 <b>${fmt(r.equalPct, 2)}%</b>` : ''}。</div>`
-    : `<div class="callout warn">${esc(r.message)}</div>`;
+  const metric = whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis);
+  const head = r.alreadyMet && r.reachedByKnown
+    ? `<div class="callout ok">目前就已經達到目標（${esc(metric)} 目前 ${fmt(r.metricBase)}，目標 ${fmt(r.target)}），補足缺口的項目不用動；表上是已知調整、負責金額套用後的結果。</div>`
+    : r.reachedByKnown
+    ? `<div class="callout ok">已知調整與負責金額就已經達到目標：${esc(metric)} ${fmt(r.metricBase)} → <b>${fmt(r.achieved)}</b>（目標 ${fmt(r.target)}），補足缺口的項目不用動。</div>`
+    : r.feasible
+      ? `<div class="callout ok">可以達成：${esc(metric)} ${fmt(r.metricBase)} → <b>${fmt(r.achieved)}</b>（目標 ${fmt(r.target)}）。</div>`
+      : `<div class="callout warn">${esc(r.message)}</div>`;
   return `${head}${(r.warnings || []).map(w => `<div class="callout warn">${esc(w)}</div>`).join('')}
     <div class="grid-scroll"><table class="grid-table lever-table">
-      <thead><tr><th>項目</th><th>目前</th><th>調整後</th><th>變動</th><th>對結果的貢獻</th><th>占總改善</th></tr></thead>
+      <thead><tr><th>項目</th><th>方式</th><th>目前</th><th>調整後</th><th>變動</th><th>對結果的貢獻</th><th>占總改善</th></tr></thead>
       <tbody>${r.levers.map(l => `<tr>
-        <td>${esc(l.label)}${l.fixed ? '<span class="lever-cap" style="background:#e2e8f0;color:#2d3748;">固定</span>' : ''}${l.capped ? '<span class="lever-cap">碰到上限</span>' : ''}</td>
+        <td>${esc(l.label)}${l.capped ? '<span class="lever-cap">碰到上限</span>' : ''}${l.note ? `<span class="lever-cap">${esc(l.note)}</span>` : ''}${l.mode === 'fill' && l.value === l.base ? '<span class="muted">（前面的項目已經補滿，不用動）</span>' : ''}</td>
+        <td>${esc(LEVER_MODES_[l.mode] || '')}</td>
         <td class="amt">${fmt(l.base, dg(l.base))} ${esc(l.unit || '')}</td>
         <td class="amt"><b>${fmt(l.value, dg(l.base))}</b> ${esc(l.unit || '')}</td>
         <td class="amt">${l.pct === null ? '' : signed_(l.pct, 2) + '%'}</td>
         <td class="amt${l.contribution < 0 ? ' negative' : ''}">${l.contribution >= 0 ? '+' : ''}${fmt(l.contribution)}</td>
         <td class="amt">${total ? (l.contribution / total * 100).toFixed(1) + '%' : ''}</td></tr>`).join('')}</tbody>
     </table></div>
-    <p class="help">貢獻依列表順序逐項加入計算（各項之間有交互作用，例如售價變動也會影響佣金與貨物稅），加總 = 總改善 ${total >= 0 ? '+' : ''}${fmt(total)}。拖曳 ⠿ 可以換順序。只在畫面上試算，不會改到存檔的數字。</p>
+    <p class="help">貢獻依列表順序逐項加入計算（各項之間有交互作用，例如售價變動也會影響佣金與貨物稅），加總 = 總改善 ${total >= 0 ? '+' : ''}${fmt(total)}。只在畫面上試算，不會改到存檔的數字。</p>
     <div class="waterfall-card">${wfSvg_(multiGoalSteps_(r), { width: 900, height: 320, labels: true, fmtV: wfShortFmt_(multiGoalSteps_(r)) })}</div>
     <div class="field-row" style="margin-top:8px;">
-      <button type="button" class="btn secondary sm" onclick="saveWhatIfScenarioDialog_(lastMultiResult_.levers.map(l => ({ driver: l.driver, value: l.value })), lastMultiResult_.levers.map(l => l.label).join('、'))">另存成新情境…</button>
-      <button type="button" class="btn secondary sm" onclick="openInWaterfallTool_(multiGoalSteps_(lastMultiResult_), '組合拳：' + whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))">在瀑布圖工具開啟（可編輯、下載 PNG）</button></div>`;
+      <button type="button" class="btn secondary sm" onclick="saveWhatIfScenarioDialog_(lastMultiResult_.levers.map(l => ({ driver: l.driver, value: l.value })), lastMultiResult_.levers.filter(l => l.value !== l.base).map(l => l.label).join('、'))">另存成新情境…</button>
+      <button type="button" class="btn secondary sm" onclick="openInWaterfallTool_(multiGoalSteps_(lastMultiResult_), '目標反推：' + whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))">在瀑布圖工具開啟（可編輯、下載 PNG）</button></div>`;
 }
 
 /**
@@ -401,7 +452,7 @@ function saveWhatIfScenarioDialog_(levers, summary) {
   const cur = currentScenario || {};
   openModal({
     title: '另存成新情境',
-    body: `<p class="help">複製「${esc(scenarioLabel(cur))}」的全部資料（銷售構成、成本、開發總投、費用、參數、說明、作法），再把這次反推的調整寫進去：<br><b>${esc(summary || '')}</b></p>`,
+    body: `<p class="help">複製「${esc(scenarioLabel(cur))}」的全部資料（銷售構成、成本、開發總投、費用、參數、報告說明、作法），再把這次反推的調整寫進去：<br><b>${esc(summary || '')}</b></p>`,
     fields: [
       { name: 'Gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, value: cur.Gate || 'GATE F' },
       { name: 'ScenarioName', label: '情境名稱', value: (cur.ScenarioName || '') + ' 反推' },

@@ -231,14 +231,15 @@ v2 新頁面：「科目與公式」(`renderChartPanel`：科目樹 + 編輯器 
   - 車型、車系、情境三個表格放在同一頁「車型與情境」（`renderMastersPanel`）。同一頁有好幾個可以各自編輯的表格時，
     用 `markDirtyPart_(page, part, save, discard)` 記每個表格各自的修改：底部「儲存」/Ctrl+S 逐一存每個改過的表格，
     某個表格自己存好了只清掉它（`clearDirtyPart_`）。「參數與匯率」頁的參數表與匯率表也是這樣。
-    舊的分頁代號（vehicletypes / vehicles / scenarios / paramfx）由 `MERGED_TABS_` 導到新頁。
+    舊的分頁代號（vehicletypes / vehicles / scenarios / paramfx / costofsales / operatingexpense）由 `MERGED_TABS_` 導到新頁。
   - 情境另有「以既有情境為基礎建立」（`createScenarioFrom()`）與「帶入目前情境」
     （`copyScenarioData()`），限同一車型 —— 跨車型的車系對不上，會產生看不見卻仍被計入損益的資料。
 
-- **表格編輯頁**（銷售構成 / 銷貨成本 / 開發總投 / 營業費用 / 參數與匯率）：
+- **表格編輯頁**（銷售構成 / 成本與費用 / 開發總投 / 參數與匯率）：
   一次看到全部資料、直接在格子裡改、最後按一次「儲存」整批送出，避免逐筆開表單輸入。
   - 銷售構成：依車系自動列出，台數與構成比即時互相連動（`getSalesMixGrid` / `saveSalesMixGrid`）。
-  - 銷貨成本 / 營業費用：矩陣式（列 = 科目、欄 = 車系），科目可直接在該頁新增/刪除
+  - 銷貨成本 / 營業費用：同一頁「成本與費用」的兩個子頁籤（`renderCostsPanel` / `costsView`，`switchTab('costofsales')` 會切到對應子頁籤）。
+    矩陣式（列 = 科目、欄 = 車系），科目可直接在該頁新增/刪除
     （`getCostOfSalesMatrix` / `saveCostOfSalesMatrix`、`addLineItemInline` / `deleteLineItemInline`）。
     最右欄是**加權平均**而非跨車系合計：一列是同一個成本項目在各車系的單台金額，相加沒有意義；
     矩陣 API 會一併回傳各車系的 `SalesMixPct`，前端據此算 Σ(金額×構成比)÷Σ構成比。

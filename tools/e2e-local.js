@@ -116,6 +116,11 @@ async function main() {
     (document.getElementById('global-error') && document.getElementById('global-error').offsetParent), null, { timeout: 15000 });
   assert(!(await page.isVisible('#global-error')), '目標情境開 GATE 報告顯示錯誤：' + (await page.textContent('#global-error')));
   assert(await page.$('#rpt-sens .sens-table'), '目標情境開 GATE 報告時，敏感度投影片應該有表格');
+  // 敏感度投影片的開關在報告頁：取消勾選就拿掉那一張，再勾回來
+  await page.uncheck('#panel-report label:has-text("附敏感度分析") input');
+  await page.waitForFunction(() => !document.getElementById('rpt-sens'), null, { timeout: 10000 });
+  await page.check('#panel-report label:has-text("附敏感度分析") input');
+  await page.waitForSelector('#rpt-sens .sens-table', { timeout: 15000 });
 
   // v2：科目與公式 —— 改季Margin 的公式，Ctrl+S 存檔，後端真的換成新公式
   await page.click('nav button[data-tab="lineitems"]');
@@ -183,8 +188,9 @@ async function main() {
   await page.waitForSelector('#ce-chips .fx-chip.kind-param');
   await page.waitForFunction(() => /%/.test((document.querySelector('#ce-chips .fx-chip.kind-param .cv') || {}).textContent || ''));
 
-  // v2.1：從 Excel 貼上一整塊數字到銷貨成本
-  await page.click('nav button[data-tab="costofsales"]');
+  // 從 Excel 貼上一整塊數字到銷貨成本(成本與費用頁的子頁籤)
+  await page.click('nav button[data-tab="costs"]');
+  await page.click('#panel-costs .dash-subnav-btn:has-text("銷貨成本")');
   await page.waitForSelector('input[data-line="b4"]');
   await page.evaluate(() => {
     const el = document.querySelector('input[data-line="b4"]'); el.focus();
@@ -194,6 +200,9 @@ async function main() {
   const pasted = await page.$$eval('input[data-line="b4"]', els => els.map(e => e.value).join(','));
   assert(pasted === '1111,2222,3333', '從 Excel 貼上的一整列應該依序填入各車系：' + pasted);
   await page.click('#savebar-discard');
+  await page.click('#panel-costs .dash-subnav-btn:has-text("營業費用")');
+  await page.waitForSelector('#grid-operatingexpense table');
+  assert(!(await page.$('#grid-costofsales')), '切到營業費用子頁籤後，銷貨成本的表格應該換掉');
 
   // v2.1：目標反推頁算得出答案、GATE 報告有作法對帳與敏感度表
   await page.click('nav button[data-tab="whatif"]');
@@ -236,19 +245,26 @@ async function main() {
   assert(await page.$('#wi-sens-result .sens-table .sens-base'), '自訂值的表格也要框出目前的數字');
   await page.click(`.seg-btn[onclick*="setSensMode_('row','pct')"]`);
 
-  // 目標反推加到三項(組合拳)：營業淨利缺口由售價、材料、開發總投一起分擔，結果表 + 瀑布圖，可以帶到瀑布圖工具
+  // 目標反推(組合拳)：三種方式各一(已知調整、負責金額、補足缺口)，結果表 + 瀑布圖，可以帶到瀑布圖工具
   await page.click('nav button[data-tab="whatif"]');
   await page.waitForSelector('#wi-multi');
-  await page.click('button:has-text("缺口由售價、材料、開發總投一起分擔")');
-  await page.waitForFunction(() => document.querySelectorAll('#wi-lever-body tr').length === 3);
-  await page.fill('#wi-multi-target', '-150000');
+  await page.click('button:has-text("組合拳範例")');
+  await page.waitForFunction(() => document.querySelectorAll('#wi-lever-body tr').length === 4);
+  const modes = await page.$$eval('#wi-lever-body select.lever-mode', ss => ss.map(s => s.value));
+  assert(modes.join() === 'known,amount,fill,fill', '組合拳範例應該是 已知調整、負責金額、補足缺口×2：' + modes.join());
+  // 目標 = 目前營業淨利 + 3 萬(要改善才達得到)
+  const planTarget = await page.evaluate(() => Math.round(whatIfOptions.metrics.find(m => m.code === profitCodeOf_(whatIfOptions)).value + 30000));
+  await page.fill('#wi-multi-target', String(planTarget));
   await page.click('#wi-multi button:has-text("計算")');
   await page.waitForSelector('#wi-multi-result .lever-table', { timeout: 30000 });
-  assert(/可以達成/.test(await page.textContent('#wi-multi-result')), '多項目標反推：-15 萬應該達得到：' + (await page.textContent('#wi-multi-result')).slice(0, 200));
-  assert((await page.$$('#wi-multi-result .wf-bar')).length === 5, '多項目標反推的瀑布圖應該有 目前 + 3 項 + 達成 共 5 根');
+  const planText = await page.textContent('#wi-multi-result');
+  assert(/可以達成/.test(planText), '組合拳應該達得到：' + planText.slice(0, 200));
+  assert(/已知調整/.test(planText) && /負責金額/.test(planText) && /補足缺口/.test(planText), '結果表要列出每一項的方式');
+  const planBars = (await page.$$('#wi-multi-result .wf-bar')).length;
+  assert(planBars >= 4, '組合拳的瀑布圖至少要有 目前 + 兩項 + 達成：' + planBars);
   await page.click('#wi-multi-result button:has-text("在瀑布圖工具開啟")');
   await page.waitForSelector('#wf-manual-body tr');
-  assert((await page.$$('#wf-chart .wf-bar')).length === 5, '帶到瀑布圖工具(自訂)後應該一樣是 5 根');
+  assert((await page.$$('#wf-chart .wf-bar')).length === planBars, '帶到瀑布圖工具(自訂)後根數應該一樣');
 
   // 瀑布圖工具：兩個欄位的差異，每一根加總要剛好接到終點；可以下載 PNG
   await page.click('#wf-body .seg-btn:has-text("兩個欄位的差異")');
@@ -299,6 +315,15 @@ async function main() {
   await page.waitForTimeout(500);
   const after = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getVehicles('DA')));
   assert(after[1].VehicleID === before[0].VehicleID, '用鍵盤把第一個車系往下移，應該立即存成新的順序');
+
+  // 新增情境改成對話框：名稱跟著情境性質自動帶入，建立後出現在情境表格
+  await page.click('#master-scenarios button:has-text("新增情境…")');
+  await page.waitForSelector('dialog.modal #mf-2');
+  await page.selectOption('dialog.modal #mf-1', '目標');
+  assert(/^目標\d{4}$/.test(await page.inputValue('dialog.modal #mf-2')), '改情境性質時，自動帶入的名稱要跟著變');
+  await page.fill('dialog.modal #mf-2', 'E2E新情境');
+  await page.click('dialog.modal button[value=ok]');
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('#entity-body-scenarios input')).some(i => i.value === 'E2E新情境'), null, { timeout: 10000 });
 
   // 科目樹拖曳(Alt+↓ 把「廣宣費用」往下移)之後，儀表板仍然是 Excel 的順序：明細在上、銷貨毛利在下，前瞻費用在營業淨利前
   await page.click('nav button[data-tab="lineitems"]');

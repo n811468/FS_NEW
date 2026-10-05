@@ -104,7 +104,6 @@
   .nav-item.active { background: #fff; color: var(--sidebar); font-weight: 600; box-shadow: 0 6px 16px -10px rgba(0, 0, 0, .6); }
   .nav-item.active svg { opacity: 1; color: var(--primary); }
   .nav-item .nav-badge { margin-left: auto; font-size: 10px; background: #e9b949; color: #1b1300; border-radius: 10px; padding: 1px 6px; font-weight: 700; }
-  .sidebar-foot { margin-top: auto; padding: 14px 18px; font-size: 11px; color: #6d7ba0; line-height: 1.6; }
   .sidebar-toggle { display: none; }
 
   .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -285,6 +284,8 @@
   .sort-flash > td { animation: sortFlash .9s ease-out; }
   @keyframes sortFlash { from { background: #fff2bf; } to { background: transparent; } }
   .chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip-list label.chk { display: inline-flex; margin-right: 6px; }
+  .chip-list label.chk input { width: auto; }
   .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 999px;
     padding: 3px 10px 3px 4px; font-size: 12.5px; font-weight: 600; color: var(--text); }
   .chip .drag-handle { width: 18px; height: 20px; }
@@ -595,6 +596,9 @@
   .field.grow { flex: 1; min-width: 220px; }
   .field.grow input { width: 100%; }
   .wf-opts { margin-top: 12px; }
+  .wf-adv { border-bottom: none; margin-top: 10px; }
+  .wf-adv > summary { padding: 6px 0; font-size: 12.5px; }
+  .wf-adv > .field-row { margin-top: 6px; }
   .wf-manual { margin: 10px 0; }
   .wf-manual input[type=text] { width: 100%; }
   .wf-manual input[type=number] { width: 140px; }
@@ -604,6 +608,9 @@
   .wf-table tr.subtotal td { font-weight: 600; background: var(--surface-2); }
   .lever-table td input[type=number] { width: 90px; }
   .lever-table select { max-width: 320px; }
+  .lever-inline { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; white-space: nowrap; }
+  .lever-inline select { width: auto; }
+  .lever-table select.lever-mode { width: auto; }
   .lever-table td.amt { text-align: right; font-variant-numeric: tabular-nums; }
   .snapshot-table td.txt { text-align: left; }
   .lever-cap { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #fefcbf; color: #744210; margin-left: 4px; }
@@ -5905,24 +5912,32 @@ function solveScalar_(g, x0, step, lowerBound) {
 }
 
 /**
- * 多項目標反推(組合拳)：營業淨利的缺口通常不會只靠一個項目補，而是售價、材料、銷量…一起分擔。
+ * 目標反推(組合拳)：照會議上實際的講法，每一個調整項目選一種方式 ——
  *
- * levers = [{ driver, share, capPct, fixed }]
- *   fixed   有填 = 這一項已經確定(例：銷量確定是 120 台/月)，直接套用，不參與反推
- *   share   分攤比例(只在 mode = 'share' 用；全部沒填就平均分攤)
- *   capPct  最多只能調 ±幾 %(例：售價最多漲 3%)；碰到上限後剩下的缺口由其他項目吸收
- * mode
- *   'share' 依比例分攤缺口：每一項先各自算出「負責的那一份缺口」要調多少，再整組一起套用、等比例微調到剛好達標
- *           (各項目之間有交互作用，例如售價變動也會影響佣金與貨物稅，所以不能單純相加)
- *   'equal' 同幅度：所有項目往有利的方向調同樣的 %，算出要調幾 %
+ * levers = [{ driver, mode, by, known, amount, capPct }]
+ *   mode 'known'  已知調整：已經談好、或想試試看的調整，直接套用
+ *                 by 'pct' 調 known %(−3 = 降 3%) / 'abs' 加減 known(−5000 = 少 5,000) / 'to' 調到 known(銷量就是 120 台)
+ *   mode 'amount' 負責金額：這一項要讓結果往目標的方向改善 amount(單台或月總額，跟 metric.basis 一樣)，
+ *                 例：採購負責 8,000 元/台 → 算出材料成本要降到多少
+ *   mode 'fill'   補足缺口：剩下的缺口依列表順序補，前一項碰到上限(capPct)才輪到下一項
+ *   capPct        負責金額、補足缺口的上限：最多只能調 ±幾 %(空白 = 不限)
  *
+ * 計算順序：先套用所有「已知調整」→ 依列表順序算「負責金額」→ 剩下的缺口由「補足缺口」依序補。
+ * 已知調整與負責金額就已經達到(或超過)目標時，補足項目不動。「變好」的方向看指標：成本/費用越低越好，其他越高越好。
  * 回傳每一項的 目前值 → 調整後、變動 %、是否碰到上限，以及「依列表順序逐項加入」的貢獻(加總剛好等於總改善，可以直接畫瀑布圖)。
  */
-function solveGoalMulti(scenarioId, metric, target, levers, mode) {
+/** 這個指標往哪個方向算「變好」：成本/費用越低越好(-1)，其他(營業淨利、毛利、收入…)越高越好(+1) */
+function metricGoodDir_(scenarioId, metric) {
+  var code = (metric && metric.code) || '';
+  if (!code || code === 'K') return 1;
+  var def = lineDefsForScenario_(scenarioId).filter(function (d) { return d.LineCode === code; })[0];
+  return def && ['成本', '成本明細', '費用', '費用明細', '模具', '設備'].indexOf(def.Category) !== -1 ? -1 : 1;
+}
+
+function solveGoalPlan(scenarioId, metric, target, levers) {
   if (!scenarioId) throw new Error('請先選擇情境');
   metric = metric || { code: '', basis: 'unit' };   // 空白 = 營業淨利(profitLineCode_)
   target = toNumber_(target);
-  mode = mode === 'equal' ? 'equal' : 'share';
   levers = (levers || []).filter(function (l) { return l && l.driver && l.driver.type; });
   if (!levers.length) throw new Error('請至少選一個調整項目');
   var seen = {};
@@ -5931,17 +5946,24 @@ function solveGoalMulti(scenarioId, metric, target, levers, mode) {
     if (seen[k]) throw new Error('「' + driverLabel_(l.driver) + '」重複選了兩次');
     seen[k] = true;
   });
+  var blank = function (v) { return v === '' || v === null || v === undefined || isNaN(Number(v)); };
   var positiveTypes = ['volume', 'price', 'fx', 'line', 'dev'];
   var items = levers.map(function (l) {
     var b = driverBase_(scenarioId, l.driver);
-    var fixed = l.fixed !== '' && l.fixed !== null && l.fixed !== undefined && !isNaN(Number(l.fixed));
-    var cap = l.capPct === '' || l.capPct === null || l.capPct === undefined || isNaN(Number(l.capPct)) ? null : Math.abs(Number(l.capPct));
-    return {
-      driver: l.driver, label: b.label, unit: b.unit, base: b.value,
-      fixed: fixed, value: fixed ? Number(l.fixed) : b.value,
-      share: Math.max(0, toNumber_(l.share)), cap: cap,
-      lower: positiveTypes.indexOf(l.driver.type) !== -1 ? 0 : null
+    var mode = l.mode === 'known' || l.mode === 'amount' ? l.mode : 'fill';
+    var it = {
+      driver: l.driver, label: b.label, unit: b.unit, base: b.value, mode: mode,
+      cap: blank(l.capPct) || mode === 'known' ? null : Math.abs(Number(l.capPct)),
+      lower: positiveTypes.indexOf(l.driver.type) !== -1 ? 0 : null,
+      amount: mode === 'amount' ? Math.abs(toNumber_(l.amount)) : 0
     };
+    if (mode === 'known') {
+      if (blank(l.known)) throw new Error('「' + b.label + '」是已知調整，請填要調多少');
+      var k = Number(l.known);
+      it.value = l.by === 'to' ? k : l.by === 'abs' ? b.value + k : b.value * (1 + k / 100);
+      if (it.lower !== null && it.value < it.lower) it.value = it.lower;
+    } else it.value = b.value;
+    return it;
   });
   var overridesFor = function (values) {
     var o = { scenarioId: scenarioId };
@@ -5954,104 +5976,116 @@ function solveGoalMulti(scenarioId, metric, target, levers, mode) {
   var metricAt = function (values) {
     return withOverrides_(overridesFor(values), function () { return whatIfMetric_(scenarioId, metric); });
   };
-  var baseValues = items.map(function (it) { return it.base; });
-  var metricBase = whatIfMetric_(scenarioId, metric);
-  var startValues = items.map(function (it) { return it.value; });   // 固定項目先套用
-  var metricStart = metricAt(startValues);
-  var gap = target - metricStart;
-  var free = items.map(function (it, i) { return it.fixed ? -1 : i; }).filter(function (i) { return i >= 0; });
-  var warnings = [];
-
-  var clampOf = function (it, x) {
-    if (it.cap !== null) {
-      var room = Math.abs(it.base) * it.cap / 100;
-      x = Math.max(it.base - room, Math.min(it.base + room, x));
+  var boundsOf = function (it) {
+    var lo = -Infinity, hi = Infinity;
+    if (it.cap !== null) { var room = Math.abs(it.base) * it.cap / 100; lo = it.base - room; hi = it.base + room; }
+    if (it.lower !== null) lo = Math.max(lo, it.lower);
+    return { lo: lo, hi: hi };
+  };
+  /**
+   * 只動第 i 項，讓結果 = goal(其他項目維持 values)。上限內做不到時停在最接近的那一端。
+   * 回傳 { value, reached }
+   */
+  var solveOne = function (values, i, goal) {
+    var it = items[i];
+    var at = function (x) { var v = values.slice(); v[i] = x; return metricAt(v) - goal; };
+    var bd = boundsOf(it);
+    if (bd.lo === -Infinity && bd.hi === Infinity) {
+      var x = solveScalar_(at, it.base, Math.abs(it.base) > 1e-9 ? Math.abs(it.base) * 0.05 : 1, it.lower);
+      return x === null ? { value: it.base, reached: false } : { value: x, reached: true };
     }
-    if (it.lower !== null && x < it.lower) x = it.lower;
-    return x;
+    var g0 = at(it.base);
+    if (Math.abs(g0) < 0.5) return { value: it.base, reached: true };
+    // 有上限：在 [lo, base] 或 [base, hi] 裡面找會跨過目標的那一段；沒有不限的那一端時往外擴大找
+    var ends = [bd.lo, bd.hi].map(function (e) {
+      if (isFinite(e)) return e;
+      var stp = Math.abs(it.base) > 1e-9 ? Math.abs(it.base) * 0.05 : 1, x = it.base, dir = e > 0 ? 1 : -1;
+      for (var k = 0; k < 22; k++) { x = it.base + dir * stp; if ((at(x) > 0) !== (g0 > 0)) return x; stp *= 2; }
+      return x;
+    });
+    for (var e = 0; e < 2; e++) {
+      var lo = it.base, hi = ends[e], gLo = g0, gHi = at(hi);
+      if ((gHi > 0) === (g0 > 0) && Math.abs(gHi) >= 0.5) continue;
+      for (var n = 0; n < 60; n++) {
+        var mid = (lo + hi) / 2, gm = at(mid);
+        if (Math.abs(gm) < 0.5 || Math.abs(hi - lo) < Math.max(1e-6, Math.abs(mid) * 1e-9)) return { value: mid, reached: true };
+        if ((gm > 0) === (gLo > 0)) { lo = mid; gLo = gm; } else hi = mid;
+      }
+      return { value: (lo + hi) / 2, reached: true };
+    }
+    // 上限內做不到：停在讓結果最接近目標的那一端
+    var best = Math.abs(at(ends[0])) <= Math.abs(at(ends[1])) ? ends[0] : ends[1];
+    return { value: Math.abs(at(best)) < Math.abs(g0) ? best : it.base, reached: false };
   };
 
-  var finalValues = startValues.slice();
-  var feasible = true, scale = 0, message = '';
-  if (free.length && Math.abs(gap) >= 0.5) {
-    // 每一項的「方向 × 幅度」(s = 1 時的變動量)
-    var delta = items.map(function () { return 0; });
-    if (mode === 'equal') {
-      free.forEach(function (i) {
-        var it = items[i];
-        if (!it.base) throw new Error('「' + it.label + '」目前是 0，不能用同幅度(%)調整，請改用「依比例分攤」');
-        var probe = startValues.slice(); probe[i] = it.base * 1.01;
-        var effect = metricAt(probe) - metricStart;
-        if (Math.abs(effect) < 1e-9) { warnings.push('「' + it.label + '」調整後結果不會變，不參與分攤'); return; }
-        delta[i] = (effect > 0) === (gap > 0) ? it.base * 0.01 : -it.base * 0.01;   // s 的單位 = 1%
-      });
-    } else {
-      var totalShare = free.reduce(function (sum, i) { return sum + items[i].share; }, 0);
-      free.forEach(function (i) {
-        var it = items[i];
-        var share = totalShare > 0 ? it.share / totalShare : 1 / free.length;
-        if (!share) return;
-        var part = metricStart + gap * share;
-        var x = solveScalar_(function (xx) { var v = startValues.slice(); v[i] = xx; return metricAt(v) - part; },
-          it.base, Math.abs(it.base) > 1e-9 ? Math.abs(it.base) * 0.05 : 1, it.lower);
-        if (x === null) { warnings.push('「' + it.label + '」單獨調整達不到它負責的那一份缺口，已由其他項目吸收'); return; }
-        delta[i] = x - it.base;
-      });
+  var baseValues = items.map(function (it) { return it.base; });
+  var metricBase = whatIfMetric_(scenarioId, metric);
+  var dir = metricGoodDir_(scenarioId, metric);     // 變好的方向(負責金額 = 往這個方向改善多少)
+  var values = items.map(function (it) { return it.value; });   // 已知調整先套用
+  var warnings = [];
+  var notes = items.map(function () { return ''; });
+  var capped = items.map(function () { return false; });
+
+  // 負責金額：依列表順序，每一項讓結果往目標方向改善 amount
+  items.forEach(function (it, i) {
+    if (it.mode !== 'amount' || !it.amount) return;
+    var now = metricAt(values);
+    var r = solveOne(values, i, now + dir * it.amount);
+    values[i] = r.value;
+    if (!r.reached) {
+      var got = (metricAt(values) - now) * dir;
+      capped[i] = it.cap !== null;
+      notes[i] = '只做得到 ' + Math.round(got);
+      warnings.push('「' + it.label + '」負責 ' + Math.round(it.amount) + '，' + (it.cap !== null ? '在上限 ±' + it.cap + '% 內' : '') + '只做得到 ' + Math.round(got) + '，差額留給補足缺口的項目');
     }
-    var active = free.filter(function (i) { return delta[i] !== 0; });
-    if (!active.length) {
+  });
+
+  // 補足缺口：剩下的缺口依列表順序補；已經達到或超過目標就不動
+  var fills = items.map(function (it, i) { return it.mode === 'fill' ? i : -1; }).filter(function (i) { return i >= 0; });
+  var before = metricAt(values);
+  var remaining = target - before;
+  // 已經達到(或超過)目標：補足項目不動，不會為了「剛好等於目標」把結果往壞的方向調
+  var reachedByKnown = Math.abs(remaining) < 0.5 || (remaining > 0 ? 1 : -1) !== dir;
+  var feasible = true, message = '';
+  if (!reachedByKnown) {
+    var done = false;
+    fills.some(function (i) {
+      var r = solveOne(values, i, target);
+      values[i] = r.value;
+      if (r.reached) { done = true; return true; }
+      capped[i] = items[i].cap !== null;
+      return false;
+    });
+    if (!done) {
       feasible = false;
-      message = '選的項目都無法改善這個結果。';
-    } else {
-      var valuesAt = function (sv) {
-        var v = startValues.slice();
-        active.forEach(function (i) { v[i] = clampOf(items[i], items[i].base + sv * delta[i]); });
-        return v;
-      };
-      var h = function (sv) { return metricAt(valuesAt(sv)) - target; };
-      var h0 = metricStart - target;
-      var lo = 0, hi = mode === 'equal' ? 1 : 1, hHi = h(hi), k = 0, prevV = null;
-      while ((hHi > 0) === (h0 > 0) && Math.abs(hHi) >= 0.5 && k++ < 24) {
-        var vNow = JSON.stringify(valuesAt(hi));
-        if (vNow === prevV) break;                  // 全部碰到上限(或 0)了，再放大也沒用
-        prevV = vNow;
-        lo = hi; hi *= 2; hHi = h(hi);
-      }
-      if ((hHi > 0) === (h0 > 0) && Math.abs(hHi) >= 0.5) {
-        feasible = false;
-        finalValues = valuesAt(hi);
-        message = '在設定的上限內達不到目標，最多只能做到 ' + Math.round(metricAt(finalValues)) + '。可以放寬上限或再加一個調整項目。';
-      } else {
-        var hLo = h(lo);
-        for (var it2 = 0; it2 < 60; it2++) {
-          var mid = (lo + hi) / 2, hm = h(mid);
-          if (Math.abs(hm) < 0.5) { lo = hi = mid; break; }
-          if ((hm > 0) === (hLo > 0)) { lo = mid; hLo = hm; } else hi = mid;
-        }
-        scale = (lo + hi) / 2;
-        finalValues = valuesAt(scale);
-      }
+      var achievedNow = metricAt(values);
+      var only = fills.length === 1 && items[fills[0]].cap === null && items[fills[0]].driver.type === 'volume';
+      var short = Math.round(Math.abs(target - achievedNow));
+      if (!fills.length) message = '照這樣調整做到 ' + Math.round(achievedNow) + '，離目標還差 ' + short + '。要算剩下的缺口怎麼補，加一個「補足缺口」的項目。';
+      else message = '補足缺口的項目' + (fills.some(function (i) { return items[i].cap !== null; }) ? '在上限內' : '') + '補不滿，最多做到 ' +
+        Math.round(achievedNow) + '，離目標還差 ' + short + '。' +
+        (only ? '只靠台數補不起來，通常是單台的變動成本已經高於售價，賣越多虧越多，要先改善售價或成本。' : '可以放寬上限、再加一個補足的項目，或調整已知調整。');
     }
   }
 
   // 依列表順序逐項加入，算每一項的貢獻(加總 = 總改善)
   var running = baseValues.slice(), prevMetric = metricBase;
   var out = items.map(function (it, i) {
-    running[i] = finalValues[i];
+    running[i] = values[i];
     var m = metricAt(running);
     var contribution = m - prevMetric;
     prevMetric = m;
-    var room = it.cap !== null ? Math.abs(it.base) * it.cap / 100 : null;
     return {
-      driver: it.driver, label: it.label, unit: it.unit, base: it.base, value: finalValues[i],
-      pct: it.base ? (finalValues[i] / it.base - 1) * 100 : null,
-      fixed: it.fixed, capped: room !== null && !it.fixed && Math.abs(Math.abs(finalValues[i] - it.base) - room) < Math.max(1e-6, room * 1e-6) && room > 0,
-      contribution: contribution
+      driver: it.driver, label: it.label, unit: it.unit, base: it.base, value: values[i], mode: it.mode,
+      pct: it.base ? (values[i] / it.base - 1) * 100 : null,
+      capped: capped[i], note: notes[i], contribution: contribution
     };
   });
   return {
-    feasible: feasible, mode: mode, metricBase: metricBase, achieved: prevMetric, target: target,
-    equalPct: mode === 'equal' ? scale : null, levers: out, warnings: warnings, message: message
+    feasible: feasible, metricBase: metricBase, achieved: prevMetric, target: target,
+    reachedByKnown: reachedByKnown && fills.length > 0 && Math.abs(remaining) >= 0.5,
+    alreadyMet: (target - metricBase) * dir <= 0.5,
+    levers: out, warnings: warnings, message: message
   };
 }
 
@@ -6270,7 +6304,7 @@ function reportMaintenance_(message) {
 }
 
   return {
-    fns: { getSheet_: getSheet_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, solveGoalMulti: solveGoalMulti, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
+    fns: { getSheet_: getSheet_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, metricGoodDir_: metricGoodDir_, solveGoalPlan: solveGoalPlan, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
     consts: { SCHEMA: SCHEMA, TEXT_COLUMNS: TEXT_COLUMNS, PL_LINE_ITEMS: PL_LINE_ITEMS, LINE_CODE_PREFIX: LINE_CODE_PREFIX },
     // 模擬 Apps Script「每次 google.script.run 都是全新執行」：單次執行內的快取要清掉
     beginExecution: function () { SHEET_CACHE_ = {}; resetCalcMemo_(); LOCK_DEPTH_ = 0; }
@@ -6565,7 +6599,7 @@ function reportMaintenance_(message) {
 
 </script>
   <!--
-    v2 版面：左側導覽依工作流程分四組 ——
+    版面：左側導覽依工作流程分四組 ——
       結果呈現(看數字、做簡報) → 輸入資料(每個情境要填的數字) → 計算設定(科目與公式、參數與匯率) → 主檔(車型與情境：車型/車系/情境同一頁)
     右側上方固定顯示「目前在哪個車型、哪個情境」，所有輸入頁都以它為範圍。
   -->
@@ -6591,12 +6625,10 @@ function reportMaintenance_(message) {
           <div class="nav-group-label">輸入資料（目前情境）</div>
           <button class="nav-item" data-tab="salesmix" onclick="switchTab('salesmix')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>銷售構成與售價</button>
-          <button class="nav-item" data-tab="costofsales" onclick="switchTab('costofsales')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>銷貨成本</button>
+          <button class="nav-item" data-tab="costs" onclick="switchTab('costs')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>成本與費用</button>
           <button class="nav-item" data-tab="devinvestment" onclick="switchTab('devinvestment')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/></svg>開發總投</button>
-          <button class="nav-item" data-tab="operatingexpense" onclick="switchTab('operatingexpense')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>營業費用</button>
         </div>
         <div class="nav-group">
           <div class="nav-group-label">計算設定</div>
@@ -6611,7 +6643,6 @@ function reportMaintenance_(message) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M6 17l1.5-6h9L18 17M7 17v2M17 17v2"/><circle cx="8" cy="14.5" r=".5"/><circle cx="16" cy="14.5" r=".5"/></svg>車型與情境</button>
         </div>
       </nav>
-      <div class="sidebar-foot">v2 · 每個車型各自一份科目表<br>公式式計算來源 · 拖曳排序</div>
     </aside>
 
     <div class="main-col">
@@ -6645,9 +6676,8 @@ function reportMaintenance_(message) {
         <div id="panel-whatif" class="panel"></div>
         <div id="panel-waterfall" class="panel"></div>
         <div id="panel-salesmix" class="panel"></div>
-        <div id="panel-costofsales" class="panel"></div>
+        <div id="panel-costs" class="panel"></div>
         <div id="panel-devinvestment" class="panel"></div>
-        <div id="panel-operatingexpense" class="panel"></div>
         <div id="panel-lineitems" class="panel"></div>
         <div id="panel-paramrates" class="panel"></div>
         <div id="panel-masters" class="panel active"></div>
@@ -6693,7 +6723,7 @@ const SCENARIO_COPY_PARTS = [
   { key: 'devinvestment', label: '開發總投' },
   { key: 'operatingexpense', label: '營業費用' },
   { key: 'parameters', label: '費率/匯率' },
-  { key: 'linenotes', label: '科目說明' },
+  { key: 'linenotes', label: '報告說明' },
   { key: 'actions', label: '改善作法' }
 ];
 
@@ -6751,8 +6781,7 @@ function isDeletableAutoLineItem(row) {
 // 表格編輯頁：key -> 渲染函式名稱
 const GRID_PANELS = {
   salesmix: 'renderSalesMixPanel',
-  costofsales: 'renderCostOfSalesPanel',
-  operatingexpense: 'renderOperatingExpensePanel',
+  costs: 'renderCostsPanel',          // 銷貨成本 / 營業費用 兩個子頁籤
   devinvestment: 'renderDevInvestmentPanel',
   paramrates: 'renderRatePanel'      // 匯率(renderFxPanel)畫在同一頁下半部
 };
@@ -7153,16 +7182,17 @@ function dragHandleHtml(label) {
 
 const PAGE_META = {
   dashboard: ['結果呈現', '損益儀表板'], report: ['結果呈現', 'GATE 審議報告'], whatif: ['結果呈現', '目標反推與敏感度分析'], waterfall: ['結果呈現', '瀑布圖工具'],
-  salesmix: ['輸入資料', '銷售構成與售價'], costofsales: ['輸入資料', '銷貨成本'],
-  devinvestment: ['輸入資料', '開發總投'], operatingexpense: ['輸入資料', '營業費用'],
+  salesmix: ['輸入資料', '銷售構成與售價'], costs: ['輸入資料', '成本與費用'], devinvestment: ['輸入資料', '開發總投'],
   lineitems: ['計算設定', '科目與公式'], paramrates: ['計算設定', '參數與匯率'],
   masters: ['主檔', '車型與情境']
 };
 /** 已經併到別頁的舊分頁(記在瀏覽器裡的上次位置、其他頁的「前往」按鈕)：導到新的那一頁 */
-const MERGED_TABS_ = { vehicletypes: 'masters', vehicles: 'masters', scenarios: 'masters', paramfx: 'paramrates' };
+const MERGED_TABS_ = { vehicletypes: 'masters', vehicles: 'masters', scenarios: 'masters', paramfx: 'paramrates',
+  costofsales: 'costs', operatingexpense: 'costs' };
 
 /* ---------------- 頁籤 / 上方選單 ---------------- */
 function switchTab(key, force) {
+  if (MATRIX_CONFIG[key]) costsView = key;   // 「前往銷貨成本/營業費用」：到成本與費用頁的那個子頁籤
   key = MERGED_TABS_[key] || key;
   if (!force && key !== currentTab && isDirty_()) {
     confirmLeave_().then(ok => { if (ok) switchTab(key, true); });
@@ -7429,11 +7459,10 @@ function drawEntityGrid(key) {
   const toolbar = document.getElementById('toolbar-' + key);
   if (!toolbar) return;
 
-  toolbar.innerHTML = (cfg.createUi === 'scenario' ? '' : cfg.createUi === 'vehicleType'
+  toolbar.innerHTML = (cfg.createUi === 'scenario' ? scenarioToolbarHtml() : cfg.createUi === 'vehicleType'
     ? `<button type="button" class="btn" onclick="createVehicleTypeDialog()">＋ 新增車型</button>`
     : `<button type="button" class="btn" onclick="addEntityRow('${key}')">＋ 新增一列</button>`) +
-    `<span class="spacer"></span><button type="button" class="btn secondary" onclick="saveEntityGrid('${key}')">儲存</button>` +
-    (cfg.createUi === 'scenario' ? scenarioToolbarHtml() : '');
+    `<span class="spacer"></span><button type="button" class="btn secondary" onclick="saveEntityGrid('${key}')">儲存</button>`;
 
   const sortable = cfg.sortable && rows.length > 1;
   const body = rows.length
@@ -7477,7 +7506,6 @@ function drawEntityGrid(key) {
       }
     });
   }
-  if (key === 'scenarios') autoFillNewScenarioName_();
   if (pendingStatus && pendingStatus.key === key) {
     setStatus(key, pendingStatus.text, pendingStatus.cls);
     pendingStatus = null;
@@ -7693,109 +7721,81 @@ function refreshScenarioOptions(preferredId) {
   })).getScenarios(currentVehicleTypeId);
 }
 
-/* ---- 情境設定：以既有情境為基礎建立 / 把既有情境的資料帶進目前情境 ---- */
+/* ---- 情境：以既有情境為基礎建立 / 把既有情境的資料帶進目前情境 ----
+ * 平常用不到的表單不佔畫面：兩顆按鈕，按了才跳出對話框(要帶入哪些資料的勾選也在對話框裡)。 */
 function scenarioToolbarHtml() {
-  const existing = (entityRows.scenarios || []).filter(s => s.__existing);
-  const sourceOptions = existing
-    .map(s => `<option value="${esc(s.ScenarioID)}">${esc(scenarioLabel(s))}</option>`).join('');
-  const partChecks = SCENARIO_COPY_PARTS.map(p => `
-    <label class="chk"><input type="checkbox" id="copy-part-${p.key}" checked> ${p.label}</label>`).join('');
+  const hasOthers = (entityRows.scenarios || []).some(s => s.__existing);
+  return `<button type="button" class="btn" onclick="createScenarioDialog()">＋ 新增情境…</button>
+    <button type="button" class="btn secondary" onclick="importIntoCurrentScenarioDialog()"${hasOthers && currentScenarioId ? '' : ' disabled'}
+      data-tip="把另一個情境的資料(可勾選類別)複製進右上角目前選的情境">帶入目前情境…</button>`;
+}
+function scenarioSourceOptions_(excludeId) {
+  return (entityRows.scenarios || []).filter(s => s.__existing && s.ScenarioID !== excludeId).map(s => [s.ScenarioID, scenarioLabel(s)]);
+}
+const COPY_PARTS_FIELD_ = () => ({ name: 'parts', label: '要帶入的資料', type: 'checks',
+  options: SCENARIO_COPY_PARTS.map(p => [p.key, p.label]), value: SCENARIO_COPY_PARTS.map(p => p.key) });
 
-  return `
-    <div class="toolbar-block">
-      <div class="toolbar-block-title">＋ 新增情境</div>
-      <div class="toolbar">
-        <label>GATE 別
-          <select id="new-scenario-gate">${GATE_OPTIONS.map(g => `<option value="${g}">${g}</option>`).join('')}</select>
-        </label>
-        <label>情境名稱
-          <input id="new-scenario-name" type="text" style="width:170px;" placeholder="例：現況0901">
-        </label>
-        <label>情境性質
-          <select id="new-scenario-type" onchange="autoFillNewScenarioName_()">${SCENARIO_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
-        </label>
-        <label>以既有情境為基礎
-          <select id="new-scenario-source">
-            <option value="">(不帶入，建立空白情境)</option>${sourceOptions}
-          </select>
-        </label>
-        <button type="button" class="btn" onclick="createScenario()">建立情境</button>
-      </div>
-      <div class="toolbar">
-        <span class="muted">要帶入的資料：</span>${partChecks}
-      </div>
-      <div class="toolbar">
-        <span class="muted">或把既有情境的資料帶進目前選取的情境（${esc(currentScenario ? scenarioLabel(currentScenario) : '尚未選擇情境')}）：</span>
-        <select id="import-scenario-source">
-          <option value="">-- 選擇來源情境 --</option>${sourceOptions}
-        </select>
-        <button type="button" class="btn secondary" onclick="importIntoCurrentScenario()">帶入目前情境</button>
-      </div>
-    </div>`;
+function createScenarioDialog() {
+  const autoName = type => type + dateToMMDD_(today());
+  let lastAuto = autoName(SCENARIO_TYPES[0]);
+  const done = openModal({
+    title: '新增情境',
+    fields: [
+      { name: 'gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, value: GATE_OPTIONS[0] },
+      { name: 'type', label: '情境性質', type: 'select', options: SCENARIO_TYPES, value: SCENARIO_TYPES[0] },
+      { name: 'name', label: '情境名稱', value: lastAuto, placeholder: '例：現況0901' },
+      { name: 'source', label: '以既有情境為基礎', type: 'select', options: [['', '(不帶入，建立空白情境)']].concat(scenarioSourceOptions_('')), value: '' },
+      Object.assign(COPY_PARTS_FIELD_(), { help: '有選「以既有情境為基礎」時才會帶入' })
+    ],
+    okText: '建立情境',
+    validate: v => !v.name.trim() ? '請輸入情境名稱' : (v.source && !v.parts.length ? '請至少勾選一項要帶入的資料，或把來源改成「不帶入」' : '')
+  });
+  // 情境名稱還是自動帶入的值時，改情境性質就跟著換(現況0901 → 目標0901)
+  const dlg = document.querySelector('dialog.modal:last-of-type');
+  const typeEl = dlg && dlg.querySelector('#mf-1'), nameEl = dlg && dlg.querySelector('#mf-2');
+  if (typeEl && nameEl) typeEl.addEventListener('change', () => {
+    if (!nameEl.value || nameEl.value === lastAuto) { lastAuto = autoName(typeEl.value); nameEl.value = lastAuto; }
+  });
+  done.then(v => {
+    if (!v) return;
+    setStatus('scenarios', '建立中...');
+    google.script.run
+      .withSuccessHandler(safeHandler(saved => {
+        pendingStatus = { key: 'scenarios', text: v.source ? '已建立情境，並帶入來源情境的資料' : '已建立情境', cls: 'ok' };
+        loadEntityData('scenarios');
+        refreshScenarioOptions(saved && saved.ScenarioID);
+      }))
+      .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
+      .createScenarioFrom({
+        ScenarioID: '', Gate: v.gate, ScenarioName: v.name.trim(), ScenarioType: v.type,
+        VehicleTypeID: currentVehicleTypeId, CreatedDate: today(), Notes: ''
+      }, v.source, v.source ? v.parts : []);
+  });
 }
 
-function selectedCopyParts() {
-  return SCENARIO_COPY_PARTS
-    .filter(p => { const el = document.getElementById('copy-part-' + p.key); return el && el.checked; })
-    .map(p => p.key);
-}
-
-/** 「新增情境」表單：情境性質改變時，名稱欄位還是空白或還是上次自動帶入的值，就重新帶一次(性質+今天MMDD) */
-let newScenarioNameAuto_ = '';
-function autoFillNewScenarioName_() {
-  const nameEl = document.getElementById('new-scenario-name');
-  const typeEl = document.getElementById('new-scenario-type');
-  if (!nameEl || !typeEl) return;
-  const auto = (typeEl.value || '') + dateToMMDD_(today());
-  if (!nameEl.value || nameEl.value === newScenarioNameAuto_) {
-    nameEl.value = auto;
-    newScenarioNameAuto_ = auto;
-  }
-}
-
-function createScenario() {
-  const name = val('new-scenario-name');
-  if (!name) { setStatus('scenarios', '請輸入情境名稱', 'err'); return; }
-  const source = val('new-scenario-source');
-  const parts = selectedCopyParts();
-  if (source && !parts.length) {
-    setStatus('scenarios', '請至少勾選一項要帶入的資料，或把來源情境改成「不帶入」', 'err');
-    return;
-  }
-  setStatus('scenarios', '建立中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(saved => {
-      pendingStatus = { key: 'scenarios', text: source ? '已建立情境，並帶入來源情境的資料' : '已建立情境', cls: 'ok' };
-      loadEntityData('scenarios');
-      refreshScenarioOptions(saved && saved.ScenarioID);
-    }))
-    .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
-    .createScenarioFrom({
-      ScenarioID: '',
-      Gate: val('new-scenario-gate'),
-      ScenarioName: name,
-      ScenarioType: val('new-scenario-type'),
-      VehicleTypeID: currentVehicleTypeId,
-      CreatedDate: today(),
-      Notes: ''
-    }, source, parts);
-}
-
-function importIntoCurrentScenario() {
-  const source = val('import-scenario-source');
-  if (!currentScenarioId) { setStatus('scenarios', '請先在上方選擇要帶入的目標情境', 'err'); return; }
-  if (!source) { setStatus('scenarios', '請選擇來源情境', 'err'); return; }
-  const parts = selectedCopyParts();
-  if (!parts.length) { setStatus('scenarios', '請至少勾選一項要帶入的資料', 'err'); return; }
-  confirmModal('帶入到目前情境？', '會先清掉目前情境所勾選類別的資料，再整批複製來源情境的內容。', '帶入', true).then(ok => {
-  if (!ok) return;
-  setStatus('scenarios', '帶入中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(() => {
-      setStatus('scenarios', '已帶入來源情境的資料（開發總投的挑戰低減目標已清空，請重新填寫）', 'ok');
-    }))
-    .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
-    .copyScenarioData(source, currentScenarioId, parts);
+function importIntoCurrentScenarioDialog() {
+  if (!currentScenarioId) { toast('請先在右上角選擇要帶入的目標情境', 'warn'); return; }
+  const sources = scenarioSourceOptions_(currentScenarioId);
+  if (!sources.length) { toast('這個車型沒有其他情境可以帶入', 'warn'); return; }
+  openModal({
+    title: '帶入目前情境：' + (currentScenario ? scenarioLabel(currentScenario) : ''),
+    body: '<p class="help">會先清掉目前情境所勾選類別的資料，再整批複製來源情境的內容（開發總投的挑戰低減目標會清空，請重新填寫）。</p>',
+    fields: [
+      { name: 'source', label: '來源情境', type: 'select', options: sources, value: sources[0][0] },
+      COPY_PARTS_FIELD_()
+    ],
+    okText: '帶入', danger: true,
+    validate: v => !v.parts.length ? '請至少勾選一項要帶入的資料' : ''
+  }).then(v => {
+    if (!v) return;
+    setStatus('scenarios', '帶入中...');
+    google.script.run
+      .withSuccessHandler(safeHandler(() => {
+        Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+        setStatus('scenarios', '已帶入來源情境的資料（開發總投的挑戰低減目標已清空，請重新填寫）', 'ok');
+      }))
+      .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
+      .copyScenarioData(v.source, currentScenarioId, v.parts);
   });
 }
 
@@ -8087,26 +8087,49 @@ const MATRIX_CONFIG = {
     title: '銷貨成本',
     getFn: 'getCostOfSalesMatrix', saveFn: 'saveCostOfSalesMatrix',
     parentLine: 'B', hasCurrency: true, totalLabel: '手動輸入合計',
-    intro: '列 = 成本項目、欄 = 車系，每格填單台金額。<b>計算來源是「手動輸入」的科目</b>才會出現在上半部；公式或開發總投攤提的科目列在下方唯讀，滑鼠移到金額上可以看計算過程。「說明」欄會直接帶到 GATE 報告上。'
+    intro: '列 = 成本項目、欄 = 車系，每格填單台金額。<b>計算來源是「手動輸入」的科目</b>才會出現在上半部；公式或開發總投攤提的科目列在下方唯讀，滑鼠移到金額上可以看計算過程。「報告說明」欄會直接印在 GATE 報告的「說明」欄。'
   },
   operatingexpense: {
     title: '營業費用',
     getFn: 'getOperatingExpenseMatrix', saveFn: 'saveOperatingExpenseMatrix',
     parentLine: 'E', hasCurrency: false, totalLabel: '手動輸入合計',
     parentOptions: [['E', '銷售費用(銷貨毛利前)'], ['G', '產品貢獻前費用'], ['I', '固定營業費用']],
-    intro: '銷售費用、產品貢獻前費用、固定營業費用、前瞻費用的單台金額。季Margin、開發費用攤提等由公式或開發總投算出，列在下方唯讀。'
+    intro: '銷售費用、產品貢獻前費用、固定營業費用、前瞻費用的單台金額。季Margin、開發費用攤提等由公式或開發總投算出，列在下方唯讀。「報告說明」欄會直接印在 GATE 報告的「說明」欄。'
   }
 };
 
 let matrixData = {};   // key -> {lines, vehicles, values, currencies, lineNotes, autoLines...}
 
-function renderCostOfSalesPanel() { renderMatrixPanel('costofsales'); }
-function renderOperatingExpensePanel() { renderMatrixPanel('operatingexpense'); }
+/**
+ * 成本與費用：銷貨成本、營業費用兩張表用同一個元件，放在同一頁用子頁籤切換(以前是兩個分頁)。
+ * 目前在哪個子頁籤記在瀏覽器裡。
+ */
+const COSTS_VIEW_KEY_ = 'plCosts.view.v1';
+let costsView = (() => { try { const v = localStorage.getItem(COSTS_VIEW_KEY_); return v === 'operatingexpense' ? v : 'costofsales'; } catch (e) { return 'costofsales'; } })();
+function renderCostsPanel() {
+  const panel = document.getElementById('panel-costs');
+  if (!panel || !requireScope('costs', true)) return;
+  panel.innerHTML = `<div class="dash-subnav">${Object.keys(MATRIX_CONFIG).map(k =>
+      `<button type="button" class="dash-subnav-btn${costsView === k ? ' active' : ''}" onclick="setCostsView('${k}')">${esc(MATRIX_CONFIG[k].title)}</button>`).join('')}</div>
+    <div id="costs-body"></div>`;
+  renderMatrixPanel(costsView);
+}
+function setCostsView(key) {
+  if (key === costsView) return;
+  const go = () => {
+    clearDirty();
+    costsView = key;
+    try { localStorage.setItem(COSTS_VIEW_KEY_, key); } catch (e) { /* 存不了就算了 */ }
+    renderCostsPanel();
+  };
+  if (isDirty_()) confirmLeave_().then(ok => { if (ok) go(); }); else go();
+}
 
 function renderMatrixPanel(key) {
-  if (!requireScope(key, true)) return;
   const cfg = MATRIX_CONFIG[key];
-  document.getElementById('panel-' + key).innerHTML = gridShell(key, cfg.title, cfg.intro);
+  const body = document.getElementById('costs-body');
+  if (!body) return;
+  body.innerHTML = gridShell(key, cfg.title, cfg.intro);
   const cacheKey = panelCacheKey_(key);
   if (panelDataCache_[cacheKey]) { matrixData[key] = panelDataCache_[cacheKey]; drawMatrix(key); }
   google.script.run
@@ -8183,7 +8206,7 @@ function drawMatrix(key) {
         <th>項目</th>
         ${cfg.hasCurrency ? '<th>幣別</th>' : ''}
         ${data.vehicles.map(v => `<th>${esc(v.VehicleCode || v.VehicleID)}<div class="th-sub">構成比 ${fmt(num(v.SalesMixPct), 1)}%</div></th>`).join('')}
-        <th>加權平均</th><th>說明（帶到報告）</th><th></th>
+        <th>加權平均</th><th data-tip="這個情境的說明，會印在 GATE 報告的「說明」欄（在報告上改也是同一份）">報告說明</th><th></th>
       </tr></thead>
       <tbody>
         ${data.lines.length ? '' : `<tr><td colspan="${data.vehicles.length + 5}" class="muted" style="text-align:center;padding:18px;">還沒有手動輸入的項目，用上方「新增項目」新增</td></tr>`}
@@ -9321,7 +9344,7 @@ function chartEditorPaneHtml_() {
           <label class="chk" style="margin-top:12px;" data-tip="貨物稅的完稅價格要扣除這個科目（預設：廣宣、促銷、批標售、季Margin）。公式 TAXDEDUCT() 就是這些科目的合計。">
             <input type="checkbox" ${String(d.CommodityTaxDeduct).toUpperCase() === 'Y' ? 'checked' : ''}
               onchange="chartDraft.CommodityTaxDeduct=this.checked?'Y':'';chartDirty_();schedulePreview_()"> 貨物稅完稅價格可以扣除這個科目</label>
-          <label class="field" style="margin-top:12px;"><span>科目說明（算法依據、資料來源）</span>
+          <label class="field" style="margin-top:12px;"><span>算法說明（算法依據、資料來源；整個車型共用，不會印在報告上）</span>
             <textarea rows="2" oninput="chartDraft.Description=this.value;chartDirty_()" placeholder="例：依生技部工時 × 24~26 年平均費率">${esc(d.Description || '')}</textarea></label>
         </div>
       </details>
@@ -10464,6 +10487,7 @@ function renderReportPanel() {
     return;
   }
   loadReportPrefs_();
+  loadWhatIfPrefs_();
   defaultReportSel_();
   const opt = (id, allowEmpty, emptyText) => (allowEmpty ? `<option value="">${emptyText}</option>` : '') +
     scenarioCache.map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === id ? ' selected' : ''}>${esc(scenarioLabel(s))}（${esc(s.ScenarioType || '現況')}）</option>`).join('');
@@ -10479,12 +10503,13 @@ function renderReportPanel() {
         <label class="field" data-tip="全系統共用：儀表板、GATE 報告、瀑布圖工具用同一個金額單位"><span>金額單位</span><div class="seg">
           ${AMOUNT_UNITS_.map(([u, t]) => `<button type="button" class="seg-btn${reportUnit === u ? ' active' : ''}" data-unit="${u}" onclick="setReportUnit(${u})">${t}/台</button>`).join('')}</div></label>
         <label class="chk" style="align-self:center;"><input type="checkbox" ${reportShowPrice ? 'checked' : ''} onchange="reportShowPrice=this.checked;saveReportPrefs_();drawReport_()"> 顯示售價結構</label>
+        <label class="chk" style="align-self:center;" data-tip="兩項假設、看哪個結果，在「目標反推與敏感度」頁設定"><input type="checkbox" ${whatIfPrefs.sens.inReport ? 'checked' : ''} onchange="whatIfPrefs.sens.inReport=this.checked;saveWhatIfPrefs_();drawReport_()"> 附敏感度分析</label>
         <span style="flex:1"></span>
         <button type="button" class="btn secondary" onclick="createSnapshotDialog_(reportSel.target, (scenarioCache.find(s => s.ScenarioID === reportSel.target) || {}).ScenarioName ? scenarioLabel(scenarioCache.find(s => s.ScenarioID === reportSel.target)) : '')" data-tip="把目標情境現在的數字存一份，之後可以比較改了什麼">存成快照</button>
         <button type="button" class="btn secondary" onclick="loadReport_()">重新計算</button>
         <button type="button" class="btn" onclick="printReport_()">列印 / 存成 PDF</button>
       </div>
-      <p class="help" style="margin:10px 0 0;">每一張卡片是一頁 16:9 投影片，列印時每頁一張。「說明」欄可以直接點進去改（會存回該情境的科目說明，銷貨成本頁的說明欄也是同一份）；作法清單可以拖曳 ⠿ 排序。每張右上角的「複製」可以把表格貼進 PowerPoint / Excel。</p>
+      <p class="help" style="margin:10px 0 0;">每一張卡片是一頁 16:9 投影片，列印時每頁一張。「說明」欄可以直接點進去改（就是銷貨成本、營業費用頁的「報告說明」，改哪邊都是同一份）；作法清單可以拖曳 ⠿ 排序。每張右上角的「複製」可以把表格貼進 PowerPoint / Excel。</p>
     </div>
     <div id="report-body"><p class="muted">計算中...</p></div>`;
   loadReport_();
@@ -11063,9 +11088,9 @@ function copyReportTable(id) {
  */
 let whatIfOptions = null;
 const WHATIF_PREFS_KEY_ = 'plWhatIf.prefs.v1';
-// 目標反推只有一張卡片(multi)：只選一項 = 單項反推；加到兩項以上 = 組合拳。以前單項(goal)、多項(multi)是兩張卡片。
+// 目標反推只有一張卡片(multi)：每一列選一種方式(已知調整 / 負責金額 / 補足缺口)；只有一列補足缺口 = 單項反推。
 let whatIfPrefs = {
-  multi: { metric: 'K', basis: 'unit', target: 0, mode: 'share', levers: null },
+  multi: { metric: 'K', basis: 'unit', target: 0, levers: null },
   sens: { metric: 'K', basis: 'unit', row: 'volume', rowSteps: '-20,-10,0,10,20', col: 'price', colSteps: '-10,-5,0,5,10', inReport: true,
     rowMode: 'pct', rowValues: '', colMode: 'pct', colValues: '' }
 };
@@ -11077,9 +11102,24 @@ function loadWhatIfPrefs_() {
     // 舊版的單項反推設定：組合拳還沒設定過時，沿用它當成唯一的一項
     if (p && p.goal && !(p.multi && Array.isArray(p.multi.levers) && p.multi.levers.length)) {
       Object.assign(whatIfPrefs.multi, { metric: p.goal.metric || 'K', basis: p.goal.basis || 'unit', target: p.goal.target || 0,
-        levers: [{ driver: p.goal.driver || 'volume', share: '', capPct: '', fixed: '' }] });
+        levers: [{ driver: p.goal.driver || 'volume', mode: 'fill' }] });
     }
   } catch (e) { /* 用預設 */ }
+  if (Array.isArray(whatIfPrefs.multi.levers)) whatIfPrefs.multi.levers = whatIfPrefs.multi.levers.map(normLever_);
+}
+/**
+ * 一列調整項目：{ driver, mode: 'known' | 'amount' | 'fill', by: 'pct' | 'abs' | 'to', known, amount, capPct }
+ * 舊版的「固定為」= 已知調整(調到)；舊版的分攤比例拿掉了，其他舊列都當成補足缺口。
+ */
+function normLever_(l) {
+  l = Object.assign({}, l);
+  if (!l.mode) l.mode = l.fixed !== '' && l.fixed !== undefined && l.fixed !== null ? 'known' : 'fill';
+  if (l.mode === 'known' && l.fixed !== undefined && (l.known === undefined || l.known === '')) { l.by = 'to'; l.known = l.fixed; }
+  if (['known', 'amount', 'fill'].indexOf(l.mode) === -1) l.mode = 'fill';
+  if (['pct', 'abs', 'to'].indexOf(l.by) === -1) l.by = 'pct';
+  ['known', 'amount', 'capPct'].forEach(k => { if (l[k] === undefined || l[k] === null) l[k] = ''; });
+  delete l.fixed; delete l.share;
+  return l;
 }
 function saveWhatIfPrefs_() {
   try { localStorage.setItem(WHATIF_PREFS_KEY_, JSON.stringify(whatIfPrefs)); } catch (e) { /* 存不了就算了 */ }
@@ -11141,7 +11181,7 @@ function drawWhatIf_() {
     <div class="card">
       <div class="card-head"><h3>敏感度分析</h3><span class="muted">兩項假設同時變動時，結果會落在哪裡（中間框起來的是目前的數字）</span>
         <span class="spacer"></span>
-        <label class="chk"><input type="checkbox" ${s.inReport ? 'checked' : ''} onchange="whatIfPrefs.sens.inReport=this.checked;saveWhatIfPrefs_()"> 放進 GATE 報告</label></div>
+        <span class="muted">${s.inReport ? 'GATE 報告會附這張表' : 'GATE 報告目前不附這張表'}（在 GATE 報告頁勾選）</span></div>
       <div class="field-row">
         <label class="field"><span>看哪個結果</span><select onchange="whatIfPrefs.sens.metric=this.value;saveWhatIfPrefs_()">${metricOptionsHtml_(s.metric)}</select></label>
         <label class="field"><span>&nbsp;</span>${basisSeg('sens', s.basis)}</label>
@@ -11160,7 +11200,7 @@ function drawWhatIf_() {
 function whatIfPreset_(kind) {
   const m = whatIfPrefs.multi;
   const profit = profitCodeOf_(whatIfOptions);
-  const one = driver => [{ driver, share: '', capPct: '', fixed: '' }];
+  const one = driver => [normLever_({ driver, mode: 'fill' })];
   if (kind === 'breakeven-volume') Object.assign(m, { metric: profit, basis: 'unit', target: 0, levers: one('volume') });
   if (kind === 'breakeven-price') Object.assign(m, { metric: profit, basis: 'unit', target: 0, levers: one('price') });
   if (kind === 'material') {
@@ -11168,7 +11208,7 @@ function whatIfPreset_(kind) {
     Object.assign(m, { metric: profit, basis: 'unit', target: Math.max(0, Math.round((whatIfOptions.metrics.find(x => x.code === profit) || {}).value || 0)),
       levers: one(lines.length ? driverKey_(lines[0].driver) : 'volume') });
   }
-  if (kind === 'combo') Object.assign(m, { metric: profit, mode: 'share', levers: defaultLevers_() });
+  if (kind === 'combo') Object.assign(m, { metric: profit, levers: defaultLevers_() });
   saveWhatIfPrefs_();
   drawWhatIf_();
   if (kind !== 'combo') runMultiGoal_();
@@ -11331,35 +11371,66 @@ function sensitivityTableHtml_(t, rows, cols, s, opts) {
   <p class="help">表內數字：${esc(metric)}${s.basis === 'month' ? '（月總額，元）' : '（加權平均，元/台）'}。綠色 = 正、紅色 = 負，顏色越深絕對值越大。</p>`;
 }
 
-/* ---------------- 目標反推(單項 / 組合拳) ----------------
- * 只選一項 = 單項反推(後端 solveGoal)。營業淨利的缺口通常不會只指派一個項目：售價、材料、銷量、開發總投…各負責一部分，
- * 加到兩項以上就是組合拳：每一項可以設「分攤比例」「最多調 ±%」或「固定值」(已經確定的數字)，後端 solveGoalMulti 一次算出每一項要調多少。
+/* ---------------- 目標反推(組合拳) ----------------
+ * 照會議上實際的講法，每一列選一種方式(後端 solveGoalPlan)：
+ *   已知調整  「材料再降 3%」「售價加 5,000」「銷量就是 120 台」—— 直接套用
+ *   負責金額  「採購負責 8,000 元/台」—— 算出這一項要調到多少
+ *   補足缺口  「剩下的先靠材料(最多 5%)，不夠再漲價」—— 依列表順序補，前一項碰到上限才輪到下一項
  */
+const LEVER_MODES_ = { known: '已知調整', amount: '負責金額', fill: '補足缺口' };
+/** 組合拳範例：三種方式各一(最大的成本科目降 3%、開發總投負責 2,000、剩下先漲價最多 3%，不夠看銷量) */
 function defaultLevers_() {
   const lines = whatIfOptions.drivers.filter(d => d.driver.type === 'line').sort((a, b) => Math.abs(b.base) - Math.abs(a.base));
-  const out = [{ driver: 'price', share: 40, capPct: 3, fixed: '' }];
-  if (lines[0]) out.push({ driver: driverKey_(lines[0].driver), share: 40, capPct: 5, fixed: '' });
-  out.push({ driver: 'dev', share: 20, capPct: '', fixed: '' });
-  return out;
+  const out = [];
+  if (lines[0]) out.push({ driver: driverKey_(lines[0].driver), mode: 'known', by: 'pct', known: -3 });
+  out.push({ driver: 'dev', mode: 'amount', amount: 2000 });
+  out.push({ driver: 'price', mode: 'fill', capPct: 3 });
+  out.push({ driver: 'volume', mode: 'fill' });
+  return out.map(normLever_);
+}
+function leverUnit_(info) { return info && info.unit ? info.unit : ''; }
+/** 已知調整套用後的值(畫面上即時提示用) */
+function knownValue_(l, info) {
+  const k = Number(l.known);
+  if (!info || l.known === '' || isNaN(k)) return null;
+  return l.by === 'to' ? k : l.by === 'abs' ? info.base + k : info.base * (1 + k / 100);
+}
+function leverSettingHtml_(l, i, amountUnit) {
+  const set = (field, redraw) => `whatIfPrefs.multi.levers[${i}].${field}=this.value;saveWhatIfPrefs_()${redraw ? ';drawWhatIf_()' : ''}`;
+  const info = whatIfDriverInfo_(l.driver);
+  const cap = `<span class="lever-inline">最多調 ±<input type="number" min="0" step="any" value="${esc(l.capPct)}" placeholder="不限" oninput="${set('capPct')}"> %</span>`;
+  if (l.mode === 'known') {
+    const kv = knownValue_(l, info);
+    const dg = info && Math.abs(info.base) < 100 ? 2 : 0;
+    return `<span class="lever-inline"><select onchange="${set('by', true)}">
+        <option value="pct"${l.by === 'pct' ? ' selected' : ''}>調 %</option>
+        <option value="abs"${l.by === 'abs' ? ' selected' : ''}>加減</option>
+        <option value="to"${l.by === 'to' ? ' selected' : ''}>調到</option></select>
+      <input type="number" step="any" value="${esc(l.known)}" placeholder="${l.by === 'pct' ? '例 -3' : l.by === 'abs' ? '例 -5000' : '例 120'}" onchange="${set('known', true)}">
+      ${l.by === 'pct' ? '%' : esc(leverUnit_(info))}
+      ${kv !== null ? `<span class="muted">→ ${fmt(kv, dg)} ${esc(leverUnit_(info))}</span>` : ''}</span>`;
+  }
+  if (l.mode === 'amount') {
+    return `<span class="lever-inline">改善 <input type="number" min="0" step="any" value="${esc(l.amount)}" placeholder="例 8000" oninput="${set('amount')}"> ${amountUnit}</span>${cap}`;
+  }
+  return cap;
 }
 function multiGoalCardHtml_() {
   const m = whatIfPrefs.multi;
   const known = k => whatIfDriverInfo_(k);
-  m.levers = (Array.isArray(m.levers) ? m.levers : []).filter(l => known(l.driver));
-  if (!m.levers.length) m.levers = [{ driver: 'volume', share: '', capPct: '', fixed: '' }];
-  const single = m.levers.length === 1;
-  const shareMode = !single && m.mode !== 'equal';
+  m.levers = (Array.isArray(m.levers) ? m.levers : []).map(normLever_).filter(l => known(l.driver));
+  if (!m.levers.length) m.levers = [normLever_({ driver: 'volume', mode: 'fill' })];
+  const amountUnit = m.basis === 'month' ? '元/月' : '元/台';
   const basisSeg = `<div class="seg">
       <button type="button" class="seg-btn${m.basis === 'unit' ? ' active' : ''}" onclick="whatIfPrefs.multi.basis='unit';saveWhatIfPrefs_();drawWhatIf_()">單台</button>
       <button type="button" class="seg-btn${m.basis === 'month' ? ' active' : ''}" onclick="whatIfPrefs.multi.basis='month';saveWhatIfPrefs_();drawWhatIf_()">月總額</button></div>`;
-  const totalShare = m.levers.filter(l => l.fixed === '' || l.fixed === undefined).reduce((s, l) => s + num(l.share), 0);
   return `<div class="card" id="wi-multi">
-    <div class="card-head"><h3>目標反推</h3><span class="muted">要讓某個結果達到目標值，要調哪些項目、調多少？只選一項 = 單項反推；多加幾項 = 缺口由好幾項一起分擔（組合拳）</span></div>
+    <div class="card-head"><h3>目標反推</h3><span class="muted">已經談好的調整先放進去，剩下的缺口誰負責、怎麼補？</span></div>
     <div class="tpl-row"><span class="muted">常見問題：</span>
       <button type="button" class="tpl-btn" onclick="whatIfPreset_('breakeven-volume')">損益兩平要賣幾台？</button>
       <button type="button" class="tpl-btn" onclick="whatIfPreset_('breakeven-price')">損益兩平要賣多少錢？</button>
       <button type="button" class="tpl-btn" onclick="whatIfPreset_('material')">營業淨利要達目標，材料成本要降到多少？</button>
-      <button type="button" class="tpl-btn" onclick="whatIfPreset_('combo')">缺口由售價、材料、開發總投一起分擔</button>
+      <button type="button" class="tpl-btn" onclick="whatIfPreset_('combo')">組合拳範例（三種方式各一）</button>
     </div>
     <div class="goal-sentence">
       <span>要讓</span>
@@ -11367,25 +11438,23 @@ function multiGoalCardHtml_() {
       ${basisSeg}
       <span>等於</span>
       <input id="wi-multi-target" type="number" step="any" value="${esc(m.target)}" style="width:140px;" oninput="whatIfPrefs.multi.target=this.value;saveWhatIfPrefs_()">
-      <span>元，${single ? '下面這一項要調到多少？' : '由下面幾項'}</span>
-      ${single ? '' : `<div class="seg">
-        <button type="button" class="seg-btn${shareMode ? ' active' : ''}" onclick="whatIfPrefs.multi.mode='share';saveWhatIfPrefs_();drawWhatIf_()" data-tip="每一項負責一定比例的缺口（例：售價 40%、材料 40%、開發 20%）">依比例分攤</button>
-        <button type="button" class="seg-btn${!shareMode ? ' active' : ''}" onclick="whatIfPrefs.multi.mode='equal';saveWhatIfPrefs_();drawWhatIf_()" data-tip="所有項目都往有利方向調同樣的 %，算出要調幾 %">同幅度調整</button>
-      </div>`}
+      <span>元</span>
     </div>
     <div class="grid-scroll"><table class="grid-table lever-table">
-      <thead><tr>${single ? '' : '<th style="width:28px;"></th>'}<th>調整項目（目前值）</th>${shareMode ? '<th>分攤比例 %</th>' : ''}${single ? '' : `<th data-tip="例：售價最多只能漲 3%；碰到上限後剩下的缺口由其他項目吸收">最多調 ±%</th><th data-tip="已經確定的數字直接填，不參與反推">固定為</th><th style="width:40px;"></th>`}</tr></thead>
+      <thead><tr><th style="width:28px;"></th><th>調整項目（目前值）</th>
+        <th data-tip="已知調整：已經談好、或想試試看的調整，直接套用&#10;負責金額：這一項要讓結果改善多少，算出要調到多少&#10;補足缺口：剩下的缺口依列表順序補，前一項碰到上限才輪到下一項">方式</th>
+        <th>設定</th><th style="width:40px;"></th></tr></thead>
       <tbody id="wi-lever-body">${m.levers.map((l, i) => `<tr data-key="${i}">
-        ${single ? '' : `<td>${dragHandleHtml('拖曳調整順序（貢獻依這個順序逐項計算）')}</td>`}
+        <td>${dragHandleHtml('拖曳調整順序（負責金額、補足缺口依這個順序計算）')}</td>
         <td><select onchange="whatIfPrefs.multi.levers[${i}].driver=this.value;saveWhatIfPrefs_();drawWhatIf_()">${driverOptionsHtml_(l.driver)}</select></td>
-        ${shareMode ? `<td><input type="number" min="0" step="any" value="${esc(l.share)}" placeholder="平均" ${l.fixed !== '' && l.fixed !== undefined ? 'disabled' : ''} oninput="whatIfPrefs.multi.levers[${i}].share=this.value;saveWhatIfPrefs_()"></td>` : ''}
-        ${single ? '' : `<td><input type="number" min="0" step="any" value="${esc(l.capPct)}" placeholder="不限" ${l.fixed !== '' && l.fixed !== undefined ? 'disabled' : ''} oninput="whatIfPrefs.multi.levers[${i}].capPct=this.value;saveWhatIfPrefs_()"></td>
-        <td><input type="number" step="any" value="${esc(l.fixed)}" placeholder="反推" onchange="whatIfPrefs.multi.levers[${i}].fixed=this.value;saveWhatIfPrefs_();drawWhatIf_()"></td>
-        <td><button type="button" class="btn ghost icon sm" onclick="whatIfPrefs.multi.levers.splice(${i},1);saveWhatIfPrefs_();drawWhatIf_()" aria-label="刪除">✕</button></td>`}
+        <td><select class="lever-mode" onchange="whatIfPrefs.multi.levers[${i}].mode=this.value;saveWhatIfPrefs_();drawWhatIf_()">
+          ${Object.keys(LEVER_MODES_).map(k => `<option value="${k}"${l.mode === k ? ' selected' : ''}>${LEVER_MODES_[k]}</option>`).join('')}</select></td>
+        <td>${leverSettingHtml_(l, i, amountUnit)}</td>
+        <td><button type="button" class="btn ghost icon sm" onclick="whatIfPrefs.multi.levers.splice(${i},1);saveWhatIfPrefs_();drawWhatIf_()" aria-label="刪除">✕</button></td>
       </tr>`).join('')}</tbody></table></div>
     <div class="field-row" style="margin-top:8px;">
-      <button type="button" class="btn secondary sm" onclick="addLever_()"${single ? ' data-tip="多加幾項 = 缺口由這幾項一起分擔（組合拳）"' : ''}>＋ 加一個項目</button>
-      ${shareMode ? `<span class="help">分攤比例合計 ${fmt(totalShare)}%${totalShare && Math.abs(totalShare - 100) > 0.01 ? '（會自動換算成 100%）' : totalShare ? '' : '（都沒填 = 平均分攤）'}</span>` : ''}
+      <button type="button" class="btn secondary sm" onclick="addLever_()">＋ 加一個項目</button>
+      <span class="help">先套用「已知調整」，再依序算「負責金額」，剩下的缺口由「補足缺口」依列表順序補。拖曳 ⠿ 調整順序。</span>
       <span class="spacer"></span>
       <button type="button" class="btn" onclick="runMultiGoal_()">計算</button>
     </div>
@@ -11396,7 +11465,7 @@ function addLever_() {
   const used = whatIfPrefs.multi.levers.map(l => l.driver);
   const next = whatIfOptions.drivers.find(d => used.indexOf(driverKey_(d.driver)) === -1);
   if (!next) return;
-  whatIfPrefs.multi.levers.push({ driver: driverKey_(next.driver), share: '', capPct: '', fixed: '' });
+  whatIfPrefs.multi.levers.push(normLever_({ driver: driverKey_(next.driver), mode: 'fill' }));
   saveWhatIfPrefs_();
   drawWhatIf_();
 }
@@ -11412,44 +11481,51 @@ function installLeverSort_() {
 let lastMultiResult_ = null;
 function runMultiGoal_() {
   const m = whatIfPrefs.multi;
-  if (m.levers.length === 1) { runGoalSeek_(); return; }
+  // 只有一列補足缺口、沒有上限 = 單項反推：用 solveGoal，答案寫成一句話
+  if (m.levers.length === 1 && m.levers[0].mode === 'fill' && String(m.levers[0].capPct).trim() === '') { runGoalSeek_(); return; }
   const box = document.getElementById('wi-multi-result');
   box.innerHTML = '<p class="muted">計算中...（每一項都要反覆試算，項目多時會花幾秒）</p>';
-  const levers = m.levers.map(l => ({ driver: driverFromKey_(l.driver), share: l.share, capPct: l.capPct, fixed: l.fixed }));
+  const levers = m.levers.map(l => ({ driver: driverFromKey_(l.driver), mode: l.mode, by: l.by, known: l.known, amount: l.amount, capPct: l.capPct }));
   google.script.run
     .withSuccessHandler(safeHandler(r => { lastMultiResult_ = r; box.innerHTML = multiGoalResultHtml_(r); }))
     .withFailureHandler(err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; })
-    .solveGoalMulti(currentScenarioId, { code: m.metric, basis: m.basis }, num(m.target), levers, m.mode);
+    .solveGoalPlan(currentScenarioId, { code: m.metric, basis: m.basis }, num(m.target), levers);
 }
 function multiGoalSteps_(r) {
   const metric = whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis);
   return [{ label: '目前 ' + metric, value: r.metricBase, kind: 'total' }]
-    .concat(r.levers.map(l => ({ label: l.label, value: l.contribution, kind: 'delta',
-      tip: `${l.label}\n${fmt(l.base, Math.abs(l.base) < 100 ? 2 : 0)} → ${fmt(l.value, Math.abs(l.base) < 100 ? 2 : 0)} ${l.unit || ''}\n貢獻 ${l.contribution >= 0 ? '+' : ''}${fmt(l.contribution)}` })))
-    .concat([{ label: (r.feasible ? '達成 ' : '最多做到 ') + metric, value: r.achieved, kind: 'total' }]);
+    .concat(r.levers.filter(l => Math.abs(l.contribution) >= 0.5 || l.value !== l.base).map(l => ({ label: l.label, value: l.contribution, kind: 'delta',
+      tip: `${l.label}（${LEVER_MODES_[l.mode] || ''}）\n${fmt(l.base, Math.abs(l.base) < 100 ? 2 : 0)} → ${fmt(l.value, Math.abs(l.base) < 100 ? 2 : 0)} ${l.unit || ''}\n貢獻 ${l.contribution >= 0 ? '+' : ''}${fmt(l.contribution)}` })))
+    .concat([{ label: (r.feasible ? '達成 ' : '做到 ') + metric, value: r.achieved, kind: 'total' }]);
 }
 function multiGoalResultHtml_(r) {
   const total = r.achieved - r.metricBase;
   const dg = v => Math.abs(v) < 100 ? 2 : 0;
-  const head = r.feasible
-    ? `<div class="callout ok">可以達成：${esc(whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))} ${fmt(r.metricBase)} → <b>${fmt(r.achieved)}</b>（目標 ${fmt(r.target)}）${r.mode === 'equal' ? `，每一項都調 <b>${fmt(r.equalPct, 2)}%</b>` : ''}。</div>`
-    : `<div class="callout warn">${esc(r.message)}</div>`;
+  const metric = whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis);
+  const head = r.alreadyMet && r.reachedByKnown
+    ? `<div class="callout ok">目前就已經達到目標（${esc(metric)} 目前 ${fmt(r.metricBase)}，目標 ${fmt(r.target)}），補足缺口的項目不用動；表上是已知調整、負責金額套用後的結果。</div>`
+    : r.reachedByKnown
+    ? `<div class="callout ok">已知調整與負責金額就已經達到目標：${esc(metric)} ${fmt(r.metricBase)} → <b>${fmt(r.achieved)}</b>（目標 ${fmt(r.target)}），補足缺口的項目不用動。</div>`
+    : r.feasible
+      ? `<div class="callout ok">可以達成：${esc(metric)} ${fmt(r.metricBase)} → <b>${fmt(r.achieved)}</b>（目標 ${fmt(r.target)}）。</div>`
+      : `<div class="callout warn">${esc(r.message)}</div>`;
   return `${head}${(r.warnings || []).map(w => `<div class="callout warn">${esc(w)}</div>`).join('')}
     <div class="grid-scroll"><table class="grid-table lever-table">
-      <thead><tr><th>項目</th><th>目前</th><th>調整後</th><th>變動</th><th>對結果的貢獻</th><th>占總改善</th></tr></thead>
+      <thead><tr><th>項目</th><th>方式</th><th>目前</th><th>調整後</th><th>變動</th><th>對結果的貢獻</th><th>占總改善</th></tr></thead>
       <tbody>${r.levers.map(l => `<tr>
-        <td>${esc(l.label)}${l.fixed ? '<span class="lever-cap" style="background:#e2e8f0;color:#2d3748;">固定</span>' : ''}${l.capped ? '<span class="lever-cap">碰到上限</span>' : ''}</td>
+        <td>${esc(l.label)}${l.capped ? '<span class="lever-cap">碰到上限</span>' : ''}${l.note ? `<span class="lever-cap">${esc(l.note)}</span>` : ''}${l.mode === 'fill' && l.value === l.base ? '<span class="muted">（前面的項目已經補滿，不用動）</span>' : ''}</td>
+        <td>${esc(LEVER_MODES_[l.mode] || '')}</td>
         <td class="amt">${fmt(l.base, dg(l.base))} ${esc(l.unit || '')}</td>
         <td class="amt"><b>${fmt(l.value, dg(l.base))}</b> ${esc(l.unit || '')}</td>
         <td class="amt">${l.pct === null ? '' : signed_(l.pct, 2) + '%'}</td>
         <td class="amt${l.contribution < 0 ? ' negative' : ''}">${l.contribution >= 0 ? '+' : ''}${fmt(l.contribution)}</td>
         <td class="amt">${total ? (l.contribution / total * 100).toFixed(1) + '%' : ''}</td></tr>`).join('')}</tbody>
     </table></div>
-    <p class="help">貢獻依列表順序逐項加入計算（各項之間有交互作用，例如售價變動也會影響佣金與貨物稅），加總 = 總改善 ${total >= 0 ? '+' : ''}${fmt(total)}。拖曳 ⠿ 可以換順序。只在畫面上試算，不會改到存檔的數字。</p>
+    <p class="help">貢獻依列表順序逐項加入計算（各項之間有交互作用，例如售價變動也會影響佣金與貨物稅），加總 = 總改善 ${total >= 0 ? '+' : ''}${fmt(total)}。只在畫面上試算，不會改到存檔的數字。</p>
     <div class="waterfall-card">${wfSvg_(multiGoalSteps_(r), { width: 900, height: 320, labels: true, fmtV: wfShortFmt_(multiGoalSteps_(r)) })}</div>
     <div class="field-row" style="margin-top:8px;">
-      <button type="button" class="btn secondary sm" onclick="saveWhatIfScenarioDialog_(lastMultiResult_.levers.map(l => ({ driver: l.driver, value: l.value })), lastMultiResult_.levers.map(l => l.label).join('、'))">另存成新情境…</button>
-      <button type="button" class="btn secondary sm" onclick="openInWaterfallTool_(multiGoalSteps_(lastMultiResult_), '組合拳：' + whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))">在瀑布圖工具開啟（可編輯、下載 PNG）</button></div>`;
+      <button type="button" class="btn secondary sm" onclick="saveWhatIfScenarioDialog_(lastMultiResult_.levers.map(l => ({ driver: l.driver, value: l.value })), lastMultiResult_.levers.filter(l => l.value !== l.base).map(l => l.label).join('、'))">另存成新情境…</button>
+      <button type="button" class="btn secondary sm" onclick="openInWaterfallTool_(multiGoalSteps_(lastMultiResult_), '目標反推：' + whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))">在瀑布圖工具開啟（可編輯、下載 PNG）</button></div>`;
 }
 
 /**
@@ -11460,7 +11536,7 @@ function saveWhatIfScenarioDialog_(levers, summary) {
   const cur = currentScenario || {};
   openModal({
     title: '另存成新情境',
-    body: `<p class="help">複製「${esc(scenarioLabel(cur))}」的全部資料（銷售構成、成本、開發總投、費用、參數、說明、作法），再把這次反推的調整寫進去：<br><b>${esc(summary || '')}</b></p>`,
+    body: `<p class="help">複製「${esc(scenarioLabel(cur))}」的全部資料（銷售構成、成本、開發總投、費用、參數、報告說明、作法），再把這次反推的調整寫進去：<br><b>${esc(summary || '')}</b></p>`,
     fields: [
       { name: 'Gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, value: cur.Gate || 'GATE F' },
       { name: 'ScenarioName', label: '情境名稱', value: (cur.ScenarioName || '') + ' 反推' },
@@ -11845,6 +11921,8 @@ function drawWaterfallTool_() {
       <p class="help">加權平均營業淨利（元/台）：現況 → 目標情境每一項作法的效果 → 目標；作法加總跟實際差異對不起來的部分單獨一根。</p>`;
   }
   const lineOpts = p.mode === 'bridge' || p.mode === 'structure';
+  // 不常改的選項收在「進階」；改過(不是預設值)就展開，才不會忘了自己設過
+  const advOpen = p.sort !== 'pl' || num(p.topN) > 0 || num(p.minAbs) > 0 || !p.labels || !!String(wfTitle_()).trim();
   body.innerHTML = `
     <div class="card">
       <div class="field-row">${seg('mode', modes, p.mode)}</div>
@@ -11854,17 +11932,20 @@ function drawWaterfallTool_() {
         ${lineOpts ? `<label class="field"><span>畫到</span><select id="wf-end" onchange="wfPrefs.end=this.value;saveWfPrefs_();runWaterfall_()"></select></label>
           <label class="field"><span>明細程度</span>${seg('level', [['major', '大項'], ['detail', '明細科目']], p.level)}</label>
           <label class="field"><span>數值</span>${seg('basis', [['unit', '單台'], ['year', '年度'], ['lc', 'LC 總額']], p.basis)}</label>` : ''}
-        <label class="field"><span>金額單位</span>${seg('unit', [[1, '元'], [1000, '千元'], [10000, '萬元']], p.unit)}</label>
-        ${p.mode !== 'manual' ? `<label class="field"><span>排序</span>${seg('sort', [['pl', '損益表順序'], ['abs', '影響大到小']], p.sort)}</label>
-          <label class="field"><span>最多顯示幾項（0 = 全部）</span><input type="number" min="0" style="width:90px;" value="${esc(p.topN)}" onchange="wfPrefs.topN=this.value;saveWfPrefs_();runWaterfall_()"></label>
-          <label class="field"><span>小於多少併入「其他」</span><input type="number" min="0" style="width:110px;" value="${esc(p.minAbs)}" onchange="wfPrefs.minAbs=this.value;saveWfPrefs_();runWaterfall_()"></label>` : ''}
-      </div>
-      <div class="field-row">
+        <label class="field" data-tip="全系統共用：儀表板、GATE 報告、瀑布圖工具用同一個金額單位"><span>金額單位</span>${seg('unit', [[1, '元'], [1000, '千元'], [10000, '萬元']], p.unit)}</label>
         ${p.mode === 'bridge' && p.basis !== 'unit' ? chk('volumeEffect', '拆出「銷量影響」') : ''}
         ${p.mode === 'structure' ? chk('subtotals', '顯示中間小計（生產毛利、銷貨毛利…）') : ''}
-        ${chk('labels', '顯示數字')}
-        <label class="field grow"><span>圖表標題（留空 = 自動）</span><input type="text" id="wf-title" value="${esc(wfTitle_())}" placeholder="自動" oninput="wfSetTitle_(this.value);saveWfPrefs_();wfRedraw_()"></label>
       </div>
+      <details class="ed-adv wf-adv"${advOpen ? ' open' : ''}>
+        <summary>進階（排序、顯示幾項、數字標籤、圖表標題）</summary>
+        <div class="field-row">
+          ${p.mode !== 'manual' ? `<label class="field"><span>排序</span>${seg('sort', [['pl', '損益表順序'], ['abs', '影響大到小']], p.sort)}</label>
+            <label class="field"><span>最多顯示幾項（0 = 全部）</span><input type="number" min="0" style="width:90px;" value="${esc(p.topN)}" onchange="wfPrefs.topN=this.value;saveWfPrefs_();runWaterfall_()"></label>
+            <label class="field"><span>小於多少併入「其他」</span><input type="number" min="0" style="width:110px;" value="${esc(p.minAbs)}" onchange="wfPrefs.minAbs=this.value;saveWfPrefs_();runWaterfall_()"></label>` : ''}
+          ${chk('labels', '顯示數字')}
+          <label class="field grow"><span>圖表標題（留空 = 自動）</span><input type="text" id="wf-title" value="${esc(wfTitle_())}" placeholder="自動" oninput="wfSetTitle_(this.value);saveWfPrefs_();wfRedraw_()"></label>
+        </div>
+      </details>
     </div>
     <div class="card">
       <div class="card-head"><h3 id="wf-heading">瀑布圖</h3><span class="spacer"></span>

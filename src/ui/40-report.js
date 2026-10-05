@@ -61,6 +61,7 @@ function renderReportPanel() {
     return;
   }
   loadReportPrefs_();
+  loadWhatIfPrefs_();
   defaultReportSel_();
   const opt = (id, allowEmpty, emptyText) => (allowEmpty ? `<option value="">${emptyText}</option>` : '') +
     scenarioCache.map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === id ? ' selected' : ''}>${esc(scenarioLabel(s))}（${esc(s.ScenarioType || '現況')}）</option>`).join('');
@@ -76,12 +77,13 @@ function renderReportPanel() {
         <label class="field" data-tip="全系統共用：儀表板、GATE 報告、瀑布圖工具用同一個金額單位"><span>金額單位</span><div class="seg">
           ${AMOUNT_UNITS_.map(([u, t]) => `<button type="button" class="seg-btn${reportUnit === u ? ' active' : ''}" data-unit="${u}" onclick="setReportUnit(${u})">${t}/台</button>`).join('')}</div></label>
         <label class="chk" style="align-self:center;"><input type="checkbox" ${reportShowPrice ? 'checked' : ''} onchange="reportShowPrice=this.checked;saveReportPrefs_();drawReport_()"> 顯示售價結構</label>
+        <label class="chk" style="align-self:center;" data-tip="兩項假設、看哪個結果，在「目標反推與敏感度」頁設定"><input type="checkbox" ${whatIfPrefs.sens.inReport ? 'checked' : ''} onchange="whatIfPrefs.sens.inReport=this.checked;saveWhatIfPrefs_();drawReport_()"> 附敏感度分析</label>
         <span style="flex:1"></span>
         <button type="button" class="btn secondary" onclick="createSnapshotDialog_(reportSel.target, (scenarioCache.find(s => s.ScenarioID === reportSel.target) || {}).ScenarioName ? scenarioLabel(scenarioCache.find(s => s.ScenarioID === reportSel.target)) : '')" data-tip="把目標情境現在的數字存一份，之後可以比較改了什麼">存成快照</button>
         <button type="button" class="btn secondary" onclick="loadReport_()">重新計算</button>
         <button type="button" class="btn" onclick="printReport_()">列印 / 存成 PDF</button>
       </div>
-      <p class="help" style="margin:10px 0 0;">每一張卡片是一頁 16:9 投影片，列印時每頁一張。「說明」欄可以直接點進去改（會存回該情境的科目說明，銷貨成本頁的說明欄也是同一份）；作法清單可以拖曳 ⠿ 排序。每張右上角的「複製」可以把表格貼進 PowerPoint / Excel。</p>
+      <p class="help" style="margin:10px 0 0;">每一張卡片是一頁 16:9 投影片，列印時每頁一張。「說明」欄可以直接點進去改（就是銷貨成本、營業費用頁的「報告說明」，改哪邊都是同一份）；作法清單可以拖曳 ⠿ 排序。每張右上角的「複製」可以把表格貼進 PowerPoint / Excel。</p>
     </div>
     <div id="report-body"><p class="muted">計算中...</p></div>`;
   loadReport_();
