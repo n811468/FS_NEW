@@ -81,6 +81,15 @@ async function main() {
   assert(/目標成本作法/.test(await page.textContent('#panel-report')), 'GATE 報告應該有「目標成本作法」');
   assert(/差距/.test(await page.textContent('#panel-report .slide')), '報告第一頁應該有現況與目標的差距');
 
+  // 目前情境就是報告的目標情境、這次開頁還沒進過「目標反推」頁：敏感度投影片也要畫得出來
+  const targetScenario = await page.$$eval('#scenario-selector option', os => (os.find(o => /目標/.test(o.textContent)) || {}).value);
+  await page.selectOption('#scenario-selector', targetScenario);
+  await page.click('nav button[data-tab="report"]');
+  await page.waitForFunction(() => document.querySelector('#rpt-sens .sens-table') || document.querySelector('#rpt-sens .callout.err') ||
+    (document.getElementById('global-error') && document.getElementById('global-error').offsetParent), null, { timeout: 15000 });
+  assert(!(await page.isVisible('#global-error')), '目標情境開 GATE 報告顯示錯誤：' + (await page.textContent('#global-error')));
+  assert(await page.$('#rpt-sens .sens-table'), '目標情境開 GATE 報告時，敏感度投影片應該有表格');
+
   // v2：科目與公式 —— 改季Margin 的公式，Ctrl+S 存檔，後端真的換成新公式
   await page.click('nav button[data-tab="lineitems"]');
   await page.waitForSelector('.tree-row:has-text("季Margin")');
