@@ -362,6 +362,16 @@ function matrixLineName(line) {
  * 對得起來就只顯示一行綠字，對不起來才把差異列出來。
  */
 function subtotalCheckHtml(cols) {
+  return noVolumeWarnHtml_(cols) + subtotalCheckInner_(cols);
+}
+/** 只填構成比、沒填月台數或 LC 年限：LC 總台數 = 0，開發總投攤提「÷ 0 = 0」，單台淨利會偏高卻看不出來 */
+function noVolumeWarnHtml_(cols) {
+  const zero = cols.filter(c => c.volume && !(num(c.volume.units) > 0) && num(c.revenue) !== 0);
+  if (!zero.length) return '';
+  return `<div class="callout warn"><div>${zero.map(c => esc(c.label)).join('、')} 的 LC 總台數是 0（銷售構成還沒填月台數或 LC 年限），
+    開發總投攤提會算成 0，單台淨利會偏高。到 <button type="button" class="link-btn" onclick="switchTab('salesmix')">銷售構成與售價</button> 補上月台數與 LC 年限。</div></div>`;
+}
+function subtotalCheckInner_(cols) {
   const bad = cols.filter(c => (c.checks || []).length);
   if (!bad.length) {
     return '<p class="status-msg ok" data-tip="每一段的明細加總都等於它的小計：&#10;收入 = 廠價 + 強配收入&#10;銷貨成本 = Σ成本明細&#10;生產毛利 = 收入 − 銷貨成本&#10;銷貨毛利 = 生產毛利 − Σ銷售費用&#10;產品貢獻 = 銷貨毛利 − Σ產品貢獻前費用&#10;營業淨利(未扣前瞻) = 產品貢獻 − Σ固定營業費用&#10;營業淨利 = 營業淨利(未扣前瞻) − 前瞻費用">✔ 小計驗算通過（滑鼠移過來看驗算了哪些等式）</p>';

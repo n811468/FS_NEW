@@ -269,6 +269,11 @@ check('損益兩平點很低時(遠低於目前銷量)也找得到；假設銷�
   near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '還原後數字不變', 0.01);
 });
 
+check('公式試算(邊打邊算)就要抓到循環引用，不是存檔才發現', () => {
+  const pv = gs.previewLineFormula('DA', sid, { LineCode: '', LineName: '循環測試', ParentLine: 'B', CalcType: 'FORMULA', Formula: '[生產毛利] * 1%' });
+  assert(pv.problems.length && /循環引用/.test(pv.problems[0].message), '新科目引用生產毛利(又被算進銷貨成本)應該當場報循環引用：' + JSON.stringify(pv.problems));
+});
+
 check('從 Excel 匯入整張表：名稱對應、新增缺少的科目、略過公式科目', () => {
   const rep = gs.importMatrixRows(sid, 'DA', 'cost', [
     { name: '材料成本 - LP', values: { V1: 433466, V2: 506850 } },

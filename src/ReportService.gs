@@ -20,6 +20,30 @@ function scenarioMeta_(scenarioId) {
   };
 }
 
+/** 情境快照當成報告的一個區塊(跟 reportScenarioBlock_ 同樣的欄位；快照沒有說明與開發總投明細) */
+function snapshotReportBlock_(snapId) {
+  var d = snapshotData_(String(snapId).slice(SNAPSHOT_PREFIX.length));
+  if (!d) throw new Error('找不到快照（可能已被刪除）');
+  var w = d.columns.filter(function (c) { return !c.vehicleId; })[0] || { amounts: {}, volume: { monthlyVolume: 0, units: 0 } };
+  var vol = w.volume || { monthlyVolume: 0, units: 0 };
+  return {
+    meta: { ScenarioID: snapId, VehicleTypeID: d.scenario.VehicleTypeID || '', Gate: d.scenario.Gate || '', ScenarioName: d.scenario.ScenarioName || '',
+      ScenarioType: d.scenario.ScenarioType || '', Notes: d.meta.Notes || '', label: snapshotLabel_(d) },
+    vehicles: d.columns.filter(function (c) { return c.vehicleId; }).map(function (c) {
+      var v = c.volume || {};
+      return { VehicleID: c.vehicleId, VehicleCode: c.vehicleLabel || c.vehicleId, salesMixPct: toNumber_(v.salesMixPct),
+        monthlyVolume: toNumber_(v.monthlyVolume), lifeCycleYears: toNumber_(v.lifeCycleYears), amounts: c.amounts };
+    }),
+    weighted: w.amounts || {},
+    volume: vol,
+    lifeCycleUnits: toNumber_(vol.units),
+    notes: {}, errors: {},
+    dev: { rows: [], total: { mold: 0, equip: 0, expense: 0, other: 0, total: 0, reduced: 0 }, lifeCycleUnits: toNumber_(vol.units) },
+    isSnapshot: true,
+    snapshotLines: d.lines.map(function (l) { var c = {}; Object.keys(l).forEach(function (k) { c[k] = l[k]; }); c.SortOrder = toNumber_(l.SortOrder); return c; })
+  };
+}
+
 /** 一個情境的完整損益：各車系 + 加權平均 + 銷量 + 說明 + 開發總投彙總 */
 function reportScenarioBlock_(scenarioId) {
   var meta = scenarioMeta_(scenarioId);
@@ -112,7 +136,8 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
   if (!targetScenarioId) throw new Error('請選擇目標情境');
   var target = reportScenarioBlock_(targetScenarioId);
   var base = baseScenarioId ? reportScenarioBlock_(baseScenarioId) : null;
-  var prev = prevScenarioId ? reportScenarioBlock_(prevScenarioId) : null;
+  // 前回可以是情境快照(上次審議時存的那一版)：快照存的是計算結果，直接拿來比
+  var prev = !prevScenarioId ? null : isSnapshotId_(prevScenarioId) ? snapshotReportBlock_(prevScenarioId) : reportScenarioBlock_(prevScenarioId);
   // 損益兩平月銷量：月銷量要多少台營業淨利才會是 0(攤提台數跟著變)
   target.breakEvenVolume = breakEvenVolume_(targetScenarioId);
   if (base) base.breakEvenVolume = breakEvenVolume_(baseScenarioId);
@@ -120,9 +145,11 @@ function getGateReport(baseScenarioId, targetScenarioId, prevScenarioId) {
   var types = [target.meta.VehicleTypeID];
   if (base) types.push(base.meta.VehicleTypeID);
   if (prev) types.push(prev.meta.VehicleTypeID);
-  var defs = unionLineDefs_(types.map(function (t) { return getPLLineItems(t); }));
+  var defLists = types.map(function (t) { return getPLLineItems(t); });
+  if (prev && prev.snapshotLines) defLists.push(prev.snapshotLines);   // 快照當時有、現在已刪掉的科目也要列得出來
+  var defs = unionLineDefs_(defLists);
   // 每個情境看自己車型的營業淨利科目(現況/前回可能是別的車型，K 還在或已經換成別的科目)
-  [target, base, prev].forEach(function (b) { if (b) b.profitCode = profitLineCode_(getPLLineItems(b.meta.VehicleTypeID)); });
+  [target, base, prev].forEach(function (b) { if (b) b.profitCode = profitLineCode_(b.snapshotLines || getPLLineItems(b.meta.VehicleTypeID)); });
   var profitCode = target.profitCode;
   var profitCodes = {};
   [target, base, prev].forEach(function (b) { if (b) profitCodes[b.profitCode] = true; });

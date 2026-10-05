@@ -363,6 +363,34 @@ check('刪除情境、刪除車系：底下的資料一起刪掉', () => {
   assert(!gs.getSalesMix(base.ScenarioID).some(r => r.VehicleID === 'DV_X'), '刪掉的車系不該留下銷售構成');
 });
 
+check('改車型/車系代號後，情境快照還在、而且對得到新的車系代號；GATE 報告的前回可以選快照', () => {
+  gs.createVehicleType('SNAP_T', '', '');
+  gs.saveVehicleGrid('SNAP_T', [{ VehicleID: 'SNAP_V', VehicleCode: '快照車系' }]);
+  const sc = gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE F', ScenarioName: '快照測試', ScenarioType: '目標', VehicleTypeID: 'SNAP_T' }, '', []);
+  gs.saveSalesMixRow({ RowID: '', ScenarioID: sc.ScenarioID, VehicleID: 'SNAP_V', SalesMixPct: 100, MonthlyVolume: 10, LifeCycleYears: 5, ListPriceTaxIncl: 900000 });
+  gs.createSnapshot(sc.ScenarioID, '審議版', '');
+  gs.renameVehicleType('SNAP_T', 'SNAP_T2');
+  const list = gs.getSnapshots('SNAP_T2');
+  assertEqual(list.length, 1, '改車型代號後快照清單');
+  gs.renameVehicle('SNAP_T2', 'SNAP_V', 'SNAP_V2');
+  const cmp = gs.calculateComparison([{ ScenarioID: 'snap:' + list[0].SnapshotID, VehicleID: 'SNAP_V2' }]);
+  assert(cmp.columns[0].amounts.A > 0, '改車系代號後，快照的車系欄位要對得到新代號');
+  const rpt = gs.getGateReport('', sc.ScenarioID, 'snap:' + list[0].SnapshotID);
+  assert(rpt.prev && /快照/.test(rpt.prev.meta.label) && rpt.prev.weighted.A > 0, '前回選快照時應該有快照的數字：' + JSON.stringify(rpt.prev && rpt.prev.meta));
+  gs.deleteVehicleType('SNAP_T2');
+});
+
+check('情境名稱在同一個車型、同一個 GATE 不能重複（新增、表格存檔、另存成新情境都擋）', () => {
+  const throws = (fn, msg) => { try { fn(); } catch (e) { assert(/已經有一個/.test(e.message), msg + '：' + e.message); return; } throw new Error(msg + '：沒有擋下'); };
+  throws(() => gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE F', ScenarioName: '現況', ScenarioType: '現況', VehicleTypeID: 'DA' }, '', []), '新增同名情境');
+  const rows = gs.getScenarios('DA').map(r => Object.assign({}, r));
+  rows.push({ ScenarioID: '', Gate: 'GATE F', ScenarioName: '現況', ScenarioType: '現況' });
+  throws(() => gs.saveScenarioGrid('DA', rows), '表格多一列同名');
+  const other = gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE E', ScenarioName: '現況', ScenarioType: '現況', VehicleTypeID: 'DA' }, '', []);
+  assert(other.ScenarioID, '不同 GATE 可以同名');
+  gs.deleteScenario(other.ScenarioID);
+});
+
 const failed = results.filter(r => !r.ok);
 results.forEach(r => console.log((r.ok ? '  ✓ ' : '  ✗ ') + r.name + (r.ok ? '' : ' — ' + r.message)));
 console.log('');

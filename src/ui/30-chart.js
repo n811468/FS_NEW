@@ -604,7 +604,7 @@ function renderChartPreview_() {
   if (st && chartDraft && chartDraft.CalcType === 'FORMULA') {
     const probs = chartPreview && chartPreview.problems || [];
     if (!String(chartDraft.Formula || '').trim()) { st.className = 'formula-status'; st.innerHTML = ''; }
-    else if (probs.length) { st.className = 'formula-status err'; st.textContent = '✘ ' + probs.map(p => p.message.replace(/^「[^」]*」/, '')).join('；'); }
+    else if (probs.length) { st.className = 'formula-status err'; st.textContent = '✘ ' + probs.map(p => p.message.replace(/^「[^」]*」的?\s*/, '')).join('；'); }
     else if (chartPreview) { st.className = 'formula-status ok'; st.innerHTML = '✔ ' + formulaReadableHtml_(chartDraft.Formula); }
   }
   fxRefreshValues_();

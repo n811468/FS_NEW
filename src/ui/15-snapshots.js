@@ -5,7 +5,8 @@
 function createSnapshotDialog_(scenarioId, label) {
   if (!scenarioId) { toast('請先選擇情境', 'warn'); return; }
   const d = new Date();
-  const today = `${d.getMonth() + 1}/${d.getDate()}`;
+  // 預設名稱帶時間：同一天存好幾份時，清單上才分得出來
+  const today = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   openModal({
     title: '存成情境快照',
     body: `<p class="help">把「${esc(label || '')}」目前算出來的損益（加權平均與每個車系）存一份。之後輸入資料怎麼改都不影響快照，
