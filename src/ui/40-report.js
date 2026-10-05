@@ -44,7 +44,7 @@ function defaultReportSel_() {
     reportSel.target = cur && cur.ScenarioType === '目標' ? cur.ScenarioID : (targets.length ? targets[targets.length - 1].ScenarioID : (cur ? cur.ScenarioID : (ids[0] || '')));
   }
   if (reportSel.base && !valid(reportSel.base)) reportSel.base = '';
-  if (reportSel.prev && !valid(reportSel.prev)) reportSel.prev = '';
+  if (reportSel.prev && !valid(reportSel.prev) && String(reportSel.prev).indexOf('snap:') !== 0) reportSel.prev = '';
   if (!reportSel.base) {
     const t = scs.find(s => s.ScenarioID === reportSel.target);
     const base = scs.find(s => s.ScenarioType !== '目標' && t && s.Gate === t.Gate && s.ScenarioID !== t.ScenarioID) ||
@@ -71,7 +71,7 @@ function renderReportPanel() {
         <label class="field rpt-pick base"><span><i class="rpt-dot"></i>現況（差距的比較基準）</span><select id="rpt-sel-base" onchange="setReportSel('base', this.value)">${opt(reportSel.base, true, '（不比較）')}</select></label>
         <span class="rpt-arrow" aria-hidden="true">→</span>
         <label class="field rpt-pick target"><span><i class="rpt-dot"></i>目標 / 本回</span><select id="rpt-sel-target" onchange="setReportSel('target', this.value)">${opt(reportSel.target)}</select></label>
-        <label class="field rpt-pick prev"><span>前回（選填，跟本回比）</span><select id="rpt-sel-prev" onchange="setReportSel('prev', this.value)">${opt(reportSel.prev, true, '（不比較）')}</select></label>
+        <label class="field rpt-pick prev"><span>前回（選填，跟本回比；可以選情境快照）</span><select id="rpt-sel-prev" onchange="setReportSel('prev', this.value)">${opt(reportSel.prev, true, '（不比較）')}</select></label>
       </div>
       <div class="report-controls" style="margin-top:12px;">
         <label class="field" data-tip="全系統共用：儀表板、GATE 報告、瀑布圖工具用同一個金額單位"><span>金額單位</span><div class="seg">
@@ -86,7 +86,27 @@ function renderReportPanel() {
       <p class="help" style="margin:10px 0 0;">每一張卡片是一頁 16:9 投影片，列印時每頁一張。「說明」欄可以直接點進去改（就是銷貨成本、營業費用頁的「報告說明」，改哪邊都是同一份）；作法清單可以拖曳 ⠿ 排序。每張右上角的「複製」可以把表格貼進 PowerPoint / Excel。</p>
     </div>
     <div id="report-body"><p class="muted">計算中...</p></div>`;
+  loadReportSnapshotOptions_();
   loadReport_();
+}
+/** 前回的選單加上這個車型的情境快照(審議那一版通常就存成快照) */
+function loadReportSnapshotOptions_() {
+  const vt = currentVehicleTypeId;
+  google.script.run.withSuccessHandler(safeHandler(list => {
+    const sel = document.getElementById('rpt-sel-prev');
+    if (!sel || vt !== currentVehicleTypeId || !(list || []).length) return;
+    const g = document.createElement('optgroup');
+    g.label = '情境快照（歷史版本）';
+    list.forEach(sn => {
+      const o = document.createElement('option');
+      o.value = 'snap:' + sn.SnapshotID;
+      o.textContent = `${sn.scenarioLabel || ''}［快照 ${sn.SnapshotName}${sn.CreatedAt ? ' ' + String(sn.CreatedAt).slice(5, 10).replace('-', '/') : ''}］`;
+      g.appendChild(o);
+    });
+    sel.appendChild(g);
+    sel.value = reportSel.prev || '';
+    if (sel.value !== (reportSel.prev || '')) { reportSel.prev = ''; sel.value = ''; }   // 快照已經被刪掉
+  })).withFailureHandler(() => {}).getSnapshots(vt);
 }
 
 function setReportSel(field, value) {

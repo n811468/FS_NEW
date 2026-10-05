@@ -134,6 +134,13 @@ function renameVehicleType(oldId, newId) {
       rows.forEach(function (r) { r.VehicleTypeID = newId; });
       if (rows.length) batchWriteRows_(sheetName, pk, rows, []);
     });
+    // 情境快照也記著車型代號(欄位 + 快照內容)，沒改的話改名後快照清單就看不到了
+    updateSnapshots_(function (row, data) {
+      if (row.VehicleTypeID !== oldId) return false;
+      row.VehicleTypeID = newId;
+      if (data && data.scenario && data.scenario.VehicleTypeID === oldId) data.scenario.VehicleTypeID = newId;
+      return true;
+    });
     // 科目表的主鍵含車型代號，要整份換成新代號
     var chart = (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) { return r.VehicleTypeID === oldId; });
     if (chart.length) {
@@ -149,6 +156,24 @@ function renameVehicleType(oldId, newId) {
     }
     return getVehicleTypes();
   });
+}
+
+/** 逐一檢查情境快照：fn(row, 解開的快照內容) 回傳 true 就把改過的列(含內容)寫回 */
+function updateSnapshots_(fn) {
+  if (!sheetExists_(SHEETS.SNAPSHOTS)) return;
+  var changed = [];
+  (sheetToObjects_(SHEETS.SNAPSHOTS) || []).forEach(function (row) {
+    var data = null;
+    try { data = JSON.parse(row.Data); } catch (e) { data = null; }
+    if (fn(row, data)) {
+      if (data) row.Data = JSON.stringify(data);
+      changed.push(row);
+    }
+  });
+  if (changed.length) {
+    batchWriteRows_(SHEETS.SNAPSHOTS, 'SnapshotID', changed, []);
+    if (typeof SNAPSHOT_MEMO_ !== 'undefined') Object.keys(SNAPSHOT_MEMO_).forEach(function (k) { delete SNAPSHOT_MEMO_[k]; });
+  }
 }
 
 // ---- Vehicles（車系，如 標準型/豪華型，隸屬某個 VehicleType） ----
@@ -279,6 +304,15 @@ function renameVehicle(vehicleTypeId, oldId, newId) {
       r.VehicleFormulas = JSON.stringify(vf);
     });
     if (lines.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', lines, []);
+    // 快照裡每個車系一欄，欄位記著車系代號：改成新代號，快照才對得到現在的車系
+    updateSnapshots_(function (row, data) {
+      if (!data || !data.columns) return false;
+      var hit = false;
+      data.columns.forEach(function (c) {
+        if (c.vehicleId === oldId) { c.vehicleId = newId; hit = true; }
+      });
+      return hit;
+    });
     return getVehicles(vehicleTypeId);
   });
 }
@@ -296,9 +330,24 @@ function validateScenarioRow_(rowObj) {
   if (!rowObj.Gate) throw new Error('請選擇 GATE 別');
   if (GATE_OPTIONS.indexOf(rowObj.Gate) === -1) throw new Error('GATE 別不正確：' + rowObj.Gate);
 }
+/** 同一個車型裡「GATE 別 + 情境名稱」不能重複：選單上會出現兩個一模一樣的選項，分不出來 */
+function assertUniqueScenarioNames_(vehicleTypeId, rows) {
+  var byId = {};
+  getScenarios(vehicleTypeId).forEach(function (sc) { byId[sc.ScenarioID] = sc; });
+  (rows || []).forEach(function (r) { if (r.ScenarioID) byId[r.ScenarioID] = r; });
+  var all = Object.keys(byId).map(function (k) { return byId[k]; }).concat((rows || []).filter(function (r) { return !r.ScenarioID; }));
+  var seen = {};
+  all.forEach(function (r) {
+    var key = (r.Gate || '') + ' ' + String(r.ScenarioName || '').trim();
+    if (!String(r.ScenarioName || '').trim()) return;
+    if (seen[key]) throw new Error('已經有一個「' + key + '」，情境名稱請取不一樣的（例如加上日期或版次）');
+    seen[key] = true;
+  });
+}
 function saveScenario(rowObj) {
   return withLock_(function () {
     validateScenarioRow_(rowObj);
+    if (rowObj.VehicleTypeID) assertUniqueScenarioNames_(rowObj.VehicleTypeID, [rowObj]);
     // 用合併式 upsert：情境表單沒有攤提基準台數欄位，直接覆寫會把開發總投頁設定的值清掉
     return upsertRowMerge_(SHEETS.SCENARIOS, 'ScenarioID', rowObj);
   });
@@ -322,6 +371,7 @@ function saveScenarioGrid(vehicleTypeId, rows) {
       validateScenarioRow_(r);
       upserts.push(mergeRowForBatch_(SHEETS.SCENARIOS, 'ScenarioID', r, existingByPk));
     });
+    assertUniqueScenarioNames_(vehicleTypeId, upserts);
     batchWriteRows_(SHEETS.SCENARIOS, 'ScenarioID', upserts, []);
     return getScenarios(vehicleTypeId);
   });
@@ -502,6 +552,10 @@ function saveAmountMatrix_(sheetName, scenarioId, cells, lineNotes) {
 function getCostOfSalesMatrix(scenarioId, vehicleTypeId) {
   var matrix = buildAmountMatrix_(SHEETS.COST_OF_SALES, scenarioId, vehicleTypeId, getCostOfSalesLineOptions(vehicleTypeId));
   matrix.currencies = getConfiguredCurrencies(scenarioId);
+  // 各幣別的匯率(全車系)：畫面上的加權平均與合計換算成台幣，才會跟儀表板一致
+  var params = getParameters(scenarioId);
+  matrix.fxRates = {};
+  matrix.currencies.forEach(function (c) { matrix.fxRates[c] = fxRateFor_(params, c, ''); });
   var auto = getCostOfSalesAutoLines(scenarioId, matrix.vehicles);
   matrix.autoLines = auto.lines;
   matrix.autoValues = auto.values;

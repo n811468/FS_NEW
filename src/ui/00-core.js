@@ -366,7 +366,7 @@ function isDirty_() { return !!dirtyState_; }
 function confirmLeave_() {
   if (!dirtyState_) return Promise.resolve(true);
   return openModal({
-    title: '有尚未儲存的修改', body: '<p>這一頁還有修改沒有儲存，要先儲存嗎？</p>',
+    title: '有尚未儲存的修改', body: '<p>這一頁還有修改沒有儲存。要保留的話，按「留在這一頁」再按儲存（Ctrl+S）；離開的話這些修改會被丟掉。</p>',
     okText: '放棄修改並離開', danger: true, cancelText: '留在這一頁'
   }).then(ok => { if (ok) clearDirty(); return !!ok; });
 }

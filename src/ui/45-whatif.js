@@ -124,7 +124,11 @@ function whatIfPreset_(kind) {
     Object.assign(m, { metric: profit, basis: 'unit', target: Math.max(0, Math.round((whatIfOptions.metrics.find(x => x.code === profit) || {}).value || 0)),
       levers: one(lines.length ? driverKey_(lines[0].driver) : 'volume') });
   }
-  if (kind === 'combo') Object.assign(m, { metric: profit, levers: defaultLevers_() });
+  if (kind === 'combo') {
+    // 目前已經賺錢時目標 0 沒有意義(補足缺口的項目都不會動)：範例改成「單台淨利再多 10%」
+    const cur = (whatIfOptions.metrics.find(x => x.code === profit) || {}).value || 0;
+    Object.assign(m, { metric: profit, basis: 'unit', target: cur > 0 ? Math.round(cur * 1.1 / 1000) * 1000 : 0, levers: defaultLevers_() });
+  }
   saveWhatIfPrefs_();
   drawWhatIf_();
   if (kind !== 'combo') runMultiGoal_();

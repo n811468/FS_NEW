@@ -722,7 +722,7 @@ function chartProblems_(defs, vehicleTypeId) {
   defs.forEach(function (d) { visit(d.LineCode, []); });
   cycles.forEach(function (cyc) {
     problems.push({
-      level: 'error', code: cyc[0],
+      level: 'error', code: cyc[0], codes: cyc,
       message: '循環引用：' + cyc.map(function (c) { return byCode[c] ? byCode[c].LineName : c; }).join(' → ') + '（公式互相引用，算不出結果）'
     });
   });
@@ -862,7 +862,10 @@ function previewLineFormula(vehicleTypeId, scenarioId, line) {
   var patched = line.LineCode
     ? defs.map(function (d) { return d.LineCode === line.LineCode ? patchLine(d) : d; })
     : defs.concat([patchLine({ LineCode: code, LineName: String(line.LineName || '').trim() || code, ParentLine: '', SortOrder: 9999 })]);
-  var problems = chartProblems_(patched, vehicleTypeId).filter(function (p) { return p.code === code && p.level === 'error'; });
+  // 循環引用記在環上第一個科目，但環上每一個科目都算「這個公式有問題」：正在編輯的科目在環上就要邊打邊顯示 ✘
+  var problems = chartProblems_(patched, vehicleTypeId).filter(function (p) {
+    return p.level === 'error' && (p.code === code || (p.codes || []).indexOf(code) !== -1);
+  });
   if (!scenarioId) return { problems: problems, preview: null };
   var vehicles = getVehicles(vehicleTypeId).map(function (v) { return { VehicleID: v.VehicleID, VehicleCode: v.VehicleCode || '' }; });
   var probe = Array.isArray(line.Probes) && line.Probes.length ? { code: code, formulas: line.Probes.slice(0, 80).map(String) } : null;

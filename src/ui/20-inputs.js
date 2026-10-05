@@ -73,7 +73,8 @@ function drawSalesMixGrid() {
         <td colspan="6"></td>
       </tr></tfoot>
     </table>
-    </div>`;
+    </div>
+    <div id="sm-warn"></div>`;
   updateSalesMixTotals();
 }
 
@@ -148,6 +149,15 @@ function updateSalesMixTotals() {
   if (unitCell) unitCell.textContent = fmt(sumUnits);
   const lcCell = document.getElementById('sm-sum-lc');
   if (lcCell) lcCell.textContent = fmt(sumLc);
+  // LC 總台數是 0：開發總投攤提會「÷ 0 = 0」，損益表看起來正常、其實少算了攤提
+  const warn = document.getElementById('sm-warn');
+  if (warn) {
+    const noYears = salesMixRows.filter(r => num(r.MonthlyVolume) > 0 && !(num(r.LifeCycleYears) > 0));
+    const msg = sumPct > 0 && !(sumUnits > 0)
+      ? '還沒有月台數：先在上方填「車型月總台數」（構成比會自動換算成各車系台數），或直接填各車系的月台數。'
+      : noYears.length ? `${noYears.map(r => esc(r.VehicleCode || r.VehicleID)).join('、')} 還沒填 LC 年限。` : '';
+    warn.innerHTML = msg ? `<div class="callout warn" style="margin-top:10px;"><div>${msg}LC 總台數是 0 時，開發總投攤提會算成 0，單台淨利會偏高。</div></div>` : '';
+  }
 }
 
 function saveSalesMixGrid() {
@@ -274,7 +284,7 @@ function drawMatrix(key) {
     const cur = firstCellProp(data, line.value, 'Currency') || 'TWD';
     const opts = (data.currencies || ['TWD']).slice();
     if (opts.indexOf(cur) === -1) opts.push(cur);
-    return `<td><select id="${key}-cur-${esc(line.value)}" onchange="matrixDirty_('${key}')">
+    return `<td><select id="${key}-cur-${esc(line.value)}" onchange="updateMatrixTotals('${key}'); matrixDirty_('${key}')">
       ${opts.map(c => `<option value="${c}"${c === cur ? ' selected' : ''}>${c}</option>`).join('')}
     </select></td>`;
   };
@@ -332,7 +342,7 @@ function drawMatrix(key) {
       </tr>` : ''}</tfoot>
     </table>
     </div>
-    <p class="muted">加權平均 = 依各車系銷售構成比加權，跟儀表板同口徑。${cfg.hasCurrency ? fxHint_(data.currencies) : ''}</p>`;
+    <p class="muted">加權平均 = 依各車系銷售構成比加權，跟儀表板同口徑；外幣列的加權平均與合計已換算成台幣。${cfg.hasCurrency ? fxHint_(data.currencies) : ''}</p>`;
   updateMatrixTotals(key);
 }
 /**
@@ -489,15 +499,21 @@ function updateMatrixTotals(key) {
   let weightedGrand = 0;
   data.lines.forEach(line => {
     let weighted = 0;
+    // 外幣登打的列：加權平均與合計換算成台幣(跟儀表板同口徑)，格子裡仍是原幣
+    const cur = MATRIX_CONFIG[key].hasCurrency ? (val(`${key}-cur-${line.value}`) || 'TWD') : 'TWD';
+    const rate = cur === 'TWD' ? 1 : num((data.fxRates || {})[cur]) || 1;
     document.querySelectorAll(`#grid-${key} input[data-line="${line.value}"]`).forEach(inp => {
-      const v = num(inp.value);
+      const v = num(inp.value) * rate;
       colSum[inp.dataset.vehicle] = (colSum[inp.dataset.vehicle] || 0) + v;
       weighted += v * (mix[inp.dataset.vehicle] || 0);
     });
     weighted = mixTotal ? weighted / mixTotal : 0;
     weightedGrand += weighted;
     const cell = document.getElementById(`${key}-sum-${line.value}`);
-    if (cell) cell.textContent = mixTotal ? fmt(weighted) : '—';
+    if (cell) {
+      cell.textContent = mixTotal ? fmt(weighted) : '—';
+      if (rate !== 1) cell.setAttribute('data-tip', `已換算成台幣：${cur} × ${rate}`); else cell.removeAttribute('data-tip');
+    }
   });
 
   const autoSum = {};
