@@ -178,6 +178,37 @@ async function main() {
   await page.waitForFunction(() => /作法對帳/.test(document.getElementById('panel-report').textContent) &&
     document.querySelector('#rpt-sens .sens-table'), null, { timeout: 15000 });
 
+  // 差距拆解：「調整長條」把前兩個科目合併成一根，長條少一根、終點不變
+  const bridgeTips = () => page.$$eval('#rpt-bridge rect.bar', rs => rs.map(r => r.getAttribute('data-tip')));
+  const tipsBefore = await bridgeTips();
+  await page.click('#rpt-bridge-edit');
+  await page.waitForSelector('dialog .bridge-group');
+  const groupInputs = await page.$$('dialog .bridge-group');
+  await groupInputs[0].fill('合併測試');
+  await groupInputs[1].fill('合併測試');
+  await page.click('dialog button[value=ok]');
+  await page.waitForFunction(n => document.querySelectorAll('#rpt-bridge rect.bar').length === n - 1, tipsBefore.length, { timeout: 5000 });
+  const tipsAfter = await bridgeTips();
+  assert(tipsAfter.some(t => /^合併測試\n/.test(t)), '合併後應該有一根「合併測試」：' + tipsAfter.join(' | '));
+  assert(tipsAfter[tipsAfter.length - 1] === tipsBefore[tipsBefore.length - 1], '合併科目不應該改變目標營業淨利');
+  assert(/2 個科目已合併/.test(await page.textContent('#rpt-bridge .bridge-tools')), '長條上方要提示目前的合併設定');
+
+  // 敏感度：直列改成自訂值，預填目前值附近的數字；改成自己的數字後表格照著算
+  await page.click('nav button[data-tab="whatif"]');
+  await page.waitForSelector('#wi-sens-row');
+  await page.click(`.seg-btn[onclick*="setSensMode_('row','value')"]`);
+  await page.waitForSelector('#wi-sens-row-values');
+  assert((await page.inputValue('#wi-sens-row-values')).split(',').length === 5, '切到自訂值時應該依目前的變動 % 預填 5 個值');
+  await page.selectOption('#wi-sens-row', 'volume');
+  await page.fill('#wi-sens-row-values', '100, 250, 600');
+  await page.click('button:has-text("產生表格")');
+  await page.waitForFunction(() => {
+    const heads = Array.from(document.querySelectorAll('#wi-sens-result .sens-table tbody .row-head')).map(td => td.textContent);
+    return heads.length === 4 && heads.some(h => /^250/.test(h.trim()));
+  }, null, { timeout: 15000 });
+  assert(await page.$('#wi-sens-result .sens-table .sens-base'), '自訂值的表格也要框出目前的數字');
+  await page.click(`.seg-btn[onclick*="setSensMode_('row','pct')"]`);
+
   // 多項目標反推：營業淨利缺口由售價、材料、開發總投一起分擔，結果表 + 瀑布圖，可以帶到瀑布圖工具
   await page.click('nav button[data-tab="whatif"]');
   await page.waitForSelector('#wi-multi');

@@ -710,6 +710,7 @@
   .st-進行中 { background: #e9efff; color: #2a4cc4; }
   .st-已確認 { background: #e8f6ef; color: #146c45; }
   .st-已結案 { background: #f1e9ff; color: #6a3dbd; }
+  .bridge-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; }
   .bridge-legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
   .rpt-table td.recon-ok { color: var(--success); font-weight: 600; }
   .rpt-table td.recon-warn { color: var(--warning); font-weight: 600; }
@@ -6835,8 +6836,8 @@ function openModal(opts) {
     dlg.addEventListener('cancel', e => { e.preventDefault(); finish(null); });
     dlg.querySelector('form').addEventListener('submit', e => {
       e.preventDefault();
-      if (!fields.length) { finish(true); return; }
-      const out = {};
+      if (!fields.length && !opts.collect) { finish(true); return; }
+      const out = opts.collect ? opts.collect(dlg) : {};
       fields.forEach((f, i) => {
         const el = dlg.querySelector('#mf-' + i);
         out[f.name] = f.type === 'checks' ? Array.from(el.querySelectorAll('input:checked')).map(x => x.value) : el.value;
@@ -10280,6 +10281,9 @@ let reportUnit = 1;              // 1 元 / 1000 千元
 let reportActions = [];          // 編輯中的作法(目標情境)
 let reportNoteEdits = {};        // { scenarioId: { LineCode: 說明 } } 還沒存的說明
 let reportShowPrice = false;
+/** 差距拆解的長條設定(每個車型各一份)：最多幾根、多小的併入「其他」、哪些科目合併成同一根 { LineCode: 合併後的名稱 } */
+let reportBridgeCfg = null;
+function defaultBridgeCfg_() { return { topN: 10, minAbs: 0, groups: {} }; }
 const REPORT_PREFS_KEY_ = 'plReport.prefs.v1';
 
 function loadReportPrefs_() {
@@ -10289,7 +10293,8 @@ function loadReportPrefs_() {
     else reportSel = { target: '', base: '', prev: '' };
     if (p.unit === 1000 || p.unit === 1) reportUnit = p.unit;
     if (typeof p.showPrice === 'boolean') reportShowPrice = p.showPrice;
-  } catch (e) { /* 沒有就用預設 */ }
+    reportBridgeCfg = Object.assign(defaultBridgeCfg_(), p.bridge && p.bridge[currentVehicleTypeId]);
+  } catch (e) { reportBridgeCfg = defaultBridgeCfg_(); }
 }
 function saveReportPrefs_() {
   try {
@@ -10297,6 +10302,8 @@ function saveReportPrefs_() {
     p.sel = p.sel || {};
     p.sel[currentVehicleTypeId] = reportSel;
     p.unit = reportUnit; p.showPrice = reportShowPrice;
+    p.bridge = p.bridge || {};
+    p.bridge[currentVehicleTypeId] = reportBridgeCfg;
     localStorage.setItem(REPORT_PREFS_KEY_, JSON.stringify(p));
   } catch (e) { /* 存不了就算了 */ }
 }
@@ -10442,7 +10449,7 @@ function drawReport_() {
   let n = 0;
   const no = () => String(++n).padStart(2, '0');
   slides.push(slideHtml_(no(), '損益目標與差距摘要', `${esc(R.vehicleTypeId)}　${esc(T.meta.label)}${B ? ' vs ' + esc(B.meta.label) : ''}`, reportSummaryHtml_()));
-  if (B) slides.push(slideHtml_(no(), '現況 → 目標：營業淨利差距拆解', '每一根長條 = 該科目讓營業淨利增加(綠)或減少(紅)多少', reportBridgeHtml_()));
+  if (B) slides.push(slideHtml_(no(), '現況 → 目標：營業淨利差距拆解', '每一根長條 = 該科目讓營業淨利增加(綠)或減少(紅)多少', '<div id="rpt-bridge">' + reportBridgeHtml_() + '</div>'));
   if (B) slides.push(slideHtml_(no(), '現況與目標對照（加權平均）', '差距 = 目標 − 現況；對淨利影響已依科目方向換算', reportCompareHtml_(), 'rpt-compare'));
   slides.push(slideHtml_(no(), '目標成本作法', '差距由哪些作法補起來、擔當單位與進度', reportActionsHtml_(), 'rpt-actions'));
   if (B) slides.push(slideHtml_(no(), '現況 → 作法 → 目標', '營業淨利：每一項作法補了多少，還差多少', '<div id="rpt-act-wf">' + reportActionWaterfallHtml_() + '</div>'));
@@ -10512,27 +10519,62 @@ function reportSummaryHtml_() {
     <p class="help">月銷 ${fmt(tVol)} 台・LC ${esc(String(T.volume.lifeCycleYears || ''))} 年・攤提台數 ${fmt(T.lifeCycleUnits)} 台；車系構成：${(T.vehicles || []).map(v => `${esc(v.VehicleCode)} ${fmt(v.salesMixPct, 1)}%`).join('・')}</p>`;
 }
 
-/** 差距拆解(瀑布圖)：現況營業淨利 → 各科目的影響 → 目標營業淨利。影響最大的 10 個科目單獨列，其他合併 */
-function reportBridgeHtml_() {
+/** 差距拆解：每個科目對營業淨利的影響(已依科目方向換算)，依影響大小排序 */
+function reportBridgeContribs_() {
   const R = reportData, T = R.target, B = R.base;
-  const contribs = R.lines.map(l => {
+  return R.lines.map(l => {
     const sign = profitSign_(l);
     if (!sign) return null;
     if (R.lines.some(x => x.ParentLine === l.LineCode)) return null;   // 有子科目的群組不重複算
     const d = ((T.weighted[l.LineCode] || 0) - (B.weighted[l.LineCode] || 0)) * sign;
     return Math.abs(d) >= 0.5 ? { code: l.LineCode, label: shortLineName(l.LineName), value: d } : null;
   }).filter(x => x).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+}
+/**
+ * 依設定把科目變成長條：同一個合併名稱的科目合成一根；影響小於門檻、或超過根數上限的併成「其他」。
+ * 回傳 [{ label, value, tip }]
+ */
+function bridgeBars_(contribs, cfg) {
+  const groups = cfg.groups || {};
+  const items = [], byName = {};
+  contribs.forEach(c => {
+    const g = String(groups[c.code] || '').trim();
+    if (!g) { items.push({ label: c.label, value: c.value, members: [c] }); return; }
+    if (!byName[g]) { byName[g] = { label: g, value: 0, members: [] }; items.push(byName[g]); }
+    byName[g].value += c.value;
+    byName[g].members.push(c);
+  });
+  items.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  const topN = num(cfg.topN) > 0 ? Math.floor(num(cfg.topN)) : Infinity, minAbs = Math.max(0, num(cfg.minAbs));
+  const shown = [], rest = [];
+  items.forEach(it => { (shown.length < topN && Math.abs(it.value) >= minAbs && Math.abs(it.value) >= 0.5 ? shown : rest).push(it); });
+  const tipOf = it => it.label + '\n' + signed_(it.value) + ' 元/台' +
+    (it.members.length > 1 ? '\n' + it.members.map(m => `・${m.label} ${signed_(m.value)}`).join('\n') : '');
+  const bars = shown.map(it => ({ label: it.label, value: it.value, tip: tipOf(it) }));
+  const restMembers = [].concat.apply([], rest.map(it => it.members));
+  const restSum = restMembers.reduce((a, m) => a + m.value, 0);
+  if (restMembers.length && Math.abs(restSum) >= 0.5) {
+    const other = { label: `其他 ${restMembers.length} 個科目`, value: restSum, members: restMembers };
+    bars.push({ label: other.label, value: restSum, tip: tipOf(other) });
+  }
+  return bars;
+}
+/** 差距拆解(瀑布圖)：現況營業淨利 → 各科目的影響 → 目標營業淨利。根數、合併方式可以在「調整長條」設定 */
+function reportBridgeHtml_() {
+  const R = reportData, T = R.target, B = R.base;
+  const contribs = reportBridgeContribs_();
+  const cfg = reportBridgeCfg || defaultBridgeCfg_();
   const start = rProfit_(B), end = rProfit_(T);
-  const top = contribs.slice(0, 10);
-  const rest = contribs.slice(10).reduce((s, c) => s + c.value, 0);
-  const explained = top.reduce((s, c) => s + c.value, 0) + rest;
+  const steps = bridgeBars_(contribs, cfg);
+  const explained = contribs.reduce((s, c) => s + c.value, 0);
   const other = (end - start) - explained;
-  const steps = top.slice();
-  if (Math.abs(rest) >= 0.5) steps.push({ label: `其他 ${contribs.length - 10} 個科目`, value: rest });
   if (Math.abs(other) >= 1) steps.push({ label: '公式/取整差異', value: other });
+  const nGroups = Object.keys(cfg.groups || {}).filter(k => String(cfg.groups[k] || '').trim() && contribs.some(c => c.code === k)).length;
   const actionsByCode = {};
   reportActions.forEach(a => { if (a.LineCode) (actionsByCode[a.LineCode] = actionsByCode[a.LineCode] || []).push(a); });
   return `
+    <div class="bridge-tools no-print"><button type="button" class="btn secondary sm" id="rpt-bridge-edit" onclick="editBridgeCfg_()">調整長條（合併科目／顯示幾根）…</button>
+      <span class="muted">${num(cfg.topN) > 0 ? `最多 ${Math.floor(num(cfg.topN))} 根` : '不限根數'}${num(cfg.minAbs) > 0 ? `・影響小於 ${fmt(num(cfg.minAbs))} 元/台併入「其他」` : ''}${nGroups ? `・${nGroups} 個科目已合併` : ''}</span></div>
     <div class="bridge-legend"><span><i style="display:inline-block;width:10px;height:10px;background:#3157d5;border-radius:2px;"></i> 營業淨利</span>
       <span><i style="display:inline-block;width:10px;height:10px;background:#1c8a59;border-radius:2px;"></i> 改善</span>
       <span><i style="display:inline-block;width:10px;height:10px;background:#d23c3c;border-radius:2px;"></i> 惡化</span></div>
@@ -10544,10 +10586,44 @@ function reportBridgeHtml_() {
         `<li>${esc(c.label)} <b class="bad">${rSigned_(c.value)}</b></li>`).join('') || '<li class="muted">（無）</li>'}</ul></div>
     </div>`;
 }
+/** 調整長條：每個科目可以填「合併成」的名稱(同名的合成一根)，另外設最多幾根、多小的併入「其他」 */
+function editBridgeCfg_() {
+  const contribs = reportBridgeContribs_();
+  const cfg = reportBridgeCfg || defaultBridgeCfg_();
+  const names = Array.from(new Set(Object.keys(cfg.groups || {}).map(k => String(cfg.groups[k] || '').trim()).filter(x => x)));
+  const body = `
+    <p class="help">同一個「合併成」名稱的科目會合成一根長條（例如把關稅、技酬金、索賠都填「其他成本」）；留白 = 單獨一根。
+      設定只存在這台電腦的瀏覽器，每個車型各一份。</p>
+    <div class="field-row" style="margin-bottom:10px;">
+      <label class="field"><span>最多顯示幾根（0 = 不限）</span><input type="number" min="0" step="1" id="bridge-topn" value="${esc(cfg.topN)}" style="width:120px;"></label>
+      <label class="field"><span>影響小於多少元/台併入「其他」</span><input type="number" min="0" step="any" id="bridge-minabs" value="${esc(cfg.minAbs || 0)}" style="width:160px;"></label>
+      <button type="button" class="btn secondary sm" style="align-self:flex-end;" onclick="this.closest('dialog').querySelectorAll('.bridge-group').forEach(i => { i.value = ''; })">全部取消合併</button>
+    </div>
+    <datalist id="bridge-group-names">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    <div class="grid-scroll" style="max-height:50vh;"><table class="grid-table">
+      <thead><tr><th style="text-align:left;">科目</th><th>對淨利影響（元/台）</th><th style="text-align:left;">合併成</th></tr></thead>
+      <tbody>${contribs.map(c => `<tr><td style="text-align:left;">${esc(c.label)}</td><td class="${c.value < 0 ? 'negative' : ''}" style="text-align:right;">${signed_(c.value)}</td>
+        <td><input type="text" class="bridge-group" data-code="${esc(c.code)}" list="bridge-group-names" value="${esc((cfg.groups || {})[c.code] || '')}" placeholder="（單獨一根）" style="width:180px;"></td></tr>`).join('')}</tbody>
+    </table></div>`;
+  openModal({
+    title: '調整差距拆解的長條', body, wide: true, okText: '套用',
+    collect: dlg => {
+      const groups = Object.assign({}, cfg.groups);   // 這次沒出現的科目(目前沒有差異)保留原本的設定
+      dlg.querySelectorAll('.bridge-group').forEach(i => { const v = i.value.trim(); if (v) groups[i.dataset.code] = v; else delete groups[i.dataset.code]; });
+      return { topN: Math.max(0, Math.floor(num(dlg.querySelector('#bridge-topn').value))), minAbs: Math.max(0, num(dlg.querySelector('#bridge-minabs').value)), groups };
+    }
+  }).then(res => {
+    if (!res) return;
+    reportBridgeCfg = res;
+    saveReportPrefs_();
+    const box = document.getElementById('rpt-bridge');
+    if (box && reportData) box.innerHTML = reportBridgeHtml_();
+  });
+}
 function bridgeSvg_(start, steps, end) {
   const bars = [{ label: '現況 營業淨利', y0: 0, y1: start, kind: 'total' }];
   let acc = start;
-  steps.forEach(s => { bars.push({ label: s.label, y0: acc, y1: acc + s.value, kind: s.value >= 0 ? 'up' : 'down', value: s.value }); acc += s.value; });
+  steps.forEach(s => { bars.push({ label: s.label, y0: acc, y1: acc + s.value, kind: s.value >= 0 ? 'up' : 'down', value: s.value, tip: s.tip }); acc += s.value; });
   bars.push({ label: '目標 營業淨利', y0: 0, y1: end, kind: 'total' });
   const vals = [0];
   bars.forEach(b => { vals.push(b.y0, b.y1); });
@@ -10569,7 +10645,7 @@ function bridgeSvg_(start, steps, end) {
       const next = bars[i + 1];
       const conn = next ? `<line x1="${x + w}" x2="${x + bw}" y1="${y(b.y1)}" y2="${y(b.y1)}" stroke="#a3acc0" stroke-dasharray="3,3"/>` : '';
       return `<g><rect class="bar" x="${x}" y="${top}" width="${w}" height="${h}" rx="3" fill="${color[b.kind]}"
-          data-tip="${esc(b.label + '\n' + (b.kind === 'total' ? fmt(v) : signed_(v)) + ' 元/台')}"/>
+          data-tip="${esc(b.tip || (b.label + '\n' + (b.kind === 'total' ? fmt(v) : signed_(v)) + ' 元/台'))}"/>
         ${conn}
         <text x="${x + w / 2}" y="${labelY}" text-anchor="middle" font-size="11.5" font-weight="700" fill="${color[b.kind]}">${esc(b.kind === 'total' ? shortAmount_(v / reportUnit) : (v >= 0 ? '+' : '') + shortAmount_(v / reportUnit))}</text>
         ${wrapLabel_(b.label, bw - 6, 11, 3).map((ln, k) => `<text x="${x + w / 2}" y="${H - padB + 18 + k * 14}" text-anchor="middle" font-size="11" fill="#475069">${esc(ln)}</text>`).join('')}
@@ -10888,7 +10964,8 @@ const WHATIF_PREFS_KEY_ = 'plWhatIf.prefs.v1';
 let whatIfPrefs = {
   goal: { metric: 'K', basis: 'unit', target: 0, driver: 'volume' },
   multi: { metric: 'K', basis: 'unit', target: 0, mode: 'share', levers: null },
-  sens: { metric: 'K', basis: 'unit', row: 'volume', rowSteps: '-20,-10,0,10,20', col: 'price', colSteps: '-10,-5,0,5,10', inReport: true }
+  sens: { metric: 'K', basis: 'unit', row: 'volume', rowSteps: '-20,-10,0,10,20', col: 'price', colSteps: '-10,-5,0,5,10', inReport: true,
+    rowMode: 'pct', rowValues: '', colMode: 'pct', colValues: '' }
 };
 function loadWhatIfPrefs_() {
   try {
@@ -10982,10 +11059,9 @@ function drawWhatIf_() {
       <div class="field-row">
         <label class="field"><span>看哪個結果</span><select onchange="whatIfPrefs.sens.metric=this.value;saveWhatIfPrefs_()">${metricOptionsHtml_(s.metric)}</select></label>
         <label class="field"><span>&nbsp;</span>${basisSeg('sens', s.basis)}</label>
-        <label class="field"><span>直列：調整項目</span><select onchange="whatIfPrefs.sens.row=this.value;saveWhatIfPrefs_()">${driverOptionsHtml_(s.row)}</select></label>
-        <label class="field"><span>變動幅度（%，逗號分隔）</span><input type="text" value="${esc(s.rowSteps)}" style="width:160px;" oninput="whatIfPrefs.sens.rowSteps=this.value;saveWhatIfPrefs_()"></label>
-        <label class="field"><span>橫列：調整項目</span><select onchange="whatIfPrefs.sens.col=this.value;saveWhatIfPrefs_()">${driverOptionsHtml_(s.col)}</select></label>
-        <label class="field"><span>變動幅度（%）</span><input type="text" value="${esc(s.colSteps)}" style="width:160px;" oninput="whatIfPrefs.sens.colSteps=this.value;saveWhatIfPrefs_()"></label>
+      </div>
+      <div class="field-row" style="margin-top:12px;">${sensAxisFieldsHtml_('row', '直列')}</div>
+      <div class="field-row" style="margin-top:12px;">${sensAxisFieldsHtml_('col', '橫列')}
         <button type="button" class="btn" style="align-self:flex-end;" onclick="runSensitivity_()">產生表格</button>
       </div>
       <div id="wi-sens-result" style="margin-top:14px;"></div>
@@ -11046,20 +11122,93 @@ function stepValues_(key, steps) {
   const base = info ? info.base : 0;
   return steps.map(p => base * (1 + p / 100));
 }
+/* ---------------- 敏感度分析 ----------------
+ * 每一軸可以用「變動幅度 %」(基準 × (1 + %))或直接輸入「自訂值」(例：匯率 4.5, 4.6, 4.8)。
+ * 兩種方式都會自動帶入目前的值，表格中間框起來的就是目前的數字。
+ */
+function sensMode_(axis) { return whatIfPrefs.sens[axis + 'Mode'] === 'value' ? 'value' : 'pct'; }
+/** 自訂值：逗號、分號、空白、換行分隔(不要加千分位) */
+function parseSensValues_(text) {
+  return String(text || '').split(/[,，;；\s]+/).map(x => x.trim()).filter(x => x !== '').map(Number).filter(x => isFinite(x));
+}
+/** 依基準值的量級取整(4.77 → 0.01、445,556 → 1,000)，切換成自訂值時預填用 */
+function roundLike_(v, base) {
+  const mag = Math.abs(base) > 0 ? Math.pow(10, Math.floor(Math.log10(Math.abs(base))) - 2) : 1;
+  return Number((Math.round(v / mag) * mag).toPrecision(12));
+}
+function sensPrefill_(axis, base) {
+  return parseSteps_(whatIfPrefs.sens[axis + 'Steps']).map(p => roundLike_(base * (1 + p / 100), base)).join(', ');
+}
+/**
+ * 一軸實際要算的值：[{ value, label, sub, isBase }]
+ *   %      → 值 = 基準 × (1 + %)，標題「-10%」、副標是實際值
+ *   自訂值 → 值照輸入，標題是值、副標是跟目前差幾 %；目前的值一定會加進去(跟輸入的值幾乎一樣時視為同一個)
+ */
+function sensAxis_(axis, base) {
+  const s = whatIfPrefs.sens;
+  const dg = v => Math.abs(v) < 100 ? 2 : 0;
+  if (sensMode_(axis) === 'pct') {
+    return parseSteps_(s[axis + 'Steps']).map(p => {
+      const value = base * (1 + p / 100);
+      return { value, label: p === 0 ? '目前' : signed_(p) + '%', sub: fmt(value, dg(value)), isBase: p === 0 };
+    });
+  }
+  const same = (a, b) => Math.abs(a - b) <= Math.max(Math.abs(b), 1e-9) * 5e-4;
+  const vals = parseSensValues_(s[axis + 'Values']).filter(v => !same(v, base)).slice(0, 10);
+  vals.push(base);
+  return vals.filter((v, i) => vals.findIndex(x => same(x, v)) === i).sort((a, b) => a - b).map(value => {
+    const isBase = value === base;
+    const pct = base ? (value / base - 1) * 100 : null;
+    return { value, label: isBase ? '目前' : fmt(value, dg(value)),
+      sub: isBase ? fmt(value, dg(value)) : pct === null ? '' : signed_(pct, Math.abs(pct) < 10 ? 1 : 0) + '%', isBase };
+  });
+}
+function sensAxisFieldsHtml_(axis, name) {
+  const s = whatIfPrefs.sens, mode = sensMode_(axis);
+  const seg = `<div class="seg">
+      <button type="button" class="seg-btn${mode === 'pct' ? ' active' : ''}" onclick="setSensMode_('${axis}','pct')" data-tip="目前的值 × (1 + %)">變動 %</button>
+      <button type="button" class="seg-btn${mode === 'value' ? ' active' : ''}" onclick="setSensMode_('${axis}','value')" data-tip="直接輸入要試算的值，例如匯率 4.5, 4.6, 4.8">自訂值</button></div>`;
+  const input = mode === 'pct'
+    ? `<label class="field"><span>變動幅度（%，逗號分隔）</span><input type="text" id="wi-sens-${axis}-steps" value="${esc(s[axis + 'Steps'])}" style="width:180px;" oninput="whatIfPrefs.sens.${axis}Steps=this.value;saveWhatIfPrefs_()"></label>`
+    : `<label class="field"><span>自訂值（逗號分隔，不要加千分位；目前的值會自動加入）</span><input type="text" id="wi-sens-${axis}-values" value="${esc(s[axis + 'Values'])}" style="width:300px;" oninput="whatIfPrefs.sens.${axis}Values=this.value;saveWhatIfPrefs_()"></label>`;
+  return `<label class="field"><span>${name}：調整項目</span><select id="wi-sens-${axis}" onchange="setSensDriver_('${axis}',this.value)">${driverOptionsHtml_(s[axis])}</select></label>
+    <div class="field"><span>&nbsp;</span>${seg}</div>${input}`;
+}
+function setSensMode_(axis, mode) {
+  const s = whatIfPrefs.sens;
+  s[axis + 'Mode'] = mode;
+  if (mode === 'value' && !parseSensValues_(s[axis + 'Values']).length) {
+    const info = whatIfDriverInfo_(s[axis]);
+    s[axis + 'Values'] = info ? sensPrefill_(axis, info.base) : '';
+  }
+  saveWhatIfPrefs_();
+  drawWhatIf_();
+}
+/** 換了調整項目：自訂值是上一個項目的數字，用不上了，依新項目的目前值重新預填 */
+function setSensDriver_(axis, key) {
+  const s = whatIfPrefs.sens;
+  s[axis] = key;
+  if (sensMode_(axis) === 'value') {
+    const info = whatIfDriverInfo_(key);
+    s[axis + 'Values'] = info ? sensPrefill_(axis, info.base) : '';
+    const el = document.getElementById('wi-sens-' + axis + '-values');
+    if (el) el.value = s[axis + 'Values'];
+  }
+  saveWhatIfPrefs_();
+}
 function runSensitivity_(targetBox, scenarioId, done) {
   const s = whatIfPrefs.sens;
   const box = targetBox || document.getElementById('wi-sens-result');
   if (!box) return;
-  const rowSteps = parseSteps_(s.rowSteps), colSteps = parseSteps_(s.colSteps);
   box.innerHTML = '<p class="muted">計算中...</p>';
   const go = opts => {
     const info = k => opts.drivers.find(d => driverKey_(d.driver) === k);
     const ri = info(s.row) || opts.drivers[0], ci = info(s.col) || opts.drivers[1];
-    const rv = rowSteps.map(p => ri.base * (1 + p / 100)), cv = colSteps.map(p => ci.base * (1 + p / 100));
+    const rows = sensAxis_('row', ri.base), cols = sensAxis_('col', ci.base);
     google.script.run
-      .withSuccessHandler(safeHandler(t => { box.innerHTML = sensitivityTableHtml_(t, rowSteps, colSteps, s, opts); if (done) done(); }))
+      .withSuccessHandler(safeHandler(t => { box.innerHTML = sensitivityTableHtml_(t, rows, cols, s, opts); if (done) done(); }))
       .withFailureHandler(err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; })
-      .sensitivityTable(scenarioId || currentScenarioId, { code: s.metric, basis: s.basis }, ri.driver, rv, ci.driver, cv);
+      .sensitivityTable(scenarioId || currentScenarioId, { code: s.metric, basis: s.basis }, ri.driver, rows.map(r => r.value), ci.driver, cols.map(c => c.value));
   };
   // 目標反推頁上按「產生表格」：沿用那一頁已經載入的選項。
   // 其他地方(GATE 報告)：那一頁不一定開過(whatIfOptions 還是 null)，開過也可能是別的情境或改資料前載的，一律重新抓
@@ -11069,23 +11218,22 @@ function runSensitivity_(targetBox, scenarioId, done) {
       .getWhatIfOptions(scenarioId || currentScenarioId);
   }
 }
-function sensitivityTableHtml_(t, rowSteps, colSteps, s, opts) {
+function sensitivityTableHtml_(t, rows, cols, s, opts) {
   const all = [].concat.apply([], t.cells);
   const maxAbs = Math.max.apply(null, all.map(Math.abs).concat([1]));
   const metric = (opts.metrics.find(m => m.code === s.metric) || {}).label || s.metric;
-  const dg = v => Math.abs(v) < 100 ? 2 : 0;
   const color = v => {
     const a = Math.min(1, Math.abs(v) / maxAbs);
     return v >= 0 ? `rgba(28,138,89,${0.08 + a * 0.32})` : `rgba(210,60,60,${0.08 + a * 0.32})`;
   };
   return `<div class="grid-scroll"><table class="grid-table sens-table">
     <thead>
-      <tr><th rowspan="2">${esc(t.rowLabel)} ↓ ／ ${esc(t.colLabel)} →</th>${colSteps.map((p, j) => `<th>${p === 0 ? '目前' : signed_(p) + '%'}</th>`).join('')}</tr>
-      <tr>${t.colValues.map(v => `<th class="th-sub">${fmt(v, dg(v))}</th>`).join('')}</tr>
+      <tr><th rowspan="2">${esc(t.rowLabel)} ↓ ／ ${esc(t.colLabel)} →</th>${cols.map(c => `<th>${esc(c.label)}</th>`).join('')}</tr>
+      <tr>${cols.map(c => `<th class="th-sub">${esc(c.sub)}</th>`).join('')}</tr>
     </thead>
     <tbody>${t.cells.map((row, i) => `<tr>
-      <td class="row-head">${rowSteps[i] === 0 ? '目前' : signed_(rowSteps[i]) + '%'} <span class="muted">${fmt(t.rowValues[i], dg(t.rowValues[i]))}${esc(t.rowUnit ? ' ' + t.rowUnit : '')}</span></td>
-      ${row.map((v, j) => `<td class="${rowSteps[i] === 0 && colSteps[j] === 0 ? 'sens-base' : ''}${v < 0 ? ' negative' : ''}" style="background:${color(v)};">${fmt(v)}</td>`).join('')}
+      <td class="row-head">${esc(rows[i].label)} <span class="muted">${esc(rows[i].sub)}${rows[i].isBase || sensMode_('row') === 'pct' ? esc(t.rowUnit ? ' ' + t.rowUnit : '') : ''}</span></td>
+      ${row.map((v, j) => `<td class="${rows[i].isBase && cols[j].isBase ? 'sens-base' : ''}${v < 0 ? ' negative' : ''}" style="background:${color(v)};">${fmt(v)}</td>`).join('')}
     </tr>`).join('')}</tbody>
   </table></div>
   <p class="help">表內數字：${esc(metric)}${s.basis === 'month' ? '（月總額，元）' : '（加權平均，元/台）'}。綠色 = 正、紅色 = 負，顏色越深絕對值越大。</p>`;

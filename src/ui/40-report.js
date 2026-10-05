@@ -5,6 +5,9 @@ let reportUnit = 1;              // 1 元 / 1000 千元
 let reportActions = [];          // 編輯中的作法(目標情境)
 let reportNoteEdits = {};        // { scenarioId: { LineCode: 說明 } } 還沒存的說明
 let reportShowPrice = false;
+/** 差距拆解的長條設定(每個車型各一份)：最多幾根、多小的併入「其他」、哪些科目合併成同一根 { LineCode: 合併後的名稱 } */
+let reportBridgeCfg = null;
+function defaultBridgeCfg_() { return { topN: 10, minAbs: 0, groups: {} }; }
 const REPORT_PREFS_KEY_ = 'plReport.prefs.v1';
 
 function loadReportPrefs_() {
@@ -14,7 +17,8 @@ function loadReportPrefs_() {
     else reportSel = { target: '', base: '', prev: '' };
     if (p.unit === 1000 || p.unit === 1) reportUnit = p.unit;
     if (typeof p.showPrice === 'boolean') reportShowPrice = p.showPrice;
-  } catch (e) { /* 沒有就用預設 */ }
+    reportBridgeCfg = Object.assign(defaultBridgeCfg_(), p.bridge && p.bridge[currentVehicleTypeId]);
+  } catch (e) { reportBridgeCfg = defaultBridgeCfg_(); }
 }
 function saveReportPrefs_() {
   try {
@@ -22,6 +26,8 @@ function saveReportPrefs_() {
     p.sel = p.sel || {};
     p.sel[currentVehicleTypeId] = reportSel;
     p.unit = reportUnit; p.showPrice = reportShowPrice;
+    p.bridge = p.bridge || {};
+    p.bridge[currentVehicleTypeId] = reportBridgeCfg;
     localStorage.setItem(REPORT_PREFS_KEY_, JSON.stringify(p));
   } catch (e) { /* 存不了就算了 */ }
 }
@@ -167,7 +173,7 @@ function drawReport_() {
   let n = 0;
   const no = () => String(++n).padStart(2, '0');
   slides.push(slideHtml_(no(), '損益目標與差距摘要', `${esc(R.vehicleTypeId)}　${esc(T.meta.label)}${B ? ' vs ' + esc(B.meta.label) : ''}`, reportSummaryHtml_()));
-  if (B) slides.push(slideHtml_(no(), '現況 → 目標：營業淨利差距拆解', '每一根長條 = 該科目讓營業淨利增加(綠)或減少(紅)多少', reportBridgeHtml_()));
+  if (B) slides.push(slideHtml_(no(), '現況 → 目標：營業淨利差距拆解', '每一根長條 = 該科目讓營業淨利增加(綠)或減少(紅)多少', '<div id="rpt-bridge">' + reportBridgeHtml_() + '</div>'));
   if (B) slides.push(slideHtml_(no(), '現況與目標對照（加權平均）', '差距 = 目標 − 現況；對淨利影響已依科目方向換算', reportCompareHtml_(), 'rpt-compare'));
   slides.push(slideHtml_(no(), '目標成本作法', '差距由哪些作法補起來、擔當單位與進度', reportActionsHtml_(), 'rpt-actions'));
   if (B) slides.push(slideHtml_(no(), '現況 → 作法 → 目標', '營業淨利：每一項作法補了多少，還差多少', '<div id="rpt-act-wf">' + reportActionWaterfallHtml_() + '</div>'));
@@ -237,27 +243,62 @@ function reportSummaryHtml_() {
     <p class="help">月銷 ${fmt(tVol)} 台・LC ${esc(String(T.volume.lifeCycleYears || ''))} 年・攤提台數 ${fmt(T.lifeCycleUnits)} 台；車系構成：${(T.vehicles || []).map(v => `${esc(v.VehicleCode)} ${fmt(v.salesMixPct, 1)}%`).join('・')}</p>`;
 }
 
-/** 差距拆解(瀑布圖)：現況營業淨利 → 各科目的影響 → 目標營業淨利。影響最大的 10 個科目單獨列，其他合併 */
-function reportBridgeHtml_() {
+/** 差距拆解：每個科目對營業淨利的影響(已依科目方向換算)，依影響大小排序 */
+function reportBridgeContribs_() {
   const R = reportData, T = R.target, B = R.base;
-  const contribs = R.lines.map(l => {
+  return R.lines.map(l => {
     const sign = profitSign_(l);
     if (!sign) return null;
     if (R.lines.some(x => x.ParentLine === l.LineCode)) return null;   // 有子科目的群組不重複算
     const d = ((T.weighted[l.LineCode] || 0) - (B.weighted[l.LineCode] || 0)) * sign;
     return Math.abs(d) >= 0.5 ? { code: l.LineCode, label: shortLineName(l.LineName), value: d } : null;
   }).filter(x => x).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+}
+/**
+ * 依設定把科目變成長條：同一個合併名稱的科目合成一根；影響小於門檻、或超過根數上限的併成「其他」。
+ * 回傳 [{ label, value, tip }]
+ */
+function bridgeBars_(contribs, cfg) {
+  const groups = cfg.groups || {};
+  const items = [], byName = {};
+  contribs.forEach(c => {
+    const g = String(groups[c.code] || '').trim();
+    if (!g) { items.push({ label: c.label, value: c.value, members: [c] }); return; }
+    if (!byName[g]) { byName[g] = { label: g, value: 0, members: [] }; items.push(byName[g]); }
+    byName[g].value += c.value;
+    byName[g].members.push(c);
+  });
+  items.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  const topN = num(cfg.topN) > 0 ? Math.floor(num(cfg.topN)) : Infinity, minAbs = Math.max(0, num(cfg.minAbs));
+  const shown = [], rest = [];
+  items.forEach(it => { (shown.length < topN && Math.abs(it.value) >= minAbs && Math.abs(it.value) >= 0.5 ? shown : rest).push(it); });
+  const tipOf = it => it.label + '\n' + signed_(it.value) + ' 元/台' +
+    (it.members.length > 1 ? '\n' + it.members.map(m => `・${m.label} ${signed_(m.value)}`).join('\n') : '');
+  const bars = shown.map(it => ({ label: it.label, value: it.value, tip: tipOf(it) }));
+  const restMembers = [].concat.apply([], rest.map(it => it.members));
+  const restSum = restMembers.reduce((a, m) => a + m.value, 0);
+  if (restMembers.length && Math.abs(restSum) >= 0.5) {
+    const other = { label: `其他 ${restMembers.length} 個科目`, value: restSum, members: restMembers };
+    bars.push({ label: other.label, value: restSum, tip: tipOf(other) });
+  }
+  return bars;
+}
+/** 差距拆解(瀑布圖)：現況營業淨利 → 各科目的影響 → 目標營業淨利。根數、合併方式可以在「調整長條」設定 */
+function reportBridgeHtml_() {
+  const R = reportData, T = R.target, B = R.base;
+  const contribs = reportBridgeContribs_();
+  const cfg = reportBridgeCfg || defaultBridgeCfg_();
   const start = rProfit_(B), end = rProfit_(T);
-  const top = contribs.slice(0, 10);
-  const rest = contribs.slice(10).reduce((s, c) => s + c.value, 0);
-  const explained = top.reduce((s, c) => s + c.value, 0) + rest;
+  const steps = bridgeBars_(contribs, cfg);
+  const explained = contribs.reduce((s, c) => s + c.value, 0);
   const other = (end - start) - explained;
-  const steps = top.slice();
-  if (Math.abs(rest) >= 0.5) steps.push({ label: `其他 ${contribs.length - 10} 個科目`, value: rest });
   if (Math.abs(other) >= 1) steps.push({ label: '公式/取整差異', value: other });
+  const nGroups = Object.keys(cfg.groups || {}).filter(k => String(cfg.groups[k] || '').trim() && contribs.some(c => c.code === k)).length;
   const actionsByCode = {};
   reportActions.forEach(a => { if (a.LineCode) (actionsByCode[a.LineCode] = actionsByCode[a.LineCode] || []).push(a); });
   return `
+    <div class="bridge-tools no-print"><button type="button" class="btn secondary sm" id="rpt-bridge-edit" onclick="editBridgeCfg_()">調整長條（合併科目／顯示幾根）…</button>
+      <span class="muted">${num(cfg.topN) > 0 ? `最多 ${Math.floor(num(cfg.topN))} 根` : '不限根數'}${num(cfg.minAbs) > 0 ? `・影響小於 ${fmt(num(cfg.minAbs))} 元/台併入「其他」` : ''}${nGroups ? `・${nGroups} 個科目已合併` : ''}</span></div>
     <div class="bridge-legend"><span><i style="display:inline-block;width:10px;height:10px;background:#3157d5;border-radius:2px;"></i> 營業淨利</span>
       <span><i style="display:inline-block;width:10px;height:10px;background:#1c8a59;border-radius:2px;"></i> 改善</span>
       <span><i style="display:inline-block;width:10px;height:10px;background:#d23c3c;border-radius:2px;"></i> 惡化</span></div>
@@ -269,10 +310,44 @@ function reportBridgeHtml_() {
         `<li>${esc(c.label)} <b class="bad">${rSigned_(c.value)}</b></li>`).join('') || '<li class="muted">（無）</li>'}</ul></div>
     </div>`;
 }
+/** 調整長條：每個科目可以填「合併成」的名稱(同名的合成一根)，另外設最多幾根、多小的併入「其他」 */
+function editBridgeCfg_() {
+  const contribs = reportBridgeContribs_();
+  const cfg = reportBridgeCfg || defaultBridgeCfg_();
+  const names = Array.from(new Set(Object.keys(cfg.groups || {}).map(k => String(cfg.groups[k] || '').trim()).filter(x => x)));
+  const body = `
+    <p class="help">同一個「合併成」名稱的科目會合成一根長條（例如把關稅、技酬金、索賠都填「其他成本」）；留白 = 單獨一根。
+      設定只存在這台電腦的瀏覽器，每個車型各一份。</p>
+    <div class="field-row" style="margin-bottom:10px;">
+      <label class="field"><span>最多顯示幾根（0 = 不限）</span><input type="number" min="0" step="1" id="bridge-topn" value="${esc(cfg.topN)}" style="width:120px;"></label>
+      <label class="field"><span>影響小於多少元/台併入「其他」</span><input type="number" min="0" step="any" id="bridge-minabs" value="${esc(cfg.minAbs || 0)}" style="width:160px;"></label>
+      <button type="button" class="btn secondary sm" style="align-self:flex-end;" onclick="this.closest('dialog').querySelectorAll('.bridge-group').forEach(i => { i.value = ''; })">全部取消合併</button>
+    </div>
+    <datalist id="bridge-group-names">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    <div class="grid-scroll" style="max-height:50vh;"><table class="grid-table">
+      <thead><tr><th style="text-align:left;">科目</th><th>對淨利影響（元/台）</th><th style="text-align:left;">合併成</th></tr></thead>
+      <tbody>${contribs.map(c => `<tr><td style="text-align:left;">${esc(c.label)}</td><td class="${c.value < 0 ? 'negative' : ''}" style="text-align:right;">${signed_(c.value)}</td>
+        <td><input type="text" class="bridge-group" data-code="${esc(c.code)}" list="bridge-group-names" value="${esc((cfg.groups || {})[c.code] || '')}" placeholder="（單獨一根）" style="width:180px;"></td></tr>`).join('')}</tbody>
+    </table></div>`;
+  openModal({
+    title: '調整差距拆解的長條', body, wide: true, okText: '套用',
+    collect: dlg => {
+      const groups = Object.assign({}, cfg.groups);   // 這次沒出現的科目(目前沒有差異)保留原本的設定
+      dlg.querySelectorAll('.bridge-group').forEach(i => { const v = i.value.trim(); if (v) groups[i.dataset.code] = v; else delete groups[i.dataset.code]; });
+      return { topN: Math.max(0, Math.floor(num(dlg.querySelector('#bridge-topn').value))), minAbs: Math.max(0, num(dlg.querySelector('#bridge-minabs').value)), groups };
+    }
+  }).then(res => {
+    if (!res) return;
+    reportBridgeCfg = res;
+    saveReportPrefs_();
+    const box = document.getElementById('rpt-bridge');
+    if (box && reportData) box.innerHTML = reportBridgeHtml_();
+  });
+}
 function bridgeSvg_(start, steps, end) {
   const bars = [{ label: '現況 營業淨利', y0: 0, y1: start, kind: 'total' }];
   let acc = start;
-  steps.forEach(s => { bars.push({ label: s.label, y0: acc, y1: acc + s.value, kind: s.value >= 0 ? 'up' : 'down', value: s.value }); acc += s.value; });
+  steps.forEach(s => { bars.push({ label: s.label, y0: acc, y1: acc + s.value, kind: s.value >= 0 ? 'up' : 'down', value: s.value, tip: s.tip }); acc += s.value; });
   bars.push({ label: '目標 營業淨利', y0: 0, y1: end, kind: 'total' });
   const vals = [0];
   bars.forEach(b => { vals.push(b.y0, b.y1); });
@@ -294,7 +369,7 @@ function bridgeSvg_(start, steps, end) {
       const next = bars[i + 1];
       const conn = next ? `<line x1="${x + w}" x2="${x + bw}" y1="${y(b.y1)}" y2="${y(b.y1)}" stroke="#a3acc0" stroke-dasharray="3,3"/>` : '';
       return `<g><rect class="bar" x="${x}" y="${top}" width="${w}" height="${h}" rx="3" fill="${color[b.kind]}"
-          data-tip="${esc(b.label + '\n' + (b.kind === 'total' ? fmt(v) : signed_(v)) + ' 元/台')}"/>
+          data-tip="${esc(b.tip || (b.label + '\n' + (b.kind === 'total' ? fmt(v) : signed_(v)) + ' 元/台'))}"/>
         ${conn}
         <text x="${x + w / 2}" y="${labelY}" text-anchor="middle" font-size="11.5" font-weight="700" fill="${color[b.kind]}">${esc(b.kind === 'total' ? shortAmount_(v / reportUnit) : (v >= 0 ? '+' : '') + shortAmount_(v / reportUnit))}</text>
         ${wrapLabel_(b.label, bw - 6, 11, 3).map((ln, k) => `<text x="${x + w / 2}" y="${H - padB + 18 + k * 14}" text-anchor="middle" font-size="11" fill="#475069">${esc(ln)}</text>`).join('')}

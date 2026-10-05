@@ -278,8 +278,8 @@ function openModal(opts) {
     dlg.addEventListener('cancel', e => { e.preventDefault(); finish(null); });
     dlg.querySelector('form').addEventListener('submit', e => {
       e.preventDefault();
-      if (!fields.length) { finish(true); return; }
-      const out = {};
+      if (!fields.length && !opts.collect) { finish(true); return; }
+      const out = opts.collect ? opts.collect(dlg) : {};
       fields.forEach((f, i) => {
         const el = dlg.querySelector('#mf-' + i);
         out[f.name] = f.type === 'checks' ? Array.from(el.querySelectorAll('input:checked')).map(x => x.value) : el.value;
