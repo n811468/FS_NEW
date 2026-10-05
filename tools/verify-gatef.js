@@ -238,5 +238,5 @@ function printTable(comparison) {
 
 if (require.main === module) main();
 
-// 讓 tools/dev-server.js 可以直接沿用這一組 Gate F 示範資料當本機預覽的種子資料
+// 其他驗證腳本(verify-formula / verify-local)沿用這一組 Gate F 資料建情境
 module.exports = { buildScenario, VEHICLES, COSTS, OPEX, RATES, PER_UNIT, LC_UNITS };
