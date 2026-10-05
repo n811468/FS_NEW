@@ -264,24 +264,32 @@ function solveScalar_(g, x0, step, lowerBound) {
 }
 
 /**
- * 多項目標反推(組合拳)：營業淨利的缺口通常不會只靠一個項目補，而是售價、材料、銷量…一起分擔。
+ * 目標反推(組合拳)：照會議上實際的講法，每一個調整項目選一種方式 ——
  *
- * levers = [{ driver, share, capPct, fixed }]
- *   fixed   有填 = 這一項已經確定(例：銷量確定是 120 台/月)，直接套用，不參與反推
- *   share   分攤比例(只在 mode = 'share' 用；全部沒填就平均分攤)
- *   capPct  最多只能調 ±幾 %(例：售價最多漲 3%)；碰到上限後剩下的缺口由其他項目吸收
- * mode
- *   'share' 依比例分攤缺口：每一項先各自算出「負責的那一份缺口」要調多少，再整組一起套用、等比例微調到剛好達標
- *           (各項目之間有交互作用，例如售價變動也會影響佣金與貨物稅，所以不能單純相加)
- *   'equal' 同幅度：所有項目往有利的方向調同樣的 %，算出要調幾 %
+ * levers = [{ driver, mode, by, known, amount, capPct }]
+ *   mode 'known'  已知調整：已經談好、或想試試看的調整，直接套用
+ *                 by 'pct' 調 known %(−3 = 降 3%) / 'abs' 加減 known(−5000 = 少 5,000) / 'to' 調到 known(銷量就是 120 台)
+ *   mode 'amount' 負責金額：這一項要讓結果往目標的方向改善 amount(單台或月總額，跟 metric.basis 一樣)，
+ *                 例：採購負責 8,000 元/台 → 算出材料成本要降到多少
+ *   mode 'fill'   補足缺口：剩下的缺口依列表順序補，前一項碰到上限(capPct)才輪到下一項
+ *   capPct        負責金額、補足缺口的上限：最多只能調 ±幾 %(空白 = 不限)
  *
+ * 計算順序：先套用所有「已知調整」→ 依列表順序算「負責金額」→ 剩下的缺口由「補足缺口」依序補。
+ * 已知調整與負責金額就已經達到(或超過)目標時，補足項目不動。「變好」的方向看指標：成本/費用越低越好，其他越高越好。
  * 回傳每一項的 目前值 → 調整後、變動 %、是否碰到上限，以及「依列表順序逐項加入」的貢獻(加總剛好等於總改善，可以直接畫瀑布圖)。
  */
-function solveGoalMulti(scenarioId, metric, target, levers, mode) {
+/** 這個指標往哪個方向算「變好」：成本/費用越低越好(-1)，其他(營業淨利、毛利、收入…)越高越好(+1) */
+function metricGoodDir_(scenarioId, metric) {
+  var code = (metric && metric.code) || '';
+  if (!code || code === 'K') return 1;
+  var def = lineDefsForScenario_(scenarioId).filter(function (d) { return d.LineCode === code; })[0];
+  return def && ['成本', '成本明細', '費用', '費用明細', '模具', '設備'].indexOf(def.Category) !== -1 ? -1 : 1;
+}
+
+function solveGoalPlan(scenarioId, metric, target, levers) {
   if (!scenarioId) throw new Error('請先選擇情境');
   metric = metric || { code: '', basis: 'unit' };   // 空白 = 營業淨利(profitLineCode_)
   target = toNumber_(target);
-  mode = mode === 'equal' ? 'equal' : 'share';
   levers = (levers || []).filter(function (l) { return l && l.driver && l.driver.type; });
   if (!levers.length) throw new Error('請至少選一個調整項目');
   var seen = {};
@@ -290,17 +298,24 @@ function solveGoalMulti(scenarioId, metric, target, levers, mode) {
     if (seen[k]) throw new Error('「' + driverLabel_(l.driver) + '」重複選了兩次');
     seen[k] = true;
   });
+  var blank = function (v) { return v === '' || v === null || v === undefined || isNaN(Number(v)); };
   var positiveTypes = ['volume', 'price', 'fx', 'line', 'dev'];
   var items = levers.map(function (l) {
     var b = driverBase_(scenarioId, l.driver);
-    var fixed = l.fixed !== '' && l.fixed !== null && l.fixed !== undefined && !isNaN(Number(l.fixed));
-    var cap = l.capPct === '' || l.capPct === null || l.capPct === undefined || isNaN(Number(l.capPct)) ? null : Math.abs(Number(l.capPct));
-    return {
-      driver: l.driver, label: b.label, unit: b.unit, base: b.value,
-      fixed: fixed, value: fixed ? Number(l.fixed) : b.value,
-      share: Math.max(0, toNumber_(l.share)), cap: cap,
-      lower: positiveTypes.indexOf(l.driver.type) !== -1 ? 0 : null
+    var mode = l.mode === 'known' || l.mode === 'amount' ? l.mode : 'fill';
+    var it = {
+      driver: l.driver, label: b.label, unit: b.unit, base: b.value, mode: mode,
+      cap: blank(l.capPct) || mode === 'known' ? null : Math.abs(Number(l.capPct)),
+      lower: positiveTypes.indexOf(l.driver.type) !== -1 ? 0 : null,
+      amount: mode === 'amount' ? Math.abs(toNumber_(l.amount)) : 0
     };
+    if (mode === 'known') {
+      if (blank(l.known)) throw new Error('「' + b.label + '」是已知調整，請填要調多少');
+      var k = Number(l.known);
+      it.value = l.by === 'to' ? k : l.by === 'abs' ? b.value + k : b.value * (1 + k / 100);
+      if (it.lower !== null && it.value < it.lower) it.value = it.lower;
+    } else it.value = b.value;
+    return it;
   });
   var overridesFor = function (values) {
     var o = { scenarioId: scenarioId };
@@ -313,104 +328,116 @@ function solveGoalMulti(scenarioId, metric, target, levers, mode) {
   var metricAt = function (values) {
     return withOverrides_(overridesFor(values), function () { return whatIfMetric_(scenarioId, metric); });
   };
-  var baseValues = items.map(function (it) { return it.base; });
-  var metricBase = whatIfMetric_(scenarioId, metric);
-  var startValues = items.map(function (it) { return it.value; });   // 固定項目先套用
-  var metricStart = metricAt(startValues);
-  var gap = target - metricStart;
-  var free = items.map(function (it, i) { return it.fixed ? -1 : i; }).filter(function (i) { return i >= 0; });
-  var warnings = [];
-
-  var clampOf = function (it, x) {
-    if (it.cap !== null) {
-      var room = Math.abs(it.base) * it.cap / 100;
-      x = Math.max(it.base - room, Math.min(it.base + room, x));
+  var boundsOf = function (it) {
+    var lo = -Infinity, hi = Infinity;
+    if (it.cap !== null) { var room = Math.abs(it.base) * it.cap / 100; lo = it.base - room; hi = it.base + room; }
+    if (it.lower !== null) lo = Math.max(lo, it.lower);
+    return { lo: lo, hi: hi };
+  };
+  /**
+   * 只動第 i 項，讓結果 = goal(其他項目維持 values)。上限內做不到時停在最接近的那一端。
+   * 回傳 { value, reached }
+   */
+  var solveOne = function (values, i, goal) {
+    var it = items[i];
+    var at = function (x) { var v = values.slice(); v[i] = x; return metricAt(v) - goal; };
+    var bd = boundsOf(it);
+    if (bd.lo === -Infinity && bd.hi === Infinity) {
+      var x = solveScalar_(at, it.base, Math.abs(it.base) > 1e-9 ? Math.abs(it.base) * 0.05 : 1, it.lower);
+      return x === null ? { value: it.base, reached: false } : { value: x, reached: true };
     }
-    if (it.lower !== null && x < it.lower) x = it.lower;
-    return x;
+    var g0 = at(it.base);
+    if (Math.abs(g0) < 0.5) return { value: it.base, reached: true };
+    // 有上限：在 [lo, base] 或 [base, hi] 裡面找會跨過目標的那一段；沒有不限的那一端時往外擴大找
+    var ends = [bd.lo, bd.hi].map(function (e) {
+      if (isFinite(e)) return e;
+      var stp = Math.abs(it.base) > 1e-9 ? Math.abs(it.base) * 0.05 : 1, x = it.base, dir = e > 0 ? 1 : -1;
+      for (var k = 0; k < 22; k++) { x = it.base + dir * stp; if ((at(x) > 0) !== (g0 > 0)) return x; stp *= 2; }
+      return x;
+    });
+    for (var e = 0; e < 2; e++) {
+      var lo = it.base, hi = ends[e], gLo = g0, gHi = at(hi);
+      if ((gHi > 0) === (g0 > 0) && Math.abs(gHi) >= 0.5) continue;
+      for (var n = 0; n < 60; n++) {
+        var mid = (lo + hi) / 2, gm = at(mid);
+        if (Math.abs(gm) < 0.5 || Math.abs(hi - lo) < Math.max(1e-6, Math.abs(mid) * 1e-9)) return { value: mid, reached: true };
+        if ((gm > 0) === (gLo > 0)) { lo = mid; gLo = gm; } else hi = mid;
+      }
+      return { value: (lo + hi) / 2, reached: true };
+    }
+    // 上限內做不到：停在讓結果最接近目標的那一端
+    var best = Math.abs(at(ends[0])) <= Math.abs(at(ends[1])) ? ends[0] : ends[1];
+    return { value: Math.abs(at(best)) < Math.abs(g0) ? best : it.base, reached: false };
   };
 
-  var finalValues = startValues.slice();
-  var feasible = true, scale = 0, message = '';
-  if (free.length && Math.abs(gap) >= 0.5) {
-    // 每一項的「方向 × 幅度」(s = 1 時的變動量)
-    var delta = items.map(function () { return 0; });
-    if (mode === 'equal') {
-      free.forEach(function (i) {
-        var it = items[i];
-        if (!it.base) throw new Error('「' + it.label + '」目前是 0，不能用同幅度(%)調整，請改用「依比例分攤」');
-        var probe = startValues.slice(); probe[i] = it.base * 1.01;
-        var effect = metricAt(probe) - metricStart;
-        if (Math.abs(effect) < 1e-9) { warnings.push('「' + it.label + '」調整後結果不會變，不參與分攤'); return; }
-        delta[i] = (effect > 0) === (gap > 0) ? it.base * 0.01 : -it.base * 0.01;   // s 的單位 = 1%
-      });
-    } else {
-      var totalShare = free.reduce(function (sum, i) { return sum + items[i].share; }, 0);
-      free.forEach(function (i) {
-        var it = items[i];
-        var share = totalShare > 0 ? it.share / totalShare : 1 / free.length;
-        if (!share) return;
-        var part = metricStart + gap * share;
-        var x = solveScalar_(function (xx) { var v = startValues.slice(); v[i] = xx; return metricAt(v) - part; },
-          it.base, Math.abs(it.base) > 1e-9 ? Math.abs(it.base) * 0.05 : 1, it.lower);
-        if (x === null) { warnings.push('「' + it.label + '」單獨調整達不到它負責的那一份缺口，已由其他項目吸收'); return; }
-        delta[i] = x - it.base;
-      });
+  var baseValues = items.map(function (it) { return it.base; });
+  var metricBase = whatIfMetric_(scenarioId, metric);
+  var dir = metricGoodDir_(scenarioId, metric);     // 變好的方向(負責金額 = 往這個方向改善多少)
+  var values = items.map(function (it) { return it.value; });   // 已知調整先套用
+  var warnings = [];
+  var notes = items.map(function () { return ''; });
+  var capped = items.map(function () { return false; });
+
+  // 負責金額：依列表順序，每一項讓結果往目標方向改善 amount
+  items.forEach(function (it, i) {
+    if (it.mode !== 'amount' || !it.amount) return;
+    var now = metricAt(values);
+    var r = solveOne(values, i, now + dir * it.amount);
+    values[i] = r.value;
+    if (!r.reached) {
+      var got = (metricAt(values) - now) * dir;
+      capped[i] = it.cap !== null;
+      notes[i] = '只做得到 ' + Math.round(got);
+      warnings.push('「' + it.label + '」負責 ' + Math.round(it.amount) + '，' + (it.cap !== null ? '在上限 ±' + it.cap + '% 內' : '') + '只做得到 ' + Math.round(got) + '，差額留給補足缺口的項目');
     }
-    var active = free.filter(function (i) { return delta[i] !== 0; });
-    if (!active.length) {
+  });
+
+  // 補足缺口：剩下的缺口依列表順序補；已經達到或超過目標就不動
+  var fills = items.map(function (it, i) { return it.mode === 'fill' ? i : -1; }).filter(function (i) { return i >= 0; });
+  var before = metricAt(values);
+  var remaining = target - before;
+  // 已經達到(或超過)目標：補足項目不動，不會為了「剛好等於目標」把結果往壞的方向調
+  var reachedByKnown = Math.abs(remaining) < 0.5 || (remaining > 0 ? 1 : -1) !== dir;
+  var feasible = true, message = '';
+  if (!reachedByKnown) {
+    var done = false;
+    fills.some(function (i) {
+      var r = solveOne(values, i, target);
+      values[i] = r.value;
+      if (r.reached) { done = true; return true; }
+      capped[i] = items[i].cap !== null;
+      return false;
+    });
+    if (!done) {
       feasible = false;
-      message = '選的項目都無法改善這個結果。';
-    } else {
-      var valuesAt = function (sv) {
-        var v = startValues.slice();
-        active.forEach(function (i) { v[i] = clampOf(items[i], items[i].base + sv * delta[i]); });
-        return v;
-      };
-      var h = function (sv) { return metricAt(valuesAt(sv)) - target; };
-      var h0 = metricStart - target;
-      var lo = 0, hi = mode === 'equal' ? 1 : 1, hHi = h(hi), k = 0, prevV = null;
-      while ((hHi > 0) === (h0 > 0) && Math.abs(hHi) >= 0.5 && k++ < 24) {
-        var vNow = JSON.stringify(valuesAt(hi));
-        if (vNow === prevV) break;                  // 全部碰到上限(或 0)了，再放大也沒用
-        prevV = vNow;
-        lo = hi; hi *= 2; hHi = h(hi);
-      }
-      if ((hHi > 0) === (h0 > 0) && Math.abs(hHi) >= 0.5) {
-        feasible = false;
-        finalValues = valuesAt(hi);
-        message = '在設定的上限內達不到目標，最多只能做到 ' + Math.round(metricAt(finalValues)) + '。可以放寬上限或再加一個調整項目。';
-      } else {
-        var hLo = h(lo);
-        for (var it2 = 0; it2 < 60; it2++) {
-          var mid = (lo + hi) / 2, hm = h(mid);
-          if (Math.abs(hm) < 0.5) { lo = hi = mid; break; }
-          if ((hm > 0) === (hLo > 0)) { lo = mid; hLo = hm; } else hi = mid;
-        }
-        scale = (lo + hi) / 2;
-        finalValues = valuesAt(scale);
-      }
+      var achievedNow = metricAt(values);
+      var only = fills.length === 1 && items[fills[0]].cap === null && items[fills[0]].driver.type === 'volume';
+      var short = Math.round(Math.abs(target - achievedNow));
+      if (!fills.length) message = '照這樣調整做到 ' + Math.round(achievedNow) + '，離目標還差 ' + short + '。要算剩下的缺口怎麼補，加一個「補足缺口」的項目。';
+      else message = '補足缺口的項目' + (fills.some(function (i) { return items[i].cap !== null; }) ? '在上限內' : '') + '補不滿，最多做到 ' +
+        Math.round(achievedNow) + '，離目標還差 ' + short + '。' +
+        (only ? '只靠台數補不起來，通常是單台的變動成本已經高於售價，賣越多虧越多，要先改善售價或成本。' : '可以放寬上限、再加一個補足的項目，或調整已知調整。');
     }
   }
 
   // 依列表順序逐項加入，算每一項的貢獻(加總 = 總改善)
   var running = baseValues.slice(), prevMetric = metricBase;
   var out = items.map(function (it, i) {
-    running[i] = finalValues[i];
+    running[i] = values[i];
     var m = metricAt(running);
     var contribution = m - prevMetric;
     prevMetric = m;
-    var room = it.cap !== null ? Math.abs(it.base) * it.cap / 100 : null;
     return {
-      driver: it.driver, label: it.label, unit: it.unit, base: it.base, value: finalValues[i],
-      pct: it.base ? (finalValues[i] / it.base - 1) * 100 : null,
-      fixed: it.fixed, capped: room !== null && !it.fixed && Math.abs(Math.abs(finalValues[i] - it.base) - room) < Math.max(1e-6, room * 1e-6) && room > 0,
-      contribution: contribution
+      driver: it.driver, label: it.label, unit: it.unit, base: it.base, value: values[i], mode: it.mode,
+      pct: it.base ? (values[i] / it.base - 1) * 100 : null,
+      capped: capped[i], note: notes[i], contribution: contribution
     };
   });
   return {
-    feasible: feasible, mode: mode, metricBase: metricBase, achieved: prevMetric, target: target,
-    equalPct: mode === 'equal' ? scale : null, levers: out, warnings: warnings, message: message
+    feasible: feasible, metricBase: metricBase, achieved: prevMetric, target: target,
+    reachedByKnown: reachedByKnown && fills.length > 0 && Math.abs(remaining) >= 0.5,
+    alreadyMet: (target - metricBase) * dir <= 0.5,
+    levers: out, warnings: warnings, message: message
   };
 }
 

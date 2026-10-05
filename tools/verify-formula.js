@@ -278,34 +278,66 @@ check('目標反推與敏感度：解出來的值代回去會達到目標，且�
   near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '試算完存檔的數字不能變', 0.01);
 });
 
-check('多項目標反推：缺口由多個項目分擔、上限、同幅度、固定值，貢獻加總 = 總改善', () => {
+check('目標反推(組合拳)：已知調整、負責金額、補足缺口依序計算，貢獻加總 = 總改善', () => {
   reset();
   const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
   const goal = k0 + 30000;
+  const M = { code: 'K', basis: 'unit' };
   const sum = r => r.levers.reduce((s, l) => s + l.contribution, 0);
-  const a = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, goal, [
-    { driver: { type: 'price' }, share: 50 }, { driver: { type: 'line', code: 'b1' }, share: 30 }, { driver: { type: 'line', code: 'b2' }, share: 20 }
-  ], 'share');
+  // 已知調整：材料成本-LP 降 2%(照 % 套用)，剩下的由售價補
+  const a = gs.solveGoalPlan(sid, M, goal, [
+    { driver: { type: 'line', code: 'b1' }, mode: 'known', by: 'pct', known: -2 },
+    { driver: { type: 'price' }, mode: 'fill' }
+  ]);
   assert(a.feasible, '應該達得到：' + a.message);
-  near(a.achieved, goal, '依比例分攤：達到目標', 1);
+  near(a.levers[0].pct, -2, '已知調整 −2% 直接套用', 1e-6);
+  near(a.achieved, goal, '售價補足剩下的缺口', 1);
   near(sum(a), goal - k0, '逐項貢獻加總 = 總改善', 1);
-  assert(a.levers[0].value > a.levers[0].base && a.levers[1].value < a.levers[1].base, '售價往上、材料往下');
-  near(a.levers[1].contribution / (goal - k0), 0.3, '材料成本-LP 大約負責 30%', 0.05);
-  const c = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, goal, [
-    { driver: { type: 'price' }, share: 50, capPct: 0.5 }, { driver: { type: 'line', code: 'b1' }, share: 50 }
-  ], 'share');
-  near(c.achieved, goal, '售價碰到上限，剩下由材料吸收', 1);
-  assert(c.levers[0].capped && Math.abs(c.levers[0].pct - 0.5) < 1e-6, '售價應標示碰到上限 0.5%：' + JSON.stringify(c.levers[0]));
-  const e = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, goal, [{ driver: { type: 'price' } }, { driver: { type: 'line', code: 'b1' } }], 'equal');
-  near(e.achieved, goal, '同幅度：達到目標', 1);
-  near(e.levers[0].pct, -e.levers[1].pct, '售價漲幾 %、材料就降幾 %', 1e-6);
-  const f = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, goal, [
-    { driver: { type: 'volume' }, fixed: 500 }, { driver: { type: 'line', code: 'b1' } }
-  ], 'share');
-  assert(f.levers[0].fixed && f.levers[0].value === 500, '固定值直接套用');
-  near(f.achieved, goal, '固定銷量後由材料補足', 1);
-  const x = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, k0 + 1e7, [{ driver: { type: 'price' }, capPct: 1 }, { driver: { type: 'line', code: 'b1' }, capPct: 1 }], 'share');
-  assert(!x.feasible && /上限/.test(x.message), '上限內達不到要說明：' + x.message);
+  assert(a.levers[1].value > a.levers[1].base, '售價往上補');
+  // 已知調整的另外兩種寫法：加減、調到
+  const b = gs.solveGoalPlan(sid, M, goal, [
+    { driver: { type: 'line', code: 'b1' }, mode: 'known', by: 'abs', known: -10000 },
+    { driver: { type: 'volume' }, mode: 'known', by: 'to', known: 500 }
+  ]);
+  near(b.levers[0].base - b.levers[0].value, 10000, '加減：少 1 萬', 1e-6);
+  assert(b.levers[1].value === 500, '調到：銷量就是 500');
+  assert(!b.feasible && /還差/.test(b.message) && /補足缺口/.test(b.message), '沒有補足項目時說明還差多少：' + b.message);
+  // 負責金額：材料負責 8,000，剩下的由售價補
+  const c = gs.solveGoalPlan(sid, M, goal, [
+    { driver: { type: 'line', code: 'b1' }, mode: 'amount', amount: 8000 },
+    { driver: { type: 'price' }, mode: 'fill' }
+  ]);
+  near(c.levers[0].contribution, 8000, '材料成本-LP 負責 8,000 元/台', 1);
+  near(c.achieved, goal, '剩下由售價補足', 1);
+  // 補足缺口依順序：售價最多 0.5%，碰到上限後換材料
+  const d = gs.solveGoalPlan(sid, M, goal, [
+    { driver: { type: 'price' }, mode: 'fill', capPct: 0.5 },
+    { driver: { type: 'line', code: 'b1' }, mode: 'fill' }
+  ]);
+  near(d.achieved, goal, '售價碰到上限，剩下由材料補', 1);
+  assert(d.levers[0].capped && Math.abs(d.levers[0].pct - 0.5) < 1e-6, '售價應標示碰到上限 0.5%：' + JSON.stringify(d.levers[0]));
+  // 第一個補足項目就夠了：後面的不動
+  const e = gs.solveGoalPlan(sid, M, k0 + 1000, [
+    { driver: { type: 'line', code: 'b1' }, mode: 'fill' }, { driver: { type: 'price' }, mode: 'fill' }
+  ]);
+  assert(e.feasible && e.levers[1].value === e.levers[1].base, '第一項補得滿，第二項不該動');
+  // 已知調整就超過目標：補足項目不動
+  const f = gs.solveGoalPlan(sid, M, k0 + 1000, [
+    { driver: { type: 'line', code: 'b1' }, mode: 'known', by: 'abs', known: -5000 }, { driver: { type: 'price' }, mode: 'fill' }
+  ]);
+  assert(f.reachedByKnown && f.levers[1].value === f.levers[1].base, '已知調整就超過目標時，補足項目不動');
+  // 目標比目前還差(已經達到)：補足項目不會為了剛好等於目標而往壞的方向調；負責金額照樣是改善
+  const g = gs.solveGoalPlan(sid, M, k0 - 20000, [
+    { driver: { type: 'line', code: 'b1' }, mode: 'amount', amount: 3000 }, { driver: { type: 'price' }, mode: 'fill' }
+  ]);
+  assert(g.alreadyMet && g.reachedByKnown && g.levers[1].value === g.levers[1].base, '已經達到目標時補足項目不動：' + JSON.stringify(g.levers[1]));
+  near(g.levers[0].contribution, 3000, '負責金額一律是往好的方向改善', 1);
+  // 看成本科目時，越低越好：負責金額讓成本降低
+  const h = gs.solveGoalPlan(sid, { code: 'B', basis: 'unit' }, 0, [{ driver: { type: 'line', code: 'b1' }, mode: 'amount', amount: 5000 }]);
+  near(h.levers[0].contribution, -5000, '銷貨成本負責 5,000 = 成本少 5,000', 1);
+  // 上限內補不滿：說明最多做到多少
+  const x = gs.solveGoalPlan(sid, M, k0 + 1e7, [{ driver: { type: 'price' }, mode: 'fill', capPct: 1 }, { driver: { type: 'line', code: 'b1' }, mode: 'fill', capPct: 1 }]);
+  assert(!x.feasible && /上限/.test(x.message) && x.levers.every(l => l.capped), '上限內達不到要說明：' + x.message);
   reset();
   near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '試算完存檔的數字不能變', 0.01);
 });
@@ -313,10 +345,10 @@ check('多項目標反推：缺口由多個項目分擔、上限、同幅度、�
 check('目標反推另存成新情境：資料寫實後重算的營業淨利 = 試算值，來源情境不變', () => {
   reset();
   const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
-  const r = gs.solveGoalMulti(sid, { code: 'K', basis: 'unit' }, k0 + 40000, [
-    { driver: { type: 'price' }, share: 30 }, { driver: { type: 'line', code: 'b1' }, share: 30 },
-    { driver: { type: 'dev' }, share: 20 }, { driver: { type: 'volume' }, share: 20 }
-  ], 'share');
+  const r = gs.solveGoalPlan(sid, { code: 'K', basis: 'unit' }, k0 + 40000, [
+    { driver: { type: 'volume' }, mode: 'known', by: 'pct', known: 10 }, { driver: { type: 'dev' }, mode: 'known', by: 'pct', known: -10 },
+    { driver: { type: 'line', code: 'b1' }, mode: 'amount', amount: 10000 }, { driver: { type: 'price' }, mode: 'fill' }
+  ]);
   assert(r.feasible, r.message);
   const saved = gs.saveWhatIfAsScenario(sid, r.levers.map(l => ({ driver: l.driver, value: l.value })), { ScenarioName: '反推目標', ScenarioType: '目標' });
   near(saved.actual, saved.expected, '新情境重算 = 試算', 1);

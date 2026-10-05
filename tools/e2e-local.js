@@ -245,19 +245,26 @@ async function main() {
   assert(await page.$('#wi-sens-result .sens-table .sens-base'), '自訂值的表格也要框出目前的數字');
   await page.click(`.seg-btn[onclick*="setSensMode_('row','pct')"]`);
 
-  // 目標反推加到三項(組合拳)：營業淨利缺口由售價、材料、開發總投一起分擔，結果表 + 瀑布圖，可以帶到瀑布圖工具
+  // 目標反推(組合拳)：三種方式各一(已知調整、負責金額、補足缺口)，結果表 + 瀑布圖，可以帶到瀑布圖工具
   await page.click('nav button[data-tab="whatif"]');
   await page.waitForSelector('#wi-multi');
-  await page.click('button:has-text("缺口由售價、材料、開發總投一起分擔")');
-  await page.waitForFunction(() => document.querySelectorAll('#wi-lever-body tr').length === 3);
-  await page.fill('#wi-multi-target', '-150000');
+  await page.click('button:has-text("組合拳範例")');
+  await page.waitForFunction(() => document.querySelectorAll('#wi-lever-body tr').length === 4);
+  const modes = await page.$$eval('#wi-lever-body select.lever-mode', ss => ss.map(s => s.value));
+  assert(modes.join() === 'known,amount,fill,fill', '組合拳範例應該是 已知調整、負責金額、補足缺口×2：' + modes.join());
+  // 目標 = 目前營業淨利 + 3 萬(要改善才達得到)
+  const planTarget = await page.evaluate(() => Math.round(whatIfOptions.metrics.find(m => m.code === profitCodeOf_(whatIfOptions)).value + 30000));
+  await page.fill('#wi-multi-target', String(planTarget));
   await page.click('#wi-multi button:has-text("計算")');
   await page.waitForSelector('#wi-multi-result .lever-table', { timeout: 30000 });
-  assert(/可以達成/.test(await page.textContent('#wi-multi-result')), '多項目標反推：-15 萬應該達得到：' + (await page.textContent('#wi-multi-result')).slice(0, 200));
-  assert((await page.$$('#wi-multi-result .wf-bar')).length === 5, '多項目標反推的瀑布圖應該有 目前 + 3 項 + 達成 共 5 根');
+  const planText = await page.textContent('#wi-multi-result');
+  assert(/可以達成/.test(planText), '組合拳應該達得到：' + planText.slice(0, 200));
+  assert(/已知調整/.test(planText) && /負責金額/.test(planText) && /補足缺口/.test(planText), '結果表要列出每一項的方式');
+  const planBars = (await page.$$('#wi-multi-result .wf-bar')).length;
+  assert(planBars >= 4, '組合拳的瀑布圖至少要有 目前 + 兩項 + 達成：' + planBars);
   await page.click('#wi-multi-result button:has-text("在瀑布圖工具開啟")');
   await page.waitForSelector('#wf-manual-body tr');
-  assert((await page.$$('#wf-chart .wf-bar')).length === 5, '帶到瀑布圖工具(自訂)後應該一樣是 5 根');
+  assert((await page.$$('#wf-chart .wf-bar')).length === planBars, '帶到瀑布圖工具(自訂)後根數應該一樣');
 
   // 瀑布圖工具：兩個欄位的差異，每一根加總要剛好接到終點；可以下載 PNG
   await page.click('#wf-body .seg-btn:has-text("兩個欄位的差異")');
