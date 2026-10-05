@@ -36,7 +36,7 @@ const ENTITIES = {
     label: '車型主檔', pk: 'VehicleTypeID',
     getFn: 'getVehicleTypes', saveGridFn: 'saveVehicleTypeGrid', deleteFn: 'deleteVehicleType',
     renameFn: 'renameVehicleType', scopedBy: null, createUi: 'vehicleType',
-    intro: '車型是最上層的單位。<b>每個車型各自有一份科目表</b>（科目在不同車型間差異很大，不再共用同一份），建立車型時可以選擇從標準範本或從既有車型複製。',
+    intro: '車型是最上層的單位。<b>每個車型各自有一份科目表</b>（科目在不同車型間差異很大，各自調整互不影響），建立車型時可以選擇從標準範本或從既有車型複製。',
     columns: [
       { name: 'VehicleTypeID', label: '車型代號', lockAfterCreate: true, width: 140 },
       { name: 'Notes', label: '備註', width: 420 }
@@ -57,7 +57,7 @@ const ENTITIES = {
     label: '情境設定', pk: 'ScenarioID',
     getFn: 'getScenarios', saveGridFn: 'saveScenarioGrid', deleteFn: 'deleteScenario',
     scopedBy: 'vehicleType', createUi: 'scenario', sortable: 'setScenarioOrder',
-    intro: '同一個 GATE 底下可以有多個情境（現況 / 目標 / 前回）。目標情境才有挑戰低減目標；新情境可以整批帶入既有情境的資料再調整。拖曳 ⠿ 調整情境選單的順序。',
+    intro: '同一個 GATE 底下可以有多個情境（現況 / 目標，例如上一次審議的目標就是 GATE 報告裡的「前回」）。目標情境才有挑戰低減目標；新情境可以整批帶入既有情境的資料再調整。拖曳 ⠿ 調整情境選單的順序。',
     columns: [
       { name: 'Gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, width: 110 },
       { name: 'ScenarioName', label: '情境名稱', width: 200 },
@@ -153,6 +153,11 @@ function fmt(v, digits) {
   // 四捨五入後是 0 的負數(如 -0.3)不要顯示成「-0」
   if (Math.abs(n) < 0.5 * Math.pow(10, -d)) return '0';
   return n.toLocaleString(undefined, { maximumFractionDigits: d });
+}
+/** 百分比取一位小數：-0.04% 四捨五入是 0，不要顯示成「-0.0」 */
+function pct1_(v) {
+  const r = Math.round((Number(v) || 0) * 10) / 10;
+  return (r === 0 ? 0 : r).toFixed(1);
 }
 /**
  * 金額單位：全系統共用一個設定(儀表板、GATE 報告、瀑布圖工具、目標反推的瀑布圖)，任何一頁改了，其他頁下次打開就跟著變。
@@ -596,6 +601,7 @@ function setCurrentScenario(value) {
     badge.style.display = currentScenario ? 'inline-flex' : 'none';
   }
   saveAppState_();
+  if (typeof syncMastersScenarioMarks_ === 'function') syncMastersScenarioMarks_();
 }
 
 function onVehicleTypeChange(value) {
@@ -679,24 +685,31 @@ function installExcelPaste_() {
     const grid = parseClipboardGrid_(text);
     const tr = td.parentElement;
     const body = tr.parentElement;
-    const rows = Array.from(body.children).filter(r => r.tagName === 'TR' && r.style.display !== 'none' && !r.hidden);
+    // 小標題列(.group-row)不是資料列，貼上時跳過，Excel 連續的一塊才會對到連續的科目
+    const rows = Array.from(body.children).filter(r => r.tagName === 'TR' && r.style.display !== 'none' && !r.hidden && !r.classList.contains('group-row'));
     const r0 = rows.indexOf(tr), c0 = Array.from(tr.children).indexOf(td);
     let filled = 0, skipped = 0;
+    const bad = [];   // 填不進去的內容(畫面上把那一格標起來，提示裡列出前幾個)
+    const skip = (cell, raw) => {
+      skipped++;
+      if (bad.length < 3 && String(raw).trim()) bad.push(String(raw).trim());
+      if (cell) { cell.classList.add('paste-skip'); setTimeout(() => cell.classList.remove('paste-skip'), 8000); }
+    };
     grid.forEach((cells, dr) => {
       const row = rows[r0 + dr];
       if (!row) { skipped += cells.length; return; }
       cells.forEach((raw, dc) => {
         const cell = row.children[c0 + dc];
         const input = cell && cell.querySelector('input:not([type=checkbox]):not([disabled]),select:not([disabled])');
-        if (!input) { if (String(raw).trim()) skipped++; return; }
+        if (!input) { if (String(raw).trim()) skip(cell, raw); return; }
         let v = raw.trim();
         if (input.type === 'number') {
           const n = parsePastedNumber_(v);
-          if (n === null) { skipped++; return; }
+          if (n === null) { skip(cell, raw); return; }
           v = n === '' ? '' : String(n);
         } else if (input.tagName === 'SELECT') {
           const opt = Array.from(input.options).find(o => o.value === v || o.text === v);
-          if (!opt) { skipped++; return; }
+          if (!opt) { skip(cell, raw); return; }
           v = opt.value;
         }
         input.value = v;
@@ -705,6 +718,6 @@ function installExcelPaste_() {
         filled++;
       });
     });
-    toast(`已從剪貼簿填入 ${filled} 格` + (skipped ? `，${skipped} 格無法填入（超出表格、唯讀或不是數字）` : '') + '。確認後記得儲存。', skipped ? 'warn' : 'ok', 4500);
+    toast(`已從剪貼簿填入 ${filled} 格` + (skipped ? `，${skipped} 格無法填入（超出表格、唯讀或不是數字${bad.length ? '，例如「' + bad.join('」「') + '」' : ''}；表格上標紅的格子）` : '') + '。確認後記得儲存。', skipped ? 'warn' : 'ok', skipped ? 8000 : 4500);
   });
 }

@@ -51,13 +51,48 @@ function getVehicleTypes() {
 function saveVehicleType(rowObj) {
   return withLock_(function () { return upsertRowMerge_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', rowObj); });
 }
+/**
+ * 刪除車型：底下的車系、情境(連同每個情境的輸入資料、作法、說明、計算結果)、快照、自己的科目表一起刪掉。
+ * 只刪主檔那一列的話，車系與情境資料還在卻看不到；之後用同一個代號重建車型或新增同代號車系時，舊資料又會冒出來。
+ */
 function deleteVehicleType(vehicleTypeId) {
   return withLock_(function () {
+    var ofType = function (sheetName) {
+      return (sheetToObjects_(sheetName) || []).filter(function (r) { return r.VehicleTypeID === vehicleTypeId; });
+    };
+    var scenarioIds = ofType(SHEETS.SCENARIOS).map(function (r) { return r.ScenarioID; });
+    deleteScenarioData_(scenarioIds);
+    if (scenarioIds.length) batchWriteRows_(SHEETS.SCENARIOS, 'ScenarioID', [], scenarioIds);
+    var vehicleIds = ofType(SHEETS.VEHICLES).map(function (r) { return r.VehicleID; });
+    if (vehicleIds.length) batchWriteRows_(SHEETS.VEHICLES, 'VehicleID', [], vehicleIds);
+    var actionIds = ofType(SHEETS.ACTIONS).map(function (r) { return r.ActionID; });
+    if (actionIds.length) batchWriteRows_(SHEETS.ACTIONS, 'ActionID', [], actionIds);
+    if (sheetExists_(SHEETS.SNAPSHOTS)) {
+      var snapIds = ofType(SHEETS.SNAPSHOTS).map(function (r) { return r.SnapshotID; });
+      if (snapIds.length) batchWriteRows_(SHEETS.SNAPSHOTS, 'SnapshotID', [], snapIds);
+    }
     // 車型自己的那份科目表一起刪掉(科目表是跟著車型走的)
-    var chart = (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) { return r.VehicleTypeID === vehicleTypeId; })
-      .map(function (r) { return r.LineID; });
+    var chart = ofType(SHEETS.PL_LINE_ITEMS).map(function (r) { return r.LineID; });
     if (chart.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', [], chart);
     return deleteRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', vehicleTypeId);
+  });
+}
+
+/** 掛在情境底下的表(ScenarioID)與各自的主鍵：刪情境時一起清掉 */
+var SCENARIO_DATA_SHEETS_ = [
+  [SHEETS.SALES_MIX, 'RowID'], [SHEETS.COST_OF_SALES, 'RowID'], [SHEETS.DEV_INVESTMENT, 'RowID'],
+  [SHEETS.OPERATING_EXPENSE, 'RowID'], [SHEETS.PARAMETERS, 'ParamID'], [SHEETS.LINE_NOTES, 'RowID'],
+  [SHEETS.ACTIONS, 'ActionID'], [SHEETS.PL_RESULT, 'ResultID']
+];
+function deleteScenarioData_(scenarioIds) {
+  var ids = {};
+  (scenarioIds || []).forEach(function (id) { if (id) ids[id] = true; });
+  if (!Object.keys(ids).length) return;
+  SCENARIO_DATA_SHEETS_.forEach(function (pair) {
+    if (!sheetExists_(pair[0])) return;
+    var dead = (sheetToObjects_(pair[0]) || []).filter(function (r) { return ids[r.ScenarioID]; })
+      .map(function (r) { return r[pair[1]]; });
+    if (dead.length) batchWriteRows_(pair[0], pair[1], [], dead);
   });
 }
 /** 車型主檔整批儲存：整張表直接編輯、按一次儲存（沒填代號的空白新增列會被略過） */
@@ -81,6 +116,7 @@ function renameVehicleType(oldId, newId) {
     newId = String(newId || '').trim();
     if (!oldId || !newId) throw new Error('車型代號不能為空');
     if (oldId === newId) return getVehicleTypes();
+    validateCode_('車型代號', newId);
     var existing = getVehicleTypes();
     var row = existing.filter(function (t) { return t.VehicleTypeID === oldId; })[0];
     if (!row) throw new Error('找不到車型：' + oldId);
@@ -129,13 +165,39 @@ function getVehicles(vehicleTypeId) {
 function saveVehicle(rowObj) {
   return withLock_(function () { return upsertRowMerge_(SHEETS.VEHICLES, 'VehicleID', rowObj); });
 }
+/** 刪除車系：它在各情境的銷售構成、成本、費用、車系參數、說明一起刪掉，免得之後新增同代號車系時舊數字又冒出來 */
 function deleteVehicle(vehicleId) {
-  return withLock_(function () { return deleteRow_(SHEETS.VEHICLES, 'VehicleID', vehicleId); });
+  return withLock_(function () {
+    [[SHEETS.SALES_MIX, 'RowID'], [SHEETS.COST_OF_SALES, 'RowID'], [SHEETS.OPERATING_EXPENSE, 'RowID'],
+      [SHEETS.PARAMETERS, 'ParamID'], [SHEETS.LINE_NOTES, 'RowID'], [SHEETS.PL_RESULT, 'ResultID']].forEach(function (pair) {
+      if (!sheetExists_(pair[0])) return;
+      var dead = (sheetToObjects_(pair[0]) || []).filter(function (r) { return vehicleId && r.VehicleID === vehicleId; })
+        .map(function (r) { return r[pair[1]]; });
+      if (dead.length) batchWriteRows_(pair[0], pair[1], [], dead);
+    });
+    return deleteRow_(SHEETS.VEHICLES, 'VehicleID', vehicleId);
+  });
 }
 /** 車系設定整批儲存 */
 function saveVehicleGrid(vehicleTypeId, rows) {
   return withLock_(function () {
-    var existingByPk = indexByPk_(sheetToObjects_(SHEETS.VEHICLES), 'VehicleID');
+    var all = sheetToObjects_(SHEETS.VEHICLES) || [];
+    var existingByPk = indexByPk_(all, 'VehicleID');
+    var types = indexByPk_(getVehicleTypes(), 'VehicleTypeID');
+    // 車系代號是全資料庫唯一的主鍵：同一張表重複、或已經屬於別的車型，直接存會把那一列整個蓋掉(連車型都換掉)
+    var seen = {};
+    (rows || []).forEach(function (r) {
+      var id = String(r.VehicleID || '').trim();
+      if (!id) return;
+      r.VehicleID = id;
+      if (seen[id]) throw new Error('車系代號「' + id + '」重複了，每個車系的代號要不一樣');
+      seen[id] = true;
+      var owner = existingByPk[id] ? existingByPk[id].VehicleTypeID : '';
+      if (!owner) { validateCode_('車系代號', id); return; }
+      if (owner !== vehicleTypeId && types[owner]) {
+        throw new Error('車系代號「' + id + '」已經用在車型 ' + owner + '，請換一個代號（例如加上車型代號）');
+      }
+    });
     var upserts = (rows || []).filter(function (r) { return r.VehicleID; })
       .map(function (r) {
         r.VehicleTypeID = vehicleTypeId;
@@ -179,6 +241,7 @@ function renameVehicle(vehicleTypeId, oldId, newId) {
     newId = String(newId || '').trim();
     if (!oldId || !newId) throw new Error('車系代號不能為空');
     if (oldId === newId) return getVehicles(vehicleTypeId);
+    validateCode_('車系代號', newId);
     var existing = getVehicles();
     var row = existing.filter(function (v) { return v.VehicleID === oldId; })[0];
     if (!row) throw new Error('找不到車系：' + oldId);
@@ -240,8 +303,12 @@ function saveScenario(rowObj) {
     return upsertRowMerge_(SHEETS.SCENARIOS, 'ScenarioID', rowObj);
   });
 }
+/** 刪除情境：這個情境的輸入資料、作法、說明、計算結果一起刪掉(快照保留，之後仍可拿來比較) */
 function deleteScenario(scenarioId) {
-  return withLock_(function () { return deleteRow_(SHEETS.SCENARIOS, 'ScenarioID', scenarioId); });
+  return withLock_(function () {
+    deleteScenarioData_([scenarioId]);
+    return deleteRow_(SHEETS.SCENARIOS, 'ScenarioID', scenarioId);
+  });
 }
 
 /** 情境設定整批儲存（既有情境直接在表格上改名/改性質，按一次儲存） */
@@ -395,7 +462,10 @@ function buildAmountMatrix_(sheetName, scenarioId, vehicleTypeId, lineOptions) {
     };
   });
 
-  return { lines: lineOptions, vehicles: vehicles, values: values, lineNotes: getLineNotes(scenarioId) };
+  // 科目代碼 → 名稱(整份科目表)：公式說明要把 P8 這類代碼換成名稱，售價結構等不在這張表上的科目也要查得到
+  var lineNames = {};
+  getPLLineItems(vehicleTypeId).forEach(function (d) { lineNames[d.LineCode] = d.LineName; });
+  return { lines: lineOptions, vehicles: vehicles, values: values, lineNotes: getLineNotes(scenarioId), lineNames: lineNames };
 }
 
 /**
@@ -667,9 +737,20 @@ function getRateGrid(scenarioId, vehicleTypeId) {
     })[0];
   };
 
+  // 同車型的其他情境有沒有填：參數值是每個情境各一份，只在一個情境填了，其他情境就會用預設值(沒有預設值 = 0)
+  var siblings = vehicleTypeId ? getScenarios(vehicleTypeId).filter(function (sc) { return sc.ScenarioID !== scenarioId; }) : [];
+  var allParams = siblings.length ? (sheetToObjects_(SHEETS.PARAMETERS) || []) : [];
+  var filledIn = function (name) {
+    var set = {};
+    allParams.forEach(function (p) { if (p.ParamName === name && p.Value !== '' && p.Value !== null) set[p.ScenarioID] = true; });
+    return set;
+  };
   var rates = getParamDefs().map(function (def) {
     var name = def.ParamName;
     var global = find(name, '');
+    var hasDefault = (def.DefaultValue !== '' && def.DefaultValue !== undefined) || DEFAULT_PARAMS[name] !== undefined;
+    var filled = filledIn(name);
+    var label = function (sc) { return (sc.Gate ? sc.Gate + ' ' : '') + (sc.ScenarioName || sc.ScenarioID); };
     var overrides = {};
     vehicles.forEach(function (v) {
       var row = find(name, v.VehicleID);
@@ -682,6 +763,10 @@ function getRateGrid(scenarioId, vehicleTypeId) {
       globalValue: global ? toNumber_(global.Value) : (def.DefaultValue !== '' && def.DefaultValue !== undefined ? def.DefaultValue :
         (DEFAULT_PARAMS[name] !== undefined ? DEFAULT_PARAMS[name] : '')),
       isDefault: !global,
+      hasDefault: hasDefault,
+      // 沒有預設值的參數：哪些其他情境沒填(公式會當 0)、哪些有填
+      missingIn: hasDefault ? [] : siblings.filter(function (sc) { return !filled[sc.ScenarioID]; }).map(label),
+      filledIn: siblings.filter(function (sc) { return filled[sc.ScenarioID]; }).map(label),
       unit: def.Unit, description: def.Description, isPreset: def.isPreset, defaultValue: def.DefaultValue,
       overrides: overrides
     };

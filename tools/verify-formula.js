@@ -246,6 +246,29 @@ check('公式用科目名稱寫，存成代碼；科目改名不會讓公式斷�
   reset();
 });
 
+check('損益兩平點很低時(遠低於目前銷量)也找得到；假設銷量 0 台要照算，不能當成沒調整', () => {
+  reset();
+  const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
+  const zero = gs.sensitivityTable(sid, { code: 'K', basis: 'month' }, { type: 'volume' }, [0], null, []);
+  near(zero.cells[0][0], 0, '銷量 0 台時月營業淨利(變動部分)應該是 0，不是目前的數字', 1);
+  // 材料成本降到很低 → 單台淨利大幅轉正，只剩開發攤提要靠台數攤平 → 損益兩平點遠低於目前銷量
+  const m = gs.getCostOfSalesMatrix(sid, 'DA');
+  const orig = [], low = [];
+  Object.keys(m.values.b1 || {}).forEach(v => {
+    const c = m.values.b1[v];
+    orig.push({ RowID: c.RowID, VehicleID: v, LineCode: 'b1', Amount: c.Amount, Currency: c.Currency, Notes: c.Notes || '' });
+    low.push({ RowID: c.RowID, VehicleID: v, LineCode: 'b1', Amount: 1000, Currency: 'TWD', Notes: c.Notes || '' });
+  });
+  gs.saveCostOfSalesMatrix(sid, low, {});
+  reset();
+  const v = gs.solveGoal(sid, { code: 'K', basis: 'unit' }, 0, { type: 'volume' });
+  assert(v.feasible && v.value > 0 && v.value < v.base * 0.2, '損益兩平月銷量應該找得到且遠低於目前銷量：' + JSON.stringify(v));
+  near(v.achieved, 0, '代回去單台營業淨利應為 0', 1);
+  gs.saveCostOfSalesMatrix(sid, orig, {});
+  reset();
+  near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '還原後數字不變', 0.01);
+});
+
 check('從 Excel 匯入整張表：名稱對應、新增缺少的科目、略過公式科目', () => {
   const rep = gs.importMatrixRows(sid, 'DA', 'cost', [
     { name: '材料成本 - LP', values: { V1: 433466, V2: 506850 } },

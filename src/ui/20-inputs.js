@@ -266,7 +266,7 @@ function drawMatrix(key) {
     grid.innerHTML = emptyStateHtml('📋', '這個車型還沒有車系', '請先到「車型與情境」建立車系。', `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
     return;
   }
-  const codeNameMap = {};
+  const codeNameMap = Object.assign({}, data.lineNames || {});
   data.lines.concat(data.autoLines || []).forEach(l => { codeNameMap[l.value] = matrixLineName(l); });
 
   const currencyCell = line => {
@@ -293,7 +293,7 @@ function drawMatrix(key) {
       </tr></thead>
       <tbody>
         ${data.lines.length ? '' : `<tr><td colspan="${data.vehicles.length + 5}" class="muted" style="text-align:center;padding:18px;">還沒有手動輸入的項目，用上方「新增項目」新增</td></tr>`}
-        ${data.lines.map(line => `
+        ${data.lines.map((line, li) => `${matrixGroupRowHtml_(key, data, li)}
           <tr data-line="${esc(line.value)}">
             <td class="row-head">${esc(matrixLineName(line))}</td>
             ${currencyCell(line)}
@@ -308,14 +308,14 @@ function drawMatrix(key) {
               oninput="matrixDirty_('${key}')" placeholder="例：依業務部提供"></td>
             <td class="row-actions"><button type="button" class="btn ghost sm" onclick="deleteMatrixLine('${key}', '${esc(line.value)}')" data-tip="刪除這個項目">✕</button></td>
           </tr>`).join('')}
-        ${(data.autoLines || []).length ? `<tr><td class="row-head" colspan="${data.vehicles.length + (cfg.hasCurrency ? 5 : 4)}"
+        ${(data.autoLines || []).length ? `<tr class="group-row"><td class="row-head" colspan="${data.vehicles.length + (cfg.hasCurrency ? 5 : 4)}"
             style="background:var(--surface-3);font-size:12px;color:var(--text-2);">由公式或開發總投算出（唯讀，要改算法請到「科目與公式」）</td></tr>` : ''}
         ${(data.autoLines || []).map(line => `
           <tr class="auto-line" data-line="${esc(line.value)}">
-            <td class="row-head">${esc(matrixLineName(line))} <span class="ct-badge ct-${esc(line.calcType)}">${line.calcType === 'DEV_AMORT' ? '攤提' : '公式'}</span></td>
+            <td class="row-head">${esc(matrixLineName(line))} <span class="ct-badge ct-${esc(line.calcType)}"${line.formula ? ` tabindex="0" data-tip="${esc('= ' + humanizeFormula_(line.formula, codeNameMap))}"` : ''}>${line.calcType === 'DEV_AMORT' ? '攤提' : '公式'}</span></td>
             ${cfg.hasCurrency ? '<td></td>' : ''}
             ${data.vehicles.map(v => autoLineCellHtml(data, line.value, v.VehicleID, codeNameMap)).join('')}
-            <td class="calc muted">—</td><td class="muted" style="text-align:left;">${line.formula ? `<code style="font-size:11px;">${esc(humanizeFormula_(line.formula, codeNameMap))}</code>` : ''}</td><td></td>
+            <td class="calc">${autoWeightedText_(data, line.value)}</td><td class="muted" style="text-align:left;font-size:12px;">${line.formula ? esc('= ' + humanizeFormula_(line.formula, codeNameMap)) : '開發總投 ÷ 攤提台數'}</td><td></td>
           </tr>`).join('')}
       </tbody>
       <tfoot><tr>
@@ -332,7 +332,7 @@ function drawMatrix(key) {
       </tr>` : ''}</tfoot>
     </table>
     </div>
-    <p class="muted">加權平均 = 依各車系銷售構成比加權，跟儀表板同口徑。</p>`;
+    <p class="muted">加權平均 = 依各車系銷售構成比加權，跟儀表板同口徑。${cfg.hasCurrency ? fxHint_(data.currencies) : ''}</p>`;
   updateMatrixTotals(key);
 }
 /**
@@ -432,6 +432,32 @@ function parseMatrixPaste_(text, vehicles) {
 function matrixDirty_(key) { markDirty(key, () => saveMatrix(key), () => { clearDirty(); renderMatrixPanel(key); }); }
 
 /** 公式/攤提科目的格子：唯讀，滑鼠移過去看計算過程 */
+/** 公式/攤提科目的加權平均：跟手動輸入的科目同一個口徑(依銷售構成比加權) */
+function autoWeightedText_(data, lineCode) {
+  let w = 0, total = 0;
+  data.vehicles.forEach(v => {
+    const amt = (data.autoValues[lineCode] || {})[v.VehicleID];
+    if (amt === undefined) return;
+    w += amt * num(v.SalesMixPct); total += num(v.SalesMixPct);
+  });
+  return total ? fmt(w / total) : '—';
+}
+/**
+ * 營業費用的科目分好幾段(銷售費用 / 產品貢獻前 / 固定營業費用 / 前瞻…)：段落換了就插一列小標題，
+ * 不然整張表平鋪，看不出哪個科目在哪一段扣。銷貨成本只有一段，不需要。
+ */
+function matrixGroupRowHtml_(key, data, i) {
+  const cfg = MATRIX_CONFIG[key];
+  if (!cfg.parentOptions) return '';
+  const line = data.lines[i], prev = data.lines[i - 1];
+  if (prev && prev.parentLine === line.parentLine) return '';
+  const known = cfg.parentOptions.find(o => o[0] === line.parentLine);
+  // 沒有父科目的(例：前瞻費用直接從營業淨利扣)就用科目自己的名稱當小標題
+  const title = known ? known[1] : line.parentName ? `計入「${shortLineName(line.parentName)}」` : matrixLineName(line);
+  return `<tr class="group-row"><td class="row-head" colspan="${data.vehicles.length + (cfg.hasCurrency ? 5 : 4)}"
+    style="background:var(--surface-2);font-size:12px;color:var(--text-2);">${esc(title)}</td></tr>`;
+}
+
 function autoLineCellHtml(data, lineCode, vehicleId, codeNameMap) {
   const amt = (data.autoValues[lineCode] || {})[vehicleId];
   if (amt === undefined) return '<td class="calc muted">—</td>';
@@ -514,6 +540,12 @@ function saveMatrix(key) {
     .withSuccessHandler(() => { clearDirty(); setStatus(key, '已儲存', 'ok'); renderMatrixPanel(key); })
     .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
     [cfg.saveFn](currentScenarioId, cells, lineNotes);
+}
+
+/** 幣別選單只有本位幣時，說明怎麼加外幣(匯率是每個情境各填一份) */
+function fxHint_(currencies) {
+  if ((currencies || []).length > 1) return '';
+  return ` 要用外幣登打？先到 <button type="button" class="link-btn" onclick="switchTab('paramrates')">參數與匯率</button> 填這個情境的匯率，幣別選單才會出現那個幣別。`;
 }
 
 function addMatrixLine(key) {
@@ -646,6 +678,7 @@ function drawDevGrid() {
     </table>
     </div>
     <datalist id="dev-departments"></datalist>
+    ${(devSummary.currencies || ['TWD']).length <= 1 ? `<p class="muted">${fxHint_(devSummary.currencies)}</p>` : ''}
     <div class="summary-box">
       <div><span class="muted">攤提用 LIFE CYCLE 總台數</span><strong>${fmt(devSummary.lifeCycleUnits)}</strong></div>
       <div><span class="muted">銷售構成推算台數</span><strong>${fmt(devSummary.salesMixLifeCycleUnits)}</strong></div>
@@ -819,6 +852,13 @@ function removeDevRow(i) {
 }
 
 function saveDevGrid() {
+  // 沒填部門也沒填金額的列，儲存時會被當成空白列刪掉；有選大類/落點/寫備註的就先提醒，免得默默消失
+  const blank = r => !String(r.Department || '').trim() && (r.Amount === '' || r.Amount === null || r.Amount === undefined);
+  const half = devRows.filter(r => !r.RowID && blank(r) && (r.TargetLineCode || r.__category || String(r.Notes || '').trim()));
+  if (half.length) {
+    setStatus('devinvestment', `有 ${half.length} 列沒有填部門也沒有填金額，儲存時會被當成空白列刪掉。請補上金額或部門，不要的列按 ✕。`, 'err');
+    return;
+  }
   setStatus('devinvestment', '儲存中...');
   google.script.run
     .withSuccessHandler(safeHandler(summary => {
@@ -845,8 +885,9 @@ function renderRatePanel() {
   document.getElementById('panel-paramrates').innerHTML = `<div class="card">
       <div class="card-head"><h3>參數與比率</h3></div>
       ${gridShell('paramrates', '參數與比率',
+    `這裡的數值是<b>每個情境各填一份</b>（目前是 ${esc(currentScenario ? scenarioLabel(currentScenario) : '')}）；參數的名稱、單位、預設值則是所有車型共用。` +
     '公式裡用 <b>[參數名稱]</b> 取用（例：<code>[營業稅率]</code>、<code>[關稅率]</code>）。單位是 % 的參數以百分比輸入(5 = 5%)，公式取出來自動變成小數。' +
-    '「全車系」是這個情境的預設值，個別車系不同時才填車系欄位（留白 = 沿用）。可以自己新增參數，例如關稅率、KD件報價、倍率。')}
+    '「全車系」是這個情境的值，個別車系不同時才填車系欄位（留白 = 沿用）。可以自己新增參數，例如關稅率、KD件報價、倍率。')}
     </div>
     <div class="card" id="fx-section"></div>`;
   renderFxPanel();
@@ -880,7 +921,7 @@ function drawRateGrid() {
       <tbody>
         ${rateData.rates.map(rate => `
           <tr>
-            <td class="row-head">${esc(rate.ParamName)}${rate.isDefault ? ' <span class="auto-tag" data-tip="這個情境還沒設定，目前用預設值">預設</span>' : ''}</td>
+            <td class="row-head">${esc(rate.ParamName)}${paramStateTag_(rate)}</td>
             <td class="calc" style="text-align:center;">${esc(rate.unit || '%')}</td>
             <td><input type="number" step="any" class="rate-global" data-name="${esc(rate.ParamName)}"
               data-paramid="${esc(rate.globalParamID)}" value="${esc(rate.globalValue)}"
@@ -900,6 +941,21 @@ function drawRateGrid() {
     <p class="muted">車系欄位留白 = 沿用全車系的值（灰字為目前沿用的數值）。</p>`;
 }
 
+/** 參數名稱旁的狀態：這個情境沒填時，是沿用預設值，還是根本沒有值(公式會當成 0) */
+function paramStateTag_(rate) {
+  if (!rate.isDefault) return '';
+  if (rate.hasDefault) return ' <span class="auto-tag" data-tip="這個情境還沒填，目前沿用預設值；要改就直接在「全車系」填">沿用預設值</span>';
+  const others = (rate.filledIn || []).length ? '\n其他情境有填：' + rate.filledIn.join('、') : '';
+  return ` <span class="auto-tag warn" data-tip="${esc('這個情境還沒填，也沒有預設值，公式會當成 0' + others)}">未填 = 0</span>`;
+}
+/** 存檔後提醒：這個情境填了值的參數，在同車型其他情境還沒填(沒有預設值 → 當成 0)，比較情境時會變成差異 */
+function warnParamGaps_(savedNames) {
+  const gaps = (rateData && rateData.rates || []).filter(r => savedNames[r.ParamName] && (r.missingIn || []).length);
+  if (!gaps.length) return;
+  toast(gaps.map(r => `「${r.ParamName}」在 ${r.missingIn.join('、')} 還沒填，公式會當成 0`).join('；') +
+    '。參數是每個情境各填一份，可以到那些情境補上，或在「編輯」設預設值。', 'warn', 8000);
+}
+
 function updateRatePlaceholders(paramName) {
   const globalInput = document.querySelector(`.rate-global[data-name="${paramName}"]`);
   document.querySelectorAll(`.rate-override[data-name="${paramName}"]`)
@@ -916,7 +972,13 @@ function saveRateGrid() {
   });
   setStatus('paramrates', '儲存中...');
   google.script.run
-    .withSuccessHandler(() => { clearDirtyPart_('paramrates'); setStatus('paramrates', '已儲存', 'ok'); loadRateGrid_(); })
+    .withSuccessHandler(() => {
+      clearDirtyPart_('paramrates'); setStatus('paramrates', '已儲存', 'ok');
+      const named = {};
+      rows.forEach(r => { if (r.Value !== '') named[r.ParamName] = true; });
+      warnParamGaps_(named);
+      loadRateGrid_();
+    })
     .withFailureHandler(err => setStatus('paramrates', '錯誤：' + err.message, 'err'))
     .saveRateGrid(currentScenarioId, rows);
 }
@@ -924,7 +986,7 @@ function saveRateGrid() {
 function paramDialog_(title, def, isNew) {
   return openModal({
     title,
-    body: '<p class="help">參數是全系統共用的定義(名稱/單位/預設值)；每個情境、每個車系的實際數值在這張表上填。</p>',
+    body: '<p class="help">參數的名稱、單位、預設值所有車型共用；實際數值是每個情境（必要時每個車系）各填一份。沒填的情境會用預設值，沒有預設值就當成 0。</p>',
     fields: [
       { name: 'ParamName', label: '參數名稱', value: def.ParamName || '', placeholder: '例：關稅率', help: isNew ? '' : '改名時，公式裡的 [舊名稱] 與各情境填的數值會一起改過去' },
       { name: 'Unit', label: '單位', type: 'select', value: def.Unit || '%', options: [['%', '%（以百分比輸入，公式取出時 ÷100）'], ['數值', '數值（原值取用，如倍率、金額）']] },
@@ -979,7 +1041,7 @@ function renderFxPanel() {
   const box = document.getElementById('fx-section');
   if (!box) return;
   box.innerHTML = '<div class="card-head"><h3>匯率</h3></div>' + gridShell('paramfx', '匯率',
-    '1 外幣 = ? 台幣。銷貨成本與開發總投以外幣登打時用這個匯率換算；公式裡也可以用 <b>[CNY匯率]</b> 這種寫法取用。');
+    '1 外幣 = ? 台幣，<b>每個情境各填一份</b>。填了匯率的幣別才會出現在銷貨成本、開發總投的幣別選單，登打的外幣金額用這個匯率換算；公式裡也可以用 <b>[CNY匯率]</b> 這種寫法取用。');
   const cacheKey = panelCacheKey_('paramfx', 'scenario');
   if (panelDataCache_[cacheKey]) { fxData = panelDataCache_[cacheKey]; drawFxGrid(); }
   google.script.run
@@ -1000,7 +1062,7 @@ function drawFxGrid() {
     <div class="grid-scroll">
     <table class="grid-table">
       <thead><tr><th>幣別</th>${fxData.paramNames.map(n =>
-        `<th>${esc(n)}<div class="th-sub">1 外幣 = ? ${esc(fxData.baseCurrency)}</div></th>`).join('')}</tr></thead>
+        `<th>${esc(n === '現況匯率' ? '匯率（這個情境）' : n)}<div class="th-sub">1 外幣 = ? ${esc(fxData.baseCurrency)}</div></th>`).join('')}</tr></thead>
       <tbody>
         <tr><td class="row-head">${esc(fxData.baseCurrency)}（本位幣）</td>
           ${fxData.paramNames.map(() => '<td class="calc">1</td>').join('')}</tr>
@@ -1017,7 +1079,7 @@ function drawFxGrid() {
       </tbody>
     </table>
     </div>
-    <p class="muted">留白 = 未設定該幣別的匯率；銷貨成本與開發總投以外幣登打時會用這個匯率換算。</p>`;
+    <p class="muted">留白 = 這個情境沒有用這個幣別（不會出現在幣別選單）。</p>`;
 }
 
 function addFxCurrency() {

@@ -11,10 +11,10 @@ const WF_PREFS_KEY_ = 'plWaterfall.prefs.v1';
 let wfPrefs = {
   mode: 'bridge',
   from: { scenarioId: '', vehicleId: '' }, to: { scenarioId: '', vehicleId: '' },
-  end: 'K', level: 'major', basis: 'unit', volumeEffect: true, unit: 1,
+  end: 'K', level: 'detail', basis: 'unit', volumeEffect: true, unit: 1,
   actionLine: '',          // 作法拆解看哪個科目：空白 = 營業淨利
   manualLowerBetter: false, // 自訂：數字變大是變差(成本/費用的瀑布轉成自訂時會帶過來)
-  sort: 'pl', topN: 0, minAbs: 0, subtotals: true, labels: true, titles: {},
+  sort: 'pl', topN: 0, minAbs: 0, subtotals: true, labels: true, axisFrom0: false, titles: {},
   manual: [
     { label: '現況營業淨利', value: -100000, kind: 'total' },
     { label: '售價調整', value: 30000, kind: 'delta' },
@@ -69,9 +69,17 @@ function wfSvg_(steps, opts) {
   const vals = [0];
   bars.forEach(b => { vals.push(b.y0, b.y1); });
   let vMin = Math.min.apply(null, vals), vMax = Math.max.apply(null, vals);
+  // 縱軸要不要從 0 開始：全部都是正數、而且變動只佔整根的一小段(例：15 萬 → 15.9 萬)時，從 0 畫起來中間每一根都看不見。
+  // opts.axisFrom0 === false 一律放大；未指定時自動判斷；整根(起點/小計/終點)就從圖的底部畫起，圖上註明「縱軸未從 0 開始」
+  const lows = bars.map(b => b.st.kind === 'total' ? b.y1 : Math.min(b.y0, b.y1));
+  const lowest = Math.min.apply(null, lows);
+  const zoom = opts.axisFrom0 !== true && lowest > 0 && vMax > 0 &&
+    (opts.axisFrom0 === false || (vMax - lowest) < vMax * 0.35);
+  if (zoom) vMin = Math.max(0, lowest - (vMax - lowest) * 0.6);
   const span = (vMax - vMin) || Math.abs(vMax) || 1;
   if (showLabels) { vMax += span * 0.08; if (vMin < 0) vMin -= span * 0.08; }
   const axis = niceTicks_(vMin, vMax, 6);
+  if (zoom && axis.lo > 0) bars.forEach(b => { if (b.st.kind === 'total') b.y0 = axis.lo; });
   const tickFont = 11;
   const leftPad = Math.max.apply(null, axis.ticks.map(t => textWidth_(fmtV(t), tickFont))) + 14;
   const n = bars.length;
@@ -86,6 +94,7 @@ function wfSvg_(steps, opts) {
   let out = `<svg class="chart-svg wf-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" ${font}>`;
   out += `<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
   if (opts.title) out += `<text x="${W / 2}" y="20" text-anchor="middle" font-size="15" font-weight="600" fill="#1a202c">${esc(opts.title)}</text>`;
+  if (zoom && axis.lo > 0) out += `<text x="${W - 12}" y="${12 + titleH}" text-anchor="end" font-size="10.5" fill="#a0aec0">縱軸未從 0 開始</text>`;
   axis.ticks.forEach(t => {
     const yy = y(t);
     out += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="${t === 0 ? '#718096' : '#e2e8f0'}" stroke-width="${t === 0 ? 1.2 : 1}"/>`;
@@ -451,6 +460,11 @@ function renderWaterfallPanel() {
     <div id="wf-body"><p class="muted">載入中...</p></div>`;
   google.script.run
     .withSuccessHandler(safeHandler(res => {
+      if (!(res.scenarios || []).length) {
+        panel.innerHTML = emptyStateHtml('📉', '還沒有情境', '瀑布圖要比較情境的損益。先到「車型與情境」建立情境並填好數字。',
+          `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
+        return;
+      }
       wfLists = res;
       wfDefaultsFromContext_();
       drawWaterfallTool_();
@@ -511,7 +525,7 @@ function drawWaterfallTool_() {
   }
   const lineOpts = p.mode === 'bridge' || p.mode === 'structure';
   // 不常改的選項收在「進階」；改過(不是預設值)就展開，才不會忘了自己設過
-  const advOpen = p.sort !== 'pl' || num(p.topN) > 0 || num(p.minAbs) > 0 || !p.labels || !!String(wfTitle_()).trim();
+  const advOpen = p.sort !== 'pl' || num(p.topN) > 0 || num(p.minAbs) > 0 || !p.labels || !!p.axisFrom0 || !!String(wfTitle_()).trim();
   body.innerHTML = `
     <div class="card">
       <div class="field-row">${seg('mode', modes, p.mode)}</div>
@@ -533,6 +547,7 @@ function drawWaterfallTool_() {
             <label class="field"><span>最多顯示幾項（0 = 全部）</span><input type="number" min="0" style="width:90px;" value="${esc(p.topN)}" onchange="wfPrefs.topN=this.value;saveWfPrefs_();runWaterfall_()"></label>
             <label class="field"><span>小於多少併入「其他」</span><input type="number" min="0" style="width:110px;" value="${esc(p.minAbs)}" onchange="wfPrefs.minAbs=this.value;saveWfPrefs_();runWaterfall_()"></label>` : ''}
           ${chk('labels', '顯示數字')}
+          ${chk('axisFrom0', '縱軸一律從 0 開始（不勾 = 差異很小時自動放大）')}
           <label class="field grow"><span>圖表標題（留空 = 自動）</span><input type="text" id="wf-title" value="${esc(wfTitle_())}" placeholder="自動" oninput="wfSetTitle_(this.value);saveWfPrefs_();wfRedraw_()"></label>
         </div>
       </details>
@@ -613,7 +628,7 @@ function wfRedraw_() {
   const heading = document.getElementById('wf-heading');
   if (heading) heading.textContent = title || '瀑布圖';
   const u = num(wfPrefs.unit) || 1;
-  box.innerHTML = wfSvg_(wfLast.steps, { title, labels: wfPrefs.labels, fmtV: wfShortFmt_(wfLast.steps), lowerBetter: !!wfLast.lowerBetter });
+  box.innerHTML = wfSvg_(wfLast.steps, { title, labels: wfPrefs.labels, axisFrom0: wfPrefs.axisFrom0 ? true : undefined, fmtV: wfShortFmt_(wfLast.steps), lowerBetter: !!wfLast.lowerBetter });
   const tbl = document.getElementById('wf-table');
   if (!tbl) return;
   let run = 0;
@@ -626,7 +641,7 @@ function wfRedraw_() {
       return `<tr class="${s.kind === 'total' ? 'subtotal' : ''}"><td>${esc(s.label)}</td>
         <td class="amt${(s.kind === 'delta' && wfLast.lowerBetter ? s.value > 0 : s.value < 0) ? ' negative' : ''}">${s.kind === 'delta' && s.value > 0 ? '+' : ''}${wfFmt_(s.value)}</td>
         <td class="amt${run < 0 ? ' negative' : ''}">${wfFmt_(run)}</td>
-        ${total ? `<td class="amt">${s.kind === 'delta' ? (s.value / total * 100).toFixed(1) + '%' : ''}</td>` : ''}</tr>`;
+        ${total ? `<td class="amt">${s.kind === 'delta' ? pct1_(s.value / total * 100) + '%' : ''}</td>` : ''}</tr>`;
     }).join('')}</tbody></table></div>`;
 }
 

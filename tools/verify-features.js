@@ -327,6 +327,42 @@ check('車系代號重新命名會連動更新銷售構成等資料', () => {
   assert(gs.getSalesMix(base.ScenarioID).some(r => r.VehicleID === 'RN_V2_NEW'), '銷售構成應該跟著改成新車系代號');
 });
 
+check('車系表格存檔：重複代號、已屬於別的車型的代號會擋下，不會把別人的車系蓋掉或搬走', () => {
+  const throws = (fn, re, msg) => { try { fn(); } catch (e) { assert(re.test(e.message), msg + '：' + e.message); return; } throw new Error(msg + '：沒有擋下'); };
+  const before = gs.getVehicles('DA').map(v => v.VehicleID + v.VehicleCode).join();
+  throws(() => gs.saveVehicleGrid('DA', [{ VehicleID: 'V1', VehicleCode: '3人貨車' }, { VehicleID: 'V1', VehicleCode: '重複' }]), /重複/, '同一張表兩列同代號');
+  throws(() => gs.saveVehicleGrid('DE', [{ VehicleID: 'W1', VehicleCode: 'DE車系' }, { VehicleID: 'V1', VehicleCode: '偷走' }]), /已經用在車型 DA/, '別的車型的代號');
+  throws(() => gs.saveVehicleGrid('DE', [{ VehicleID: 'W 2', VehicleCode: '有空白' }]), /不能有空白/, '代號有空白');
+  assertEqual(gs.getVehicles('DA').map(v => v.VehicleID + v.VehicleCode).join(), before, 'DA 的車系不能被動到');
+  throws(() => gs.createVehicleType('有 空白', '', ''), /不能有空白/, '車型代號有空白');
+});
+
+check('刪除車型：車系、情境與情境資料一起刪掉；同代號重建時舊資料不會冒出來', () => {
+  gs.createVehicleType('DEL_T', '', '');
+  gs.saveVehicleGrid('DEL_T', [{ VehicleID: 'DEL_V', VehicleCode: '刪除測試' }]);
+  const sc = gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE F', ScenarioName: '刪除測試', ScenarioType: '現況', VehicleTypeID: 'DEL_T' }, '', []);
+  gs.saveSalesMixRow({ RowID: '', ScenarioID: sc.ScenarioID, VehicleID: 'DEL_V', SalesMixPct: 100, MonthlyVolume: 10, LifeCycleYears: 5 });
+  gs.saveCostOfSalesMatrix(sc.ScenarioID, [{ RowID: '', VehicleID: 'DEL_V', LineCode: 'b1', Amount: 1234, Currency: 'TWD' }]);
+  gs.deleteVehicleType('DEL_T');
+  assert(!gs.getVehicles().some(v => v.VehicleID === 'DEL_V'), '車系應該一起刪掉');
+  assert(!gs.getScenarios().some(s => s.ScenarioID === sc.ScenarioID), '情境應該一起刪掉');
+  assert(!gs.getSalesMix(sc.ScenarioID).length && !gs.getCostOfSales(sc.ScenarioID).length, '情境的輸入資料應該一起刪掉');
+  gs.createVehicleType('DEL_T', '', '');
+  assertEqual(gs.getVehicles('DEL_T').length, 0, '同代號重建的車型應該是空的');
+  gs.deleteVehicleType('DEL_T');
+});
+
+check('刪除情境、刪除車系：底下的資料一起刪掉', () => {
+  const sc = gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE F', ScenarioName: '刪情境', ScenarioType: '現況', VehicleTypeID: 'DA' }, base.ScenarioID, ['salesmix', 'costofsales']);
+  assert(gs.getSalesMix(sc.ScenarioID).length > 0, '前提：帶入了資料');
+  gs.deleteScenario(sc.ScenarioID);
+  assert(!gs.getSalesMix(sc.ScenarioID).length && !gs.getCostOfSales(sc.ScenarioID).length, '刪掉的情境不該留下資料');
+  gs.saveVehicle({ VehicleID: 'DV_X', VehicleTypeID: 'DA', VehicleCode: '刪車系' });
+  gs.saveSalesMixRow({ RowID: '', ScenarioID: base.ScenarioID, VehicleID: 'DV_X', SalesMixPct: 0, MonthlyVolume: 0, LifeCycleYears: 5 });
+  gs.deleteVehicle('DV_X');
+  assert(!gs.getSalesMix(base.ScenarioID).some(r => r.VehicleID === 'DV_X'), '刪掉的車系不該留下銷售構成');
+});
+
 const failed = results.filter(r => !r.ok);
 results.forEach(r => console.log((r.ok ? '  ✓ ' : '  ✗ ') + r.name + (r.ok ? '' : ' — ' + r.message)));
 console.log('');

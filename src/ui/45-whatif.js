@@ -435,7 +435,7 @@ function multiGoalResultHtml_(r) {
         <td class="amt"><b>${fmt(l.value, dg(l.base))}</b> ${esc(l.unit || '')}</td>
         <td class="amt">${l.pct === null ? '' : signed_(l.pct, 2) + '%'}</td>
         <td class="amt${l.contribution < 0 ? ' negative' : ''}">${l.contribution >= 0 ? '+' : ''}${fmt(l.contribution)}</td>
-        <td class="amt">${total ? (l.contribution / total * 100).toFixed(1) + '%' : ''}</td></tr>`).join('')}</tbody>
+        <td class="amt">${total ? pct1_(l.contribution / total * 100) + '%' : ''}</td></tr>`).join('')}</tbody>
     </table></div>
     <p class="help">貢獻依列表順序逐項加入計算（各項之間有交互作用，例如售價變動也會影響佣金與貨物稅），加總 = 總改善 ${total >= 0 ? '+' : ''}${fmt(total)}。只在畫面上試算，不會改到存檔的數字。</p>
     <div class="waterfall-card">${wfSvg_(multiGoalSteps_(r), { width: 900, height: 320, labels: true, fmtV: wfShortFmt_(multiGoalSteps_(r)) })}</div>

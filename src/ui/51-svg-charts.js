@@ -13,7 +13,7 @@ function shortAmount_(v) {
   if (amountUnit === 1 && Math.abs(n) >= 1e4) return fmt(n / 1e4, 1) + '萬';
   return fmt(n);
 }
-function pctLabel_(v) { return (Number(v) || 0).toFixed(1) + '%'; }
+function pctLabel_(v) { return pct1_(v) + '%'; }
 
 /** 座標軸刻度：把範圍切成 1/2/2.5/5 × 10^n 的整齊間隔 */
 function niceTicks_(min, max, count) {
@@ -183,7 +183,7 @@ function chartBarTip_(col, line) {
 }
 function pctText_(v, base) {
   base = Number(base);
-  return base ? (Number(v) / base * 100).toFixed(1) + '%' : '—';
+  return base ? pct1_(Number(v) / base * 100) + '%' : '—';
 }
 
 /** 科目比較圖(橫軸 = 科目、每組裡一根長條 = 一個比較欄位)，或倒過來(橫軸 = 比較欄位) */
@@ -572,7 +572,7 @@ function secondCellHtml(v, col, line, cols, attrs) {
   const base = pctBaseOf_(col);
   if (!base) return `<td class="pct muted"${attrs}>—</td>`;
   const p = Number(v) / base * 100;
-  return `<td class="pct${p < 0 ? ' negative' : ''}"${attrs}>${p.toFixed(1)}%</td>`;
+  return `<td class="pct${Number(pct1_(p)) < 0 ? ' negative' : ''}"${attrs}>${pct1_(p)}%</td>`;
 }
 /** 舊名稱，測試與其他地方仍可能呼叫：只顯示百分比那種第二小欄 */
 function pctCellHtml(v, col) { return secondCellHtml(v, col, null, [], ''); }

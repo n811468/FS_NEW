@@ -47,12 +47,13 @@ function overridesFor_(scenarioId) {
 function calcSalesMix_(scenarioId) {
   var rows = getSalesMix(scenarioId);
   var o = overridesFor_(scenarioId);
-  if (!o || (!o.volume && !o.price)) return rows;
+  // 倍數 0 也是有效的假設(銷量 0 台、售價 0)：用 !== undefined 判斷，不能用真假值
+  if (!o || (o.volume === undefined && o.price === undefined)) return rows;
   return rows.map(function (r) {
     var c = {};
     Object.keys(r).forEach(function (k) { c[k] = r[k]; });
-    if (o.volume) c.MonthlyVolume = toNumber_(r.MonthlyVolume) * o.volume;
-    if (o.price) c.ListPriceTaxIncl = toNumber_(r.ListPriceTaxIncl) * o.price;
+    if (o.volume !== undefined) c.MonthlyVolume = toNumber_(r.MonthlyVolume) * o.volume;
+    if (o.price !== undefined) c.ListPriceTaxIncl = toNumber_(r.ListPriceTaxIncl) * o.price;
     return c;
   });
 }
@@ -724,7 +725,7 @@ function getLifeCycleUnits(scenarioId) {
   var scenario = getScenarios().filter(function (s) { return s.ScenarioID === scenarioId; })[0];
   if (scenario) {
     var o = overridesFor_(scenarioId);
-    var vol = toNumber_(scenario.AmortMonthlyVolume) * (o && o.volume ? o.volume : 1);
+    var vol = toNumber_(scenario.AmortMonthlyVolume) * (o && o.volume !== undefined ? o.volume : 1);
     var years = toNumber_(scenario.AmortLifeCycleYears);
     if (vol > 0 && years > 0) return vol * 12 * years;
   }

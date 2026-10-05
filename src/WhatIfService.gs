@@ -146,6 +146,8 @@ function solveGoal(scenarioId, metric, target, driver) {
   };
   var f0 = whatIfMetric_(scenarioId, metric);
   var positiveOnly = ['volume', 'price', 'fx', 'line', 'dev'].indexOf(driver.type) !== -1;
+  // 銷量的下限不是 0：0 台時攤提台數也是 0，攤提「÷ 0 = 0」會讓單台淨利突然變好，搜尋會跨不過真正的損益兩平點
+  var minX = driver.type === 'volume' ? Math.abs(base.value) * 1e-4 : 0;
   var g = function (x) { return evalAt(x) - target; };
   var x0 = base.value;
   if (Math.abs(f0 - target) < 0.5) {
@@ -159,10 +161,10 @@ function solveGoal(scenarioId, metric, target, driver) {
     var prevX = x0, prevG = g0, s = step;
     for (var k = 0; k < 22; k++) {
       var x = x0 + dir * s;
-      if (positiveOnly && x < 0) x = 0;
+      if (positiveOnly && x < minX) x = minX;
       var gx = g(x); tries++;
       if ((gx > 0) !== (prevG > 0) || gx === 0) { lo = prevX; gLo = prevG; hi = x; gHi = gx; return true; }
-      if (positiveOnly && x === 0) break;
+      if (positiveOnly && x === minX) break;
       prevX = x; prevG = gx; s *= 2;
     }
     return false;
@@ -306,7 +308,8 @@ function solveGoalPlan(scenarioId, metric, target, levers) {
     var it = {
       driver: l.driver, label: b.label, unit: b.unit, base: b.value, mode: mode,
       cap: blank(l.capPct) || mode === 'known' ? null : Math.abs(Number(l.capPct)),
-      lower: positiveTypes.indexOf(l.driver.type) !== -1 ? 0 : null,
+      // 銷量下限同 solveGoal：0 台時攤提 ÷ 0 = 0，不能拿來當搜尋端點
+      lower: l.driver.type === 'volume' ? Math.abs(b.value) * 1e-4 : positiveTypes.indexOf(l.driver.type) !== -1 ? 0 : null,
       amount: mode === 'amount' ? Math.abs(toNumber_(l.amount)) : 0
     };
     if (mode === 'known') {

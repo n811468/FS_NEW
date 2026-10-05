@@ -412,12 +412,18 @@ async function main() {
   assert(new RegExp('^FS資料包_' + MAIN + '_').test(dlSc.suggestedFilename()), '情境資料包的檔名應該帶車型與情境：' + dlSc.suggestedFilename());
 
   // 清空 → 用匯入取代 → 資料回來
-  await Promise.all([page.waitForNavigation(), page.selectOption('#fs-local-bar .fsl-more', 'reset')]);
+  // 清空要先在對話框確認(用系統自己的對話框，不是瀏覽器的 confirm)
+  await page.selectOption('#fs-local-bar .fsl-more', 'reset');
+  await page.waitForSelector('dialog.modal[open]');
+  assert(/清空所有資料/.test(await page.textContent('dialog.modal[open]')), '清空前應該先問');
+  await Promise.all([page.waitForNavigation(), page.click('dialog.modal[open] button[value=ok]')]);
   await page.waitForSelector('#fs-local-bar');
   assert((await page.$$eval('#vehicletype-selector option', os => os.filter(o => o.value).length)) === 0, '清空後應該沒有車型');
   await page.setInputFiles('#fs-local-bar input[type=file]', packFile);
   await page.waitForSelector('#fs-local-dialog[open]');
-  await Promise.all([page.waitForNavigation(), page.click('#fs-local-dialog button:has-text("取代整個資料庫")')]);
+  await page.click('#fs-local-dialog button:has-text("取代整個資料庫")');
+  await page.waitForSelector('dialog.modal[open]');
+  await Promise.all([page.waitForNavigation(), page.click('dialog.modal[open] button[value=ok]')]);
   await page.waitForFunction(() => document.querySelectorAll('#vehicletype-selector option').length >= 3);
   assert((await page.$$eval('#vehicletype-selector option', os => os.map(o => o.value).filter(v => v))).sort().join() === [MAIN, OTHER, 'DQ'].sort().join(), '匯入取代後車型不對');
 
@@ -429,8 +435,8 @@ async function main() {
   await page.waitForSelector('#fs-local-dialog[open]');
   await page.click('#fs-local-dialog button:has-text("合併匯入")');
   await page.waitForSelector('#fs-local-dialog >> text=確認合併內容');
-  // deleteVehicleType 只刪車型主檔那一列，OTHER 的車系/情境還在，所以合併會是「取代」OTHER
-  assert(new RegExp('車型 ' + OTHER + '：本機的資料.*會被資料包.*取代').test(await page.textContent('#fs-local-dialog')), '合併確認畫面沒有列出要取代的車型 ' + OTHER);
+  // 刪除車型會連車系/情境一起刪掉，所以合併時 OTHER 是「新增」
+  assert(new RegExp('車型 ' + OTHER + '：(新增|本機沒有這個車型)').test(await page.textContent('#fs-local-dialog')), '合併確認畫面沒有列出要新增的車型 ' + OTHER);
   await Promise.all([page.waitForNavigation(), page.click('#fs-local-dialog button:has-text("確定合併")')]);
   await page.waitForFunction(() => document.querySelectorAll('#vehicletype-selector option').length >= 3);
   assert((await page.$$eval('#vehicletype-selector option', os => os.map(o => o.value).filter(v => v))).sort().join() === [MAIN, OTHER, 'DQ'].sort().join(), '合併後車型不對');

@@ -31,12 +31,19 @@
 #fs-local-banner { align-items: center; gap: 12px; padding: 9px 28px; font-size: 13px; }
 #fs-local-banner.fsl-banner-info { background: #edf1fe; color: #213c91; }
 #fs-local-banner.fsl-banner-danger { background: #fdeeee; color: #8b1f1f; }
+#fs-local-banner .fsl-banner-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; margin-left: 8px; }
 #fs-local-dialog { border: none; border-radius: 14px; padding: 22px 24px; max-width: 640px; width: calc(100% - 32px); box-shadow: 0 10px 30px -12px rgba(16,27,51,.35); }
 #fs-local-dialog::backdrop { background: rgba(16,27,51,.42); }
 #fs-local-dialog h3 { margin: 0 0 12px; font-size: 16px; }
 #fs-local-dialog .fsl-pre { white-space: pre-wrap; background: #f8f9fc; border: 1px solid #e3e7ef; border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: 13px; line-height: 1.6; max-height: 50vh; overflow: auto; }
 #fs-local-dialog .fsl-help { font-size: 12px; color: #475069; padding-left: 18px; line-height: 1.7; }
 #fs-local-dialog .fsl-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+@media (max-width: 600px) {
+  #fs-local-bar { padding: 6px 14px; gap: 6px; }
+  #fs-local-bar .fsl-badge { display: none; }
+  #fs-local-bar .fsl-status { order: 9; width: 100%; font-size: 11.5px; }
+  #fs-local-banner { padding: 8px 14px; flex-wrap: wrap; }
+}
 @media print { #fs-local-bar, #fs-local-banner { display: none !important; } }
 
 </style>
@@ -233,6 +240,10 @@
   td.row-actions { white-space: nowrap; text-align: center !important; }
   .row-move { padding: 3px 7px; font-size: 11px; line-height: 1; }
   .auto-tag { font-size: 10.5px; color: var(--primary); background: var(--primary-weak); border-radius: 4px; padding: 1px 5px; margin-left: 6px; font-weight: 600; }
+  .auto-tag.warn { color: var(--warning); background: var(--warning-weak); }
+  td.paste-skip { box-shadow: inset 0 0 0 2px var(--danger); background: var(--danger-weak); }
+  tr.current-row > td { background: var(--primary-weak); }
+  tr.current-row > td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
   tr.auto-line td { color: var(--text-2); }
   tr.auto-line td.row-head { font-weight: 500; }
   .summary-box { display: flex; flex-wrap: wrap; gap: 28px; margin: 14px 0; padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -606,6 +617,8 @@
   .wf-manual input[type=text] { width: 100%; }
   .wf-manual input[type=number] { width: 140px; }
   .wf-table { margin-top: 12px; max-width: 760px; }
+  #wf-table .grid-scroll { max-width: 760px; }
+  #wf-table .wf-table { width: 100%; margin-top: 0; }
   table.grid-table.wf-table td:first-child, table.grid-table.lever-table td:not(.amt) { text-align: left; }
   .wf-table td.amt { text-align: right; font-variant-numeric: tabular-nums; }
   .wf-table tr.subtotal td { font-weight: 600; background: var(--surface-2); }
@@ -759,6 +772,16 @@
     .topbar { padding: 10px 14px; flex-wrap: wrap; }
     main { padding: 16px 14px 120px; }
     .calc-type-cards { grid-template-columns: 1fr; }
+  }
+  /* 手機：車型/情境選單併成一列、拿掉小標籤，頁首不要佔掉三分之一個畫面 */
+  @media (max-width: 600px) {
+    .topbar { gap: 8px; }
+    .page-title h1 { font-size: 18px; }
+    .context-bar { width: 100%; flex-wrap: nowrap; margin-left: 0; }
+    .ctx-picker { flex: 1 1 0; min-width: 0; padding-left: 10px; }
+    .ctx-picker label { display: none; }
+    .ctx-picker select { min-width: 0; width: 100%; }
+    .type-badge { display: none !important; }
   }
 
   /* ---------------- 列印：GATE 報告每一張投影片一頁(16:9 橫式) ---------------- */
@@ -1738,6 +1761,17 @@ function getSheet_(name) {
   if (!sheet) throw new Error('找不到分頁：' + name + '，請先執行 setupSpreadsheet()');
   return sheet;
 }
+/**
+ * 車型/車系代號：不能有空白、逗號、直線、引號。
+ * 逗號是「分攤車系」的分隔符號、| 是科目表主鍵的分隔符號、引號會讓 REF("…") 公式斷掉，空白則容易在比對時對不上。
+ */
+function validateCode_(label, id) {
+  if (/[\s,，|"'“”]/.test(String(id))) throw new Error(label + '「' + id + '」不能有空白、逗號、| 或引號');
+}
+/** 分頁存不存在(舊的試算表可能還沒有 Snapshots 等後來加的分頁) */
+function sheetExists_(name) {
+  return !!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+}
 
 // 同一次執行內的流水號：整批寫入(如一次存下整張表格)會連續產生很多 ID，
 // 只取 UUID 前 8 碼有機會撞號，撞號的後果是後一列直接覆蓋前一列、而且不會報錯。
@@ -2443,13 +2477,48 @@ function getVehicleTypes() {
 function saveVehicleType(rowObj) {
   return withLock_(function () { return upsertRowMerge_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', rowObj); });
 }
+/**
+ * 刪除車型：底下的車系、情境(連同每個情境的輸入資料、作法、說明、計算結果)、快照、自己的科目表一起刪掉。
+ * 只刪主檔那一列的話，車系與情境資料還在卻看不到；之後用同一個代號重建車型或新增同代號車系時，舊資料又會冒出來。
+ */
 function deleteVehicleType(vehicleTypeId) {
   return withLock_(function () {
+    var ofType = function (sheetName) {
+      return (sheetToObjects_(sheetName) || []).filter(function (r) { return r.VehicleTypeID === vehicleTypeId; });
+    };
+    var scenarioIds = ofType(SHEETS.SCENARIOS).map(function (r) { return r.ScenarioID; });
+    deleteScenarioData_(scenarioIds);
+    if (scenarioIds.length) batchWriteRows_(SHEETS.SCENARIOS, 'ScenarioID', [], scenarioIds);
+    var vehicleIds = ofType(SHEETS.VEHICLES).map(function (r) { return r.VehicleID; });
+    if (vehicleIds.length) batchWriteRows_(SHEETS.VEHICLES, 'VehicleID', [], vehicleIds);
+    var actionIds = ofType(SHEETS.ACTIONS).map(function (r) { return r.ActionID; });
+    if (actionIds.length) batchWriteRows_(SHEETS.ACTIONS, 'ActionID', [], actionIds);
+    if (sheetExists_(SHEETS.SNAPSHOTS)) {
+      var snapIds = ofType(SHEETS.SNAPSHOTS).map(function (r) { return r.SnapshotID; });
+      if (snapIds.length) batchWriteRows_(SHEETS.SNAPSHOTS, 'SnapshotID', [], snapIds);
+    }
     // 車型自己的那份科目表一起刪掉(科目表是跟著車型走的)
-    var chart = (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) { return r.VehicleTypeID === vehicleTypeId; })
-      .map(function (r) { return r.LineID; });
+    var chart = ofType(SHEETS.PL_LINE_ITEMS).map(function (r) { return r.LineID; });
     if (chart.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', [], chart);
     return deleteRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', vehicleTypeId);
+  });
+}
+
+/** 掛在情境底下的表(ScenarioID)與各自的主鍵：刪情境時一起清掉 */
+var SCENARIO_DATA_SHEETS_ = [
+  [SHEETS.SALES_MIX, 'RowID'], [SHEETS.COST_OF_SALES, 'RowID'], [SHEETS.DEV_INVESTMENT, 'RowID'],
+  [SHEETS.OPERATING_EXPENSE, 'RowID'], [SHEETS.PARAMETERS, 'ParamID'], [SHEETS.LINE_NOTES, 'RowID'],
+  [SHEETS.ACTIONS, 'ActionID'], [SHEETS.PL_RESULT, 'ResultID']
+];
+function deleteScenarioData_(scenarioIds) {
+  var ids = {};
+  (scenarioIds || []).forEach(function (id) { if (id) ids[id] = true; });
+  if (!Object.keys(ids).length) return;
+  SCENARIO_DATA_SHEETS_.forEach(function (pair) {
+    if (!sheetExists_(pair[0])) return;
+    var dead = (sheetToObjects_(pair[0]) || []).filter(function (r) { return ids[r.ScenarioID]; })
+      .map(function (r) { return r[pair[1]]; });
+    if (dead.length) batchWriteRows_(pair[0], pair[1], [], dead);
   });
 }
 /** 車型主檔整批儲存：整張表直接編輯、按一次儲存（沒填代號的空白新增列會被略過） */
@@ -2473,6 +2542,7 @@ function renameVehicleType(oldId, newId) {
     newId = String(newId || '').trim();
     if (!oldId || !newId) throw new Error('車型代號不能為空');
     if (oldId === newId) return getVehicleTypes();
+    validateCode_('車型代號', newId);
     var existing = getVehicleTypes();
     var row = existing.filter(function (t) { return t.VehicleTypeID === oldId; })[0];
     if (!row) throw new Error('找不到車型：' + oldId);
@@ -2521,13 +2591,39 @@ function getVehicles(vehicleTypeId) {
 function saveVehicle(rowObj) {
   return withLock_(function () { return upsertRowMerge_(SHEETS.VEHICLES, 'VehicleID', rowObj); });
 }
+/** 刪除車系：它在各情境的銷售構成、成本、費用、車系參數、說明一起刪掉，免得之後新增同代號車系時舊數字又冒出來 */
 function deleteVehicle(vehicleId) {
-  return withLock_(function () { return deleteRow_(SHEETS.VEHICLES, 'VehicleID', vehicleId); });
+  return withLock_(function () {
+    [[SHEETS.SALES_MIX, 'RowID'], [SHEETS.COST_OF_SALES, 'RowID'], [SHEETS.OPERATING_EXPENSE, 'RowID'],
+      [SHEETS.PARAMETERS, 'ParamID'], [SHEETS.LINE_NOTES, 'RowID'], [SHEETS.PL_RESULT, 'ResultID']].forEach(function (pair) {
+      if (!sheetExists_(pair[0])) return;
+      var dead = (sheetToObjects_(pair[0]) || []).filter(function (r) { return vehicleId && r.VehicleID === vehicleId; })
+        .map(function (r) { return r[pair[1]]; });
+      if (dead.length) batchWriteRows_(pair[0], pair[1], [], dead);
+    });
+    return deleteRow_(SHEETS.VEHICLES, 'VehicleID', vehicleId);
+  });
 }
 /** 車系設定整批儲存 */
 function saveVehicleGrid(vehicleTypeId, rows) {
   return withLock_(function () {
-    var existingByPk = indexByPk_(sheetToObjects_(SHEETS.VEHICLES), 'VehicleID');
+    var all = sheetToObjects_(SHEETS.VEHICLES) || [];
+    var existingByPk = indexByPk_(all, 'VehicleID');
+    var types = indexByPk_(getVehicleTypes(), 'VehicleTypeID');
+    // 車系代號是全資料庫唯一的主鍵：同一張表重複、或已經屬於別的車型，直接存會把那一列整個蓋掉(連車型都換掉)
+    var seen = {};
+    (rows || []).forEach(function (r) {
+      var id = String(r.VehicleID || '').trim();
+      if (!id) return;
+      r.VehicleID = id;
+      if (seen[id]) throw new Error('車系代號「' + id + '」重複了，每個車系的代號要不一樣');
+      seen[id] = true;
+      var owner = existingByPk[id] ? existingByPk[id].VehicleTypeID : '';
+      if (!owner) { validateCode_('車系代號', id); return; }
+      if (owner !== vehicleTypeId && types[owner]) {
+        throw new Error('車系代號「' + id + '」已經用在車型 ' + owner + '，請換一個代號（例如加上車型代號）');
+      }
+    });
     var upserts = (rows || []).filter(function (r) { return r.VehicleID; })
       .map(function (r) {
         r.VehicleTypeID = vehicleTypeId;
@@ -2571,6 +2667,7 @@ function renameVehicle(vehicleTypeId, oldId, newId) {
     newId = String(newId || '').trim();
     if (!oldId || !newId) throw new Error('車系代號不能為空');
     if (oldId === newId) return getVehicles(vehicleTypeId);
+    validateCode_('車系代號', newId);
     var existing = getVehicles();
     var row = existing.filter(function (v) { return v.VehicleID === oldId; })[0];
     if (!row) throw new Error('找不到車系：' + oldId);
@@ -2632,8 +2729,12 @@ function saveScenario(rowObj) {
     return upsertRowMerge_(SHEETS.SCENARIOS, 'ScenarioID', rowObj);
   });
 }
+/** 刪除情境：這個情境的輸入資料、作法、說明、計算結果一起刪掉(快照保留，之後仍可拿來比較) */
 function deleteScenario(scenarioId) {
-  return withLock_(function () { return deleteRow_(SHEETS.SCENARIOS, 'ScenarioID', scenarioId); });
+  return withLock_(function () {
+    deleteScenarioData_([scenarioId]);
+    return deleteRow_(SHEETS.SCENARIOS, 'ScenarioID', scenarioId);
+  });
 }
 
 /** 情境設定整批儲存（既有情境直接在表格上改名/改性質，按一次儲存） */
@@ -2787,7 +2888,10 @@ function buildAmountMatrix_(sheetName, scenarioId, vehicleTypeId, lineOptions) {
     };
   });
 
-  return { lines: lineOptions, vehicles: vehicles, values: values, lineNotes: getLineNotes(scenarioId) };
+  // 科目代碼 → 名稱(整份科目表)：公式說明要把 P8 這類代碼換成名稱，售價結構等不在這張表上的科目也要查得到
+  var lineNames = {};
+  getPLLineItems(vehicleTypeId).forEach(function (d) { lineNames[d.LineCode] = d.LineName; });
+  return { lines: lineOptions, vehicles: vehicles, values: values, lineNotes: getLineNotes(scenarioId), lineNames: lineNames };
 }
 
 /**
@@ -3059,9 +3163,20 @@ function getRateGrid(scenarioId, vehicleTypeId) {
     })[0];
   };
 
+  // 同車型的其他情境有沒有填：參數值是每個情境各一份，只在一個情境填了，其他情境就會用預設值(沒有預設值 = 0)
+  var siblings = vehicleTypeId ? getScenarios(vehicleTypeId).filter(function (sc) { return sc.ScenarioID !== scenarioId; }) : [];
+  var allParams = siblings.length ? (sheetToObjects_(SHEETS.PARAMETERS) || []) : [];
+  var filledIn = function (name) {
+    var set = {};
+    allParams.forEach(function (p) { if (p.ParamName === name && p.Value !== '' && p.Value !== null) set[p.ScenarioID] = true; });
+    return set;
+  };
   var rates = getParamDefs().map(function (def) {
     var name = def.ParamName;
     var global = find(name, '');
+    var hasDefault = (def.DefaultValue !== '' && def.DefaultValue !== undefined) || DEFAULT_PARAMS[name] !== undefined;
+    var filled = filledIn(name);
+    var label = function (sc) { return (sc.Gate ? sc.Gate + ' ' : '') + (sc.ScenarioName || sc.ScenarioID); };
     var overrides = {};
     vehicles.forEach(function (v) {
       var row = find(name, v.VehicleID);
@@ -3074,6 +3189,10 @@ function getRateGrid(scenarioId, vehicleTypeId) {
       globalValue: global ? toNumber_(global.Value) : (def.DefaultValue !== '' && def.DefaultValue !== undefined ? def.DefaultValue :
         (DEFAULT_PARAMS[name] !== undefined ? DEFAULT_PARAMS[name] : '')),
       isDefault: !global,
+      hasDefault: hasDefault,
+      // 沒有預設值的參數：哪些其他情境沒填(公式會當 0)、哪些有填
+      missingIn: hasDefault ? [] : siblings.filter(function (sc) { return !filled[sc.ScenarioID]; }).map(label),
+      filledIn: siblings.filter(function (sc) { return filled[sc.ScenarioID]; }).map(label),
       unit: def.Unit, description: def.Description, isPreset: def.isPreset, defaultValue: def.DefaultValue,
       overrides: overrides
     };
@@ -3600,7 +3719,10 @@ function inputLineOptions_(vehicleTypeId, costSection) {
   var defs = getPLLineItems(vehicleTypeId);
   return defs.filter(function (d) {
     return d.CalcType === CALC_TYPES.INPUT && isCostSectionLine_(d, defs) === costSection;
-  }).map(function (d) { return { value: d.LineCode, label: d.LineCode + ' ' + d.LineName, parentLine: d.ParentLine }; });
+  }).map(function (d) {
+    var parent = defs.filter(function (p) { return p.LineCode === d.ParentLine; })[0];
+    return { value: d.LineCode, label: d.LineCode + ' ' + d.LineName, parentLine: d.ParentLine, parentName: parent ? parent.LineName : '' };
+  });
 }
 /** 銷貨成本頁的成本項目(B 段底下、手動輸入) */
 function getCostOfSalesLineOptions(vehicleTypeId) { return inputLineOptions_(vehicleTypeId, true); }
@@ -4415,6 +4537,7 @@ function createVehicleType(vehicleTypeId, notes, chartSourceTypeId) {
   return withLock_(function () {
     var id = String(vehicleTypeId || '').trim();
     if (!id) throw new Error('請輸入車型代號');
+    validateCode_('車型代號', id);
     if (getVehicleTypes().some(function (t) { return String(t.VehicleTypeID) === id; })) throw new Error('車型「' + id + '」已經存在');
     upsertRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', { VehicleTypeID: id, Notes: notes || '' });
     ensureTypeChart_(id, chartSourceTypeId || '');
@@ -4473,12 +4596,13 @@ function overridesFor_(scenarioId) {
 function calcSalesMix_(scenarioId) {
   var rows = getSalesMix(scenarioId);
   var o = overridesFor_(scenarioId);
-  if (!o || (!o.volume && !o.price)) return rows;
+  // 倍數 0 也是有效的假設(銷量 0 台、售價 0)：用 !== undefined 判斷，不能用真假值
+  if (!o || (o.volume === undefined && o.price === undefined)) return rows;
   return rows.map(function (r) {
     var c = {};
     Object.keys(r).forEach(function (k) { c[k] = r[k]; });
-    if (o.volume) c.MonthlyVolume = toNumber_(r.MonthlyVolume) * o.volume;
-    if (o.price) c.ListPriceTaxIncl = toNumber_(r.ListPriceTaxIncl) * o.price;
+    if (o.volume !== undefined) c.MonthlyVolume = toNumber_(r.MonthlyVolume) * o.volume;
+    if (o.price !== undefined) c.ListPriceTaxIncl = toNumber_(r.ListPriceTaxIncl) * o.price;
     return c;
   });
 }
@@ -5150,7 +5274,7 @@ function getLifeCycleUnits(scenarioId) {
   var scenario = getScenarios().filter(function (s) { return s.ScenarioID === scenarioId; })[0];
   if (scenario) {
     var o = overridesFor_(scenarioId);
-    var vol = toNumber_(scenario.AmortMonthlyVolume) * (o && o.volume ? o.volume : 1);
+    var vol = toNumber_(scenario.AmortMonthlyVolume) * (o && o.volume !== undefined ? o.volume : 1);
     var years = toNumber_(scenario.AmortLifeCycleYears);
     if (vol > 0 && years > 0) return vol * 12 * years;
   }
@@ -5797,6 +5921,8 @@ function solveGoal(scenarioId, metric, target, driver) {
   };
   var f0 = whatIfMetric_(scenarioId, metric);
   var positiveOnly = ['volume', 'price', 'fx', 'line', 'dev'].indexOf(driver.type) !== -1;
+  // 銷量的下限不是 0：0 台時攤提台數也是 0，攤提「÷ 0 = 0」會讓單台淨利突然變好，搜尋會跨不過真正的損益兩平點
+  var minX = driver.type === 'volume' ? Math.abs(base.value) * 1e-4 : 0;
   var g = function (x) { return evalAt(x) - target; };
   var x0 = base.value;
   if (Math.abs(f0 - target) < 0.5) {
@@ -5810,10 +5936,10 @@ function solveGoal(scenarioId, metric, target, driver) {
     var prevX = x0, prevG = g0, s = step;
     for (var k = 0; k < 22; k++) {
       var x = x0 + dir * s;
-      if (positiveOnly && x < 0) x = 0;
+      if (positiveOnly && x < minX) x = minX;
       var gx = g(x); tries++;
       if ((gx > 0) !== (prevG > 0) || gx === 0) { lo = prevX; gLo = prevG; hi = x; gHi = gx; return true; }
-      if (positiveOnly && x === 0) break;
+      if (positiveOnly && x === minX) break;
       prevX = x; prevG = gx; s *= 2;
     }
     return false;
@@ -5957,7 +6083,8 @@ function solveGoalPlan(scenarioId, metric, target, levers) {
     var it = {
       driver: l.driver, label: b.label, unit: b.unit, base: b.value, mode: mode,
       cap: blank(l.capPct) || mode === 'known' ? null : Math.abs(Number(l.capPct)),
-      lower: positiveTypes.indexOf(l.driver.type) !== -1 ? 0 : null,
+      // 銷量下限同 solveGoal：0 台時攤提 ÷ 0 = 0，不能拿來當搜尋端點
+      lower: l.driver.type === 'volume' ? Math.abs(b.value) * 1e-4 : positiveTypes.indexOf(l.driver.type) !== -1 ? 0 : null,
       amount: mode === 'amount' ? Math.abs(toNumber_(l.amount)) : 0
     };
     if (mode === 'known') {
@@ -6307,7 +6434,7 @@ function reportMaintenance_(message) {
 }
 
   return {
-    fns: { getSheet_: getSheet_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, metricGoodDir_: metricGoodDir_, solveGoalPlan: solveGoalPlan, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
+    fns: { getSheet_: getSheet_, validateCode_: validateCode_, sheetExists_: sheetExists_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, deleteScenarioData_: deleteScenarioData_, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, metricGoodDir_: metricGoodDir_, solveGoalPlan: solveGoalPlan, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
     consts: { SCHEMA: SCHEMA, TEXT_COLUMNS: TEXT_COLUMNS, PL_LINE_ITEMS: PL_LINE_ITEMS, LINE_CODE_PREFIX: LINE_CODE_PREFIX },
     // 模擬 Apps Script「每次 google.script.run 都是全新執行」：單次執行內的快取要清掉
     beginExecution: function () { SHEET_CACHE_ = {}; resetCalcMemo_(); LOCK_DEPTH_ = 0; }
@@ -6353,7 +6480,7 @@ function reportMaintenance_(message) {
     var shim = opts.shim, Pack = opts.pack;
     var storage = opts.storage || null;
     var changed = false;
-    var state = { savedAt: '', changesSinceExport: 0, lastExportAt: '', storageOk: true, stale: false, firstRun: false };
+    var state = { savedAt: '', changesSinceExport: 0, firstUnsavedAt: '', lastExportAt: '', storageOk: true, stale: false, firstRun: false };
     var listeners = [];
 
     var spreadsheet = new shim.Spreadsheet(function (sheetName) {
@@ -6390,7 +6517,7 @@ function reportMaintenance_(message) {
       state.savedAt = new Date().toISOString();
       try {
         storage.setItem(STORAGE_KEY, JSON.stringify({
-          savedAt: state.savedAt, changesSinceExport: state.changesSinceExport,
+          savedAt: state.savedAt, changesSinceExport: state.changesSinceExport, firstUnsavedAt: state.firstUnsavedAt,
           lastExportAt: state.lastExportAt, tables: tables
         }));
         state.storageOk = true;
@@ -6415,6 +6542,7 @@ function reportMaintenance_(message) {
         writeTables(saved.tables);
         state.savedAt = saved.savedAt || '';
         state.changesSinceExport = saved.changesSinceExport || 0;
+        state.firstUnsavedAt = saved.firstUnsavedAt || '';
         state.lastExportAt = saved.lastExportAt || '';
       } else {
         writeTables({});
@@ -6423,6 +6551,12 @@ function reportMaintenance_(message) {
       }
       changed = false;
       notify();
+    }
+
+    /** 記一筆「還沒整份備份的修改」；第一筆的時間拿來提醒「從什麼時候開始沒備份」 */
+    function markChanged() {
+      if (!state.changesSinceExport) state.firstUnsavedAt = new Date().toISOString();
+      state.changesSinceExport++;
     }
 
     /** 前端呼叫後端函式。跟 google.script.run 一樣只開放公開函式(結尾不是底線)，參數與回傳值都走一次 JSON。 */
@@ -6439,7 +6573,7 @@ function reportMaintenance_(message) {
         result = fn.apply(null, JSON.parse(JSON.stringify(args || [])));
       } finally {
         if (changed) {
-          state.changesSinceExport++;
+          markChanged();
           persist();
           notify();
         }
@@ -6467,6 +6601,7 @@ function reportMaintenance_(message) {
         : !vehicleTypeIds || !vehicleTypeIds.length || coversAll(vehicleTypeIds.map(String), ids(tables.VehicleTypes, 'VehicleTypeID'));
       if (whole) {
         state.changesSinceExport = 0;
+        state.firstUnsavedAt = '';
         state.lastExportAt = pack.exportedAt;
         persist();
         notify();
@@ -6477,7 +6612,9 @@ function reportMaintenance_(message) {
     /** 取代匯入：整份資料庫換成資料包的內容 */
     function replaceWithPack(pack) {
       writeTables(pack.tables);
-      state.changesSinceExport = pack.scope && pack.scope.kind === 'all' ? 0 : 1;
+      state.changesSinceExport = 0;
+      state.firstUnsavedAt = '';
+      if (!(pack.scope && pack.scope.kind === 'all')) markChanged();
       persist();
       notify();
     }
@@ -6490,7 +6627,7 @@ function reportMaintenance_(message) {
     function mergePack(pack) {
       var merged = Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope);
       writeTables(merged.tables);
-      state.changesSinceExport++;
+      markChanged();
       persist();
       notify();
       return merged.report;
@@ -6500,6 +6637,7 @@ function reportMaintenance_(message) {
     function resetAll() {
       writeTables({});
       state.changesSinceExport = 0;
+      state.firstUnsavedAt = '';
       persist();
       notify();
     }
@@ -6742,7 +6880,7 @@ const ENTITIES = {
     label: '車型主檔', pk: 'VehicleTypeID',
     getFn: 'getVehicleTypes', saveGridFn: 'saveVehicleTypeGrid', deleteFn: 'deleteVehicleType',
     renameFn: 'renameVehicleType', scopedBy: null, createUi: 'vehicleType',
-    intro: '車型是最上層的單位。<b>每個車型各自有一份科目表</b>（科目在不同車型間差異很大，不再共用同一份），建立車型時可以選擇從標準範本或從既有車型複製。',
+    intro: '車型是最上層的單位。<b>每個車型各自有一份科目表</b>（科目在不同車型間差異很大，各自調整互不影響），建立車型時可以選擇從標準範本或從既有車型複製。',
     columns: [
       { name: 'VehicleTypeID', label: '車型代號', lockAfterCreate: true, width: 140 },
       { name: 'Notes', label: '備註', width: 420 }
@@ -6763,7 +6901,7 @@ const ENTITIES = {
     label: '情境設定', pk: 'ScenarioID',
     getFn: 'getScenarios', saveGridFn: 'saveScenarioGrid', deleteFn: 'deleteScenario',
     scopedBy: 'vehicleType', createUi: 'scenario', sortable: 'setScenarioOrder',
-    intro: '同一個 GATE 底下可以有多個情境（現況 / 目標 / 前回）。目標情境才有挑戰低減目標；新情境可以整批帶入既有情境的資料再調整。拖曳 ⠿ 調整情境選單的順序。',
+    intro: '同一個 GATE 底下可以有多個情境（現況 / 目標，例如上一次審議的目標就是 GATE 報告裡的「前回」）。目標情境才有挑戰低減目標；新情境可以整批帶入既有情境的資料再調整。拖曳 ⠿ 調整情境選單的順序。',
     columns: [
       { name: 'Gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, width: 110 },
       { name: 'ScenarioName', label: '情境名稱', width: 200 },
@@ -6859,6 +6997,11 @@ function fmt(v, digits) {
   // 四捨五入後是 0 的負數(如 -0.3)不要顯示成「-0」
   if (Math.abs(n) < 0.5 * Math.pow(10, -d)) return '0';
   return n.toLocaleString(undefined, { maximumFractionDigits: d });
+}
+/** 百分比取一位小數：-0.04% 四捨五入是 0，不要顯示成「-0.0」 */
+function pct1_(v) {
+  const r = Math.round((Number(v) || 0) * 10) / 10;
+  return (r === 0 ? 0 : r).toFixed(1);
 }
 /**
  * 金額單位：全系統共用一個設定(儀表板、GATE 報告、瀑布圖工具、目標反推的瀑布圖)，任何一頁改了，其他頁下次打開就跟著變。
@@ -7302,6 +7445,7 @@ function setCurrentScenario(value) {
     badge.style.display = currentScenario ? 'inline-flex' : 'none';
   }
   saveAppState_();
+  if (typeof syncMastersScenarioMarks_ === 'function') syncMastersScenarioMarks_();
 }
 
 function onVehicleTypeChange(value) {
@@ -7385,24 +7529,31 @@ function installExcelPaste_() {
     const grid = parseClipboardGrid_(text);
     const tr = td.parentElement;
     const body = tr.parentElement;
-    const rows = Array.from(body.children).filter(r => r.tagName === 'TR' && r.style.display !== 'none' && !r.hidden);
+    // 小標題列(.group-row)不是資料列，貼上時跳過，Excel 連續的一塊才會對到連續的科目
+    const rows = Array.from(body.children).filter(r => r.tagName === 'TR' && r.style.display !== 'none' && !r.hidden && !r.classList.contains('group-row'));
     const r0 = rows.indexOf(tr), c0 = Array.from(tr.children).indexOf(td);
     let filled = 0, skipped = 0;
+    const bad = [];   // 填不進去的內容(畫面上把那一格標起來，提示裡列出前幾個)
+    const skip = (cell, raw) => {
+      skipped++;
+      if (bad.length < 3 && String(raw).trim()) bad.push(String(raw).trim());
+      if (cell) { cell.classList.add('paste-skip'); setTimeout(() => cell.classList.remove('paste-skip'), 8000); }
+    };
     grid.forEach((cells, dr) => {
       const row = rows[r0 + dr];
       if (!row) { skipped += cells.length; return; }
       cells.forEach((raw, dc) => {
         const cell = row.children[c0 + dc];
         const input = cell && cell.querySelector('input:not([type=checkbox]):not([disabled]),select:not([disabled])');
-        if (!input) { if (String(raw).trim()) skipped++; return; }
+        if (!input) { if (String(raw).trim()) skip(cell, raw); return; }
         let v = raw.trim();
         if (input.type === 'number') {
           const n = parsePastedNumber_(v);
-          if (n === null) { skipped++; return; }
+          if (n === null) { skip(cell, raw); return; }
           v = n === '' ? '' : String(n);
         } else if (input.tagName === 'SELECT') {
           const opt = Array.from(input.options).find(o => o.value === v || o.text === v);
-          if (!opt) { skipped++; return; }
+          if (!opt) { skip(cell, raw); return; }
           v = opt.value;
         }
         input.value = v;
@@ -7411,7 +7562,7 @@ function installExcelPaste_() {
         filled++;
       });
     });
-    toast(`已從剪貼簿填入 ${filled} 格` + (skipped ? `，${skipped} 格無法填入（超出表格、唯讀或不是數字）` : '') + '。確認後記得儲存。', skipped ? 'warn' : 'ok', 4500);
+    toast(`已從剪貼簿填入 ${filled} 格` + (skipped ? `，${skipped} 格無法填入（超出表格、唯讀或不是數字${bad.length ? '，例如「' + bad.join('」「') + '」' : ''}；表格上標紅的格子）` : '') + '。確認後記得儲存。', skipped ? 'warn' : 'ok', skipped ? 8000 : 4500);
   });
 }
 
@@ -7432,7 +7583,7 @@ function renderMastersPanel() {
         ? '<p class="muted">請先在上面建立車型，或在右上角選擇車型。</p>'
         : gridShell(key, ENTITIES[key].label, ENTITIES[key].intro)}
     </div>`;
-  panel.innerHTML = section('vehicletypes', '車型') +
+  panel.innerHTML = '<div id="master-next"></div>' + section('vehicletypes', '車型') +
     section('vehicles', `車系${vt ? `<span class="muted">（${esc(vt)}）</span>` : ''}`) +
     section('scenarios', `情境${vt ? `<span class="muted">（${esc(vt)}）</span>` : ''}`) +
     (vt ? snapshotCardShellHtml_() : '');
@@ -7476,7 +7627,7 @@ function drawEntityGrid(key) {
 
   const sortable = cfg.sortable && rows.length > 1;
   const body = rows.length
-    ? rows.map((r, i) => `<tr${r.__existing ? '' : ' class="new-row"'} data-key="${i}">
+    ? rows.map((r, i) => `<tr${!r.__existing ? ' class="new-row"' : key === 'scenarios' && r.ScenarioID === currentScenarioId ? ' class="current-row" data-tip="右上角目前選的情境"' : ''} data-key="${i}">
         ${sortable ? `<td class="row-actions">${r.__existing ? dragHandleHtml() : ''}</td>` : ''}
         ${cfg.columns.map(col => entityCellHtml(key, i, col, r)).join('')}
         <td class="row-actions">${entityRowActionHtml(key, i, r, rows.length)}</td>
@@ -7520,7 +7671,47 @@ function drawEntityGrid(key) {
     setStatus(key, pendingStatus.text, pendingStatus.cls);
     pendingStatus = null;
   }
+  updateMasterNext_();
 }
+
+/** 右上角換了情境(例如剛建立的情境自動被選起來)：情境表格的標示列、快照按鈕跟著換，不必整頁重畫 */
+function syncMastersScenarioMarks_() {
+  const rows = entityRows.scenarios || [];
+  document.querySelectorAll('#entity-body-scenarios tr[data-key]').forEach(tr => {
+    const r = rows[Number(tr.dataset.key)];
+    const on = !!(r && r.__existing && r.ScenarioID === currentScenarioId);
+    tr.classList.toggle('current-row', on);
+    if (on) tr.setAttribute('data-tip', '右上角目前選的情境'); else if (r && r.__existing) tr.removeAttribute('data-tip');
+  });
+  const snapBtn = document.querySelector('#snapshot-card .card-head button');
+  if (snapBtn) { snapBtn.disabled = !currentScenarioId; if (currentScenarioId) snapBtn.removeAttribute('data-tip'); }
+}
+
+/** 頁首的「下一步」：剛建好車型的人不知道接著要做什麼，照 車系 → 情境 → 輸入資料 的順序提示一次 */
+function updateMasterNext_() {
+  const box = document.getElementById('master-next');
+  if (!box) return;
+  const has = key => (entityRows[key] || []).some(r => r.__existing);
+  let html = '';
+  if (!currentVehicleTypeId) {
+    if (entityRows.vehicletypes && !has('vehicletypes')) html = '<b>第 1 步</b>：按「＋ 新增車型」建立第一個車型。';
+  } else if (entityRows.vehicles && !has('vehicles')) {
+    html = `<b>下一步</b>：在下面「車系」按「＋ 新增一列」，加上 ${esc(currentVehicleTypeId)} 的車系（標準型、豪華型…），按儲存。`;
+  } else if (entityRows.scenarios && !has('scenarios')) {
+    html = '<b>下一步</b>：在下面「情境」按「＋ 新增情境…」，先建立「現況」情境。';
+  } else if (entityRows.scenarios && has('scenarios') && entityRows.vehicles && has('vehicles') && !localStorage_get_('fs-master-next-done')) {
+    html = `<b>下一步</b>：右上角選好情境後，依序填
+      <button type="button" class="link-btn" onclick="switchTab('salesmix')">銷售構成與售價</button> →
+      <button type="button" class="link-btn" onclick="switchTab('costs')">成本與費用</button> →
+      <button type="button" class="link-btn" onclick="switchTab('devinvestment')">開發總投</button>，
+      就能在 <button type="button" class="link-btn" onclick="switchTab('dashboard')">損益儀表板</button> 看到結果。
+      要做目標情境時，新增情境選「目標」並以現況為基礎帶入資料。
+      <button type="button" class="link-btn" onclick="localStorage_set_('fs-master-next-done', '1');updateMasterNext_()">不再顯示</button>`;
+  }
+  box.innerHTML = html ? `<div class="callout info master-next"><div>${html}</div></div>` : '';
+}
+function localStorage_get_(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function localStorage_set_(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 暫存被封鎖就算了 */ } }
 
 function entityCellHtml(key, i, col, row) {
   const value = row[col.name] === undefined || row[col.name] === null ? '' : row[col.name];
@@ -7567,7 +7758,7 @@ function renameEntityRow(key, i) {
     body: '<p class="help">所有引用這個代號的資料（車系、情境、銷售構成、成本、科目表…）會一起改成新代號。</p>',
     fields: [{ name: 'id', label: '新的代號', value: oldId }],
     okText: '修改',
-    validate: v => !v.id.trim() ? '代號不能空白' : ''
+    validate: v => !v.id.trim() ? '代號不能空白' : codeProblem_('代號', v.id.trim())
   }).then(v => {
     if (!v) return;
     const newId = v.id.trim();
@@ -7640,9 +7831,12 @@ function deleteEntityRow(key, i) {
   const cfg = ENTITIES[key];
   const row = entityRows[key][i];
   const label = row[cfg.pk] && cfg.pk !== 'ScenarioID' ? row[cfg.pk] : scenarioLabel(row);
-  confirmModal('刪除「' + label + '」？', key === 'vehicletypes'
-    ? '車型與它自己的科目表會一起刪除。底下的車系與情境資料不會被刪，但會看不到。這個動作無法復原。'
-    : '這個動作無法復原。', '刪除', true).then(ok => {
+  const body = key === 'vehicletypes'
+    ? '底下的車系、情境（含所有輸入的數字、作法、說明）、情境快照與這個車型的科目表會<b>一起刪除</b>。這個動作無法復原，建議先「匯出車型」留一份。'
+    : key === 'scenarios'
+      ? '這個情境的銷售構成、成本、費用、開發總投、參數、作法與說明會一起刪除（情境快照保留）。這個動作無法復原。'
+      : '這個動作無法復原。';
+  confirmModal('刪除「' + label + '」？', body, '刪除', true).then(ok => {
     if (!ok) return;
     setStatus(key, '刪除中...');
     google.script.run
@@ -7659,8 +7853,49 @@ function deleteEntityRow(key, i) {
   });
 }
 
+/** 存檔前先擋下會被默默丟掉或互相覆蓋的列：填了名稱卻沒填代號、代號重複、同一個 GATE 情境名稱重複 */
+function entityGridProblem_(key) {
+  const cfg = ENTITIES[key];
+  const rows = entityRows[key] || [];
+  if (cfg.pk && cfg.pk !== 'ScenarioID') {
+    const noCode = rows.filter(r => !r.__existing && !String(r[cfg.pk] || '').trim() &&
+      cfg.columns.some(c => c.name !== cfg.pk && String(r[c.name] || '').trim()));
+    if (noCode.length) return `有 ${noCode.length} 列還沒填「${cfg.columns[0].label}」，填好再儲存（不要的列按「移除」）`;
+    const seen = {};
+    for (const r of rows) {
+      const id = String(r[cfg.pk] || '').trim();
+      if (!id) continue;
+      if (seen[id]) return `${cfg.columns[0].label}「${id}」重複了`;
+      seen[id] = true;
+      if (!r.__existing && codeProblem_(cfg.columns[0].label, id)) return codeProblem_(cfg.columns[0].label, id);
+    }
+  }
+  if (key === 'scenarios') {
+    const dup = duplicateScenarioName_(rows);
+    if (dup) return dup;
+  }
+  return '';
+}
+/** 代號不能有空白、逗號、| 或引號(分攤車系用逗號分隔、科目表主鍵用 |、REF("…") 公式用引號)；後端也會擋 */
+function codeProblem_(label, id) {
+  return /[\s,，|"'“”]/.test(id) ? `${label}「${id}」不能有空白、逗號、| 或引號` : '';
+}
+/** 同一個車型裡「GATE 別 + 情境名稱」重複時，選單上會出現兩個一模一樣的選項，分不出來 */
+function duplicateScenarioName_(rows) {
+  const seen = {};
+  for (const r of rows) {
+    if (!r.Gate && !r.ScenarioName) continue;
+    const k = (r.Gate || '') + ' ' + String(r.ScenarioName || '').trim();
+    if (seen[k]) return `已經有一個「${k}」，情境名稱請取不一樣的（例如加上日期或版次）`;
+    seen[k] = true;
+  }
+  return '';
+}
+
 function saveEntityGrid(key) {
   const cfg = ENTITIES[key];
+  const problem = entityGridProblem_(key);
+  if (problem) { setStatus(key, problem, 'err'); return; }
   const rows = (entityRows[key] || []).map(r => {
     const copy = {};
     cfg.columns.forEach(c => { copy[c.name] = r[c.name] === undefined ? '' : r[c.name]; });
@@ -7696,7 +7931,7 @@ function createVehicleTypeDialog() {
         options: [['', '標準範本']].concat(others.map(id => [id, '複製「' + id + '」的科目表'])) }
     ],
     okText: '建立',
-    validate: v => !v.id.trim() ? '請輸入車型代號' : ''
+    validate: v => !v.id.trim() ? '請輸入車型代號' : codeProblem_('車型代號', v.id.trim())
   }).then(v => {
     if (!v) return;
     google.script.run
@@ -7758,7 +7993,9 @@ function createScenarioDialog() {
       Object.assign(COPY_PARTS_FIELD_(), { help: '有選「以既有情境為基礎」時才會帶入' })
     ],
     okText: '建立情境',
-    validate: v => !v.name.trim() ? '請輸入情境名稱' : (v.source && !v.parts.length ? '請至少勾選一項要帶入的資料，或把來源改成「不帶入」' : '')
+    validate: v => !v.name.trim() ? '請輸入情境名稱'
+      : duplicateScenarioName_((entityRows.scenarios || []).concat([{ Gate: v.gate, ScenarioName: v.name }]))
+      || (v.source && !v.parts.length ? '請至少勾選一項要帶入的資料，或把來源改成「不帶入」' : '')
   });
   // 情境名稱還是自動帶入的值時，改情境性質就跟著換(現況0901 → 目標0901)
   const dlg = document.querySelector('dialog.modal:last-of-type');
@@ -7851,7 +8088,7 @@ function snapshotCardShellHtml_() {
   return `<div class="card" id="snapshot-card" style="margin-top:16px;">
     <div class="card-head"><h3>情境快照（版本紀錄）</h3><span class="muted">存下某個時間點的損益數字，之後跟現在比較「差在哪」</span>
       <span class="spacer"></span>
-      <button type="button" class="btn sm" onclick="createSnapshotDialog_(currentScenarioId, currentScenario ? scenarioLabel(currentScenario) : '')">把目前情境存成快照</button></div>
+      <button type="button" class="btn sm" onclick="createSnapshotDialog_(currentScenarioId, currentScenario ? scenarioLabel(currentScenario) : '')"${currentScenarioId ? '' : ' disabled data-tip="先建立並選擇情境"'}>把目前情境存成快照</button></div>
     <div id="snapshot-body"><p class="muted">載入中...</p></div></div>`;
 }
 function loadSnapshotCard_() {
@@ -8193,7 +8430,7 @@ function drawMatrix(key) {
     grid.innerHTML = emptyStateHtml('📋', '這個車型還沒有車系', '請先到「車型與情境」建立車系。', `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
     return;
   }
-  const codeNameMap = {};
+  const codeNameMap = Object.assign({}, data.lineNames || {});
   data.lines.concat(data.autoLines || []).forEach(l => { codeNameMap[l.value] = matrixLineName(l); });
 
   const currencyCell = line => {
@@ -8220,7 +8457,7 @@ function drawMatrix(key) {
       </tr></thead>
       <tbody>
         ${data.lines.length ? '' : `<tr><td colspan="${data.vehicles.length + 5}" class="muted" style="text-align:center;padding:18px;">還沒有手動輸入的項目，用上方「新增項目」新增</td></tr>`}
-        ${data.lines.map(line => `
+        ${data.lines.map((line, li) => `${matrixGroupRowHtml_(key, data, li)}
           <tr data-line="${esc(line.value)}">
             <td class="row-head">${esc(matrixLineName(line))}</td>
             ${currencyCell(line)}
@@ -8235,14 +8472,14 @@ function drawMatrix(key) {
               oninput="matrixDirty_('${key}')" placeholder="例：依業務部提供"></td>
             <td class="row-actions"><button type="button" class="btn ghost sm" onclick="deleteMatrixLine('${key}', '${esc(line.value)}')" data-tip="刪除這個項目">✕</button></td>
           </tr>`).join('')}
-        ${(data.autoLines || []).length ? `<tr><td class="row-head" colspan="${data.vehicles.length + (cfg.hasCurrency ? 5 : 4)}"
+        ${(data.autoLines || []).length ? `<tr class="group-row"><td class="row-head" colspan="${data.vehicles.length + (cfg.hasCurrency ? 5 : 4)}"
             style="background:var(--surface-3);font-size:12px;color:var(--text-2);">由公式或開發總投算出（唯讀，要改算法請到「科目與公式」）</td></tr>` : ''}
         ${(data.autoLines || []).map(line => `
           <tr class="auto-line" data-line="${esc(line.value)}">
-            <td class="row-head">${esc(matrixLineName(line))} <span class="ct-badge ct-${esc(line.calcType)}">${line.calcType === 'DEV_AMORT' ? '攤提' : '公式'}</span></td>
+            <td class="row-head">${esc(matrixLineName(line))} <span class="ct-badge ct-${esc(line.calcType)}"${line.formula ? ` tabindex="0" data-tip="${esc('= ' + humanizeFormula_(line.formula, codeNameMap))}"` : ''}>${line.calcType === 'DEV_AMORT' ? '攤提' : '公式'}</span></td>
             ${cfg.hasCurrency ? '<td></td>' : ''}
             ${data.vehicles.map(v => autoLineCellHtml(data, line.value, v.VehicleID, codeNameMap)).join('')}
-            <td class="calc muted">—</td><td class="muted" style="text-align:left;">${line.formula ? `<code style="font-size:11px;">${esc(humanizeFormula_(line.formula, codeNameMap))}</code>` : ''}</td><td></td>
+            <td class="calc">${autoWeightedText_(data, line.value)}</td><td class="muted" style="text-align:left;font-size:12px;">${line.formula ? esc('= ' + humanizeFormula_(line.formula, codeNameMap)) : '開發總投 ÷ 攤提台數'}</td><td></td>
           </tr>`).join('')}
       </tbody>
       <tfoot><tr>
@@ -8259,7 +8496,7 @@ function drawMatrix(key) {
       </tr>` : ''}</tfoot>
     </table>
     </div>
-    <p class="muted">加權平均 = 依各車系銷售構成比加權，跟儀表板同口徑。</p>`;
+    <p class="muted">加權平均 = 依各車系銷售構成比加權，跟儀表板同口徑。${cfg.hasCurrency ? fxHint_(data.currencies) : ''}</p>`;
   updateMatrixTotals(key);
 }
 /**
@@ -8359,6 +8596,32 @@ function parseMatrixPaste_(text, vehicles) {
 function matrixDirty_(key) { markDirty(key, () => saveMatrix(key), () => { clearDirty(); renderMatrixPanel(key); }); }
 
 /** 公式/攤提科目的格子：唯讀，滑鼠移過去看計算過程 */
+/** 公式/攤提科目的加權平均：跟手動輸入的科目同一個口徑(依銷售構成比加權) */
+function autoWeightedText_(data, lineCode) {
+  let w = 0, total = 0;
+  data.vehicles.forEach(v => {
+    const amt = (data.autoValues[lineCode] || {})[v.VehicleID];
+    if (amt === undefined) return;
+    w += amt * num(v.SalesMixPct); total += num(v.SalesMixPct);
+  });
+  return total ? fmt(w / total) : '—';
+}
+/**
+ * 營業費用的科目分好幾段(銷售費用 / 產品貢獻前 / 固定營業費用 / 前瞻…)：段落換了就插一列小標題，
+ * 不然整張表平鋪，看不出哪個科目在哪一段扣。銷貨成本只有一段，不需要。
+ */
+function matrixGroupRowHtml_(key, data, i) {
+  const cfg = MATRIX_CONFIG[key];
+  if (!cfg.parentOptions) return '';
+  const line = data.lines[i], prev = data.lines[i - 1];
+  if (prev && prev.parentLine === line.parentLine) return '';
+  const known = cfg.parentOptions.find(o => o[0] === line.parentLine);
+  // 沒有父科目的(例：前瞻費用直接從營業淨利扣)就用科目自己的名稱當小標題
+  const title = known ? known[1] : line.parentName ? `計入「${shortLineName(line.parentName)}」` : matrixLineName(line);
+  return `<tr class="group-row"><td class="row-head" colspan="${data.vehicles.length + (cfg.hasCurrency ? 5 : 4)}"
+    style="background:var(--surface-2);font-size:12px;color:var(--text-2);">${esc(title)}</td></tr>`;
+}
+
 function autoLineCellHtml(data, lineCode, vehicleId, codeNameMap) {
   const amt = (data.autoValues[lineCode] || {})[vehicleId];
   if (amt === undefined) return '<td class="calc muted">—</td>';
@@ -8441,6 +8704,12 @@ function saveMatrix(key) {
     .withSuccessHandler(() => { clearDirty(); setStatus(key, '已儲存', 'ok'); renderMatrixPanel(key); })
     .withFailureHandler(err => setStatus(key, '錯誤：' + err.message, 'err'))
     [cfg.saveFn](currentScenarioId, cells, lineNotes);
+}
+
+/** 幣別選單只有本位幣時，說明怎麼加外幣(匯率是每個情境各填一份) */
+function fxHint_(currencies) {
+  if ((currencies || []).length > 1) return '';
+  return ` 要用外幣登打？先到 <button type="button" class="link-btn" onclick="switchTab('paramrates')">參數與匯率</button> 填這個情境的匯率，幣別選單才會出現那個幣別。`;
 }
 
 function addMatrixLine(key) {
@@ -8573,6 +8842,7 @@ function drawDevGrid() {
     </table>
     </div>
     <datalist id="dev-departments"></datalist>
+    ${(devSummary.currencies || ['TWD']).length <= 1 ? `<p class="muted">${fxHint_(devSummary.currencies)}</p>` : ''}
     <div class="summary-box">
       <div><span class="muted">攤提用 LIFE CYCLE 總台數</span><strong>${fmt(devSummary.lifeCycleUnits)}</strong></div>
       <div><span class="muted">銷售構成推算台數</span><strong>${fmt(devSummary.salesMixLifeCycleUnits)}</strong></div>
@@ -8746,6 +9016,13 @@ function removeDevRow(i) {
 }
 
 function saveDevGrid() {
+  // 沒填部門也沒填金額的列，儲存時會被當成空白列刪掉；有選大類/落點/寫備註的就先提醒，免得默默消失
+  const blank = r => !String(r.Department || '').trim() && (r.Amount === '' || r.Amount === null || r.Amount === undefined);
+  const half = devRows.filter(r => !r.RowID && blank(r) && (r.TargetLineCode || r.__category || String(r.Notes || '').trim()));
+  if (half.length) {
+    setStatus('devinvestment', `有 ${half.length} 列沒有填部門也沒有填金額，儲存時會被當成空白列刪掉。請補上金額或部門，不要的列按 ✕。`, 'err');
+    return;
+  }
   setStatus('devinvestment', '儲存中...');
   google.script.run
     .withSuccessHandler(safeHandler(summary => {
@@ -8772,8 +9049,9 @@ function renderRatePanel() {
   document.getElementById('panel-paramrates').innerHTML = `<div class="card">
       <div class="card-head"><h3>參數與比率</h3></div>
       ${gridShell('paramrates', '參數與比率',
+    `這裡的數值是<b>每個情境各填一份</b>（目前是 ${esc(currentScenario ? scenarioLabel(currentScenario) : '')}）；參數的名稱、單位、預設值則是所有車型共用。` +
     '公式裡用 <b>[參數名稱]</b> 取用（例：<code>[營業稅率]</code>、<code>[關稅率]</code>）。單位是 % 的參數以百分比輸入(5 = 5%)，公式取出來自動變成小數。' +
-    '「全車系」是這個情境的預設值，個別車系不同時才填車系欄位（留白 = 沿用）。可以自己新增參數，例如關稅率、KD件報價、倍率。')}
+    '「全車系」是這個情境的值，個別車系不同時才填車系欄位（留白 = 沿用）。可以自己新增參數，例如關稅率、KD件報價、倍率。')}
     </div>
     <div class="card" id="fx-section"></div>`;
   renderFxPanel();
@@ -8807,7 +9085,7 @@ function drawRateGrid() {
       <tbody>
         ${rateData.rates.map(rate => `
           <tr>
-            <td class="row-head">${esc(rate.ParamName)}${rate.isDefault ? ' <span class="auto-tag" data-tip="這個情境還沒設定，目前用預設值">預設</span>' : ''}</td>
+            <td class="row-head">${esc(rate.ParamName)}${paramStateTag_(rate)}</td>
             <td class="calc" style="text-align:center;">${esc(rate.unit || '%')}</td>
             <td><input type="number" step="any" class="rate-global" data-name="${esc(rate.ParamName)}"
               data-paramid="${esc(rate.globalParamID)}" value="${esc(rate.globalValue)}"
@@ -8827,6 +9105,21 @@ function drawRateGrid() {
     <p class="muted">車系欄位留白 = 沿用全車系的值（灰字為目前沿用的數值）。</p>`;
 }
 
+/** 參數名稱旁的狀態：這個情境沒填時，是沿用預設值，還是根本沒有值(公式會當成 0) */
+function paramStateTag_(rate) {
+  if (!rate.isDefault) return '';
+  if (rate.hasDefault) return ' <span class="auto-tag" data-tip="這個情境還沒填，目前沿用預設值；要改就直接在「全車系」填">沿用預設值</span>';
+  const others = (rate.filledIn || []).length ? '\n其他情境有填：' + rate.filledIn.join('、') : '';
+  return ` <span class="auto-tag warn" data-tip="${esc('這個情境還沒填，也沒有預設值，公式會當成 0' + others)}">未填 = 0</span>`;
+}
+/** 存檔後提醒：這個情境填了值的參數，在同車型其他情境還沒填(沒有預設值 → 當成 0)，比較情境時會變成差異 */
+function warnParamGaps_(savedNames) {
+  const gaps = (rateData && rateData.rates || []).filter(r => savedNames[r.ParamName] && (r.missingIn || []).length);
+  if (!gaps.length) return;
+  toast(gaps.map(r => `「${r.ParamName}」在 ${r.missingIn.join('、')} 還沒填，公式會當成 0`).join('；') +
+    '。參數是每個情境各填一份，可以到那些情境補上，或在「編輯」設預設值。', 'warn', 8000);
+}
+
 function updateRatePlaceholders(paramName) {
   const globalInput = document.querySelector(`.rate-global[data-name="${paramName}"]`);
   document.querySelectorAll(`.rate-override[data-name="${paramName}"]`)
@@ -8843,7 +9136,13 @@ function saveRateGrid() {
   });
   setStatus('paramrates', '儲存中...');
   google.script.run
-    .withSuccessHandler(() => { clearDirtyPart_('paramrates'); setStatus('paramrates', '已儲存', 'ok'); loadRateGrid_(); })
+    .withSuccessHandler(() => {
+      clearDirtyPart_('paramrates'); setStatus('paramrates', '已儲存', 'ok');
+      const named = {};
+      rows.forEach(r => { if (r.Value !== '') named[r.ParamName] = true; });
+      warnParamGaps_(named);
+      loadRateGrid_();
+    })
     .withFailureHandler(err => setStatus('paramrates', '錯誤：' + err.message, 'err'))
     .saveRateGrid(currentScenarioId, rows);
 }
@@ -8851,7 +9150,7 @@ function saveRateGrid() {
 function paramDialog_(title, def, isNew) {
   return openModal({
     title,
-    body: '<p class="help">參數是全系統共用的定義(名稱/單位/預設值)；每個情境、每個車系的實際數值在這張表上填。</p>',
+    body: '<p class="help">參數的名稱、單位、預設值所有車型共用；實際數值是每個情境（必要時每個車系）各填一份。沒填的情境會用預設值，沒有預設值就當成 0。</p>',
     fields: [
       { name: 'ParamName', label: '參數名稱', value: def.ParamName || '', placeholder: '例：關稅率', help: isNew ? '' : '改名時，公式裡的 [舊名稱] 與各情境填的數值會一起改過去' },
       { name: 'Unit', label: '單位', type: 'select', value: def.Unit || '%', options: [['%', '%（以百分比輸入，公式取出時 ÷100）'], ['數值', '數值（原值取用，如倍率、金額）']] },
@@ -8906,7 +9205,7 @@ function renderFxPanel() {
   const box = document.getElementById('fx-section');
   if (!box) return;
   box.innerHTML = '<div class="card-head"><h3>匯率</h3></div>' + gridShell('paramfx', '匯率',
-    '1 外幣 = ? 台幣。銷貨成本與開發總投以外幣登打時用這個匯率換算；公式裡也可以用 <b>[CNY匯率]</b> 這種寫法取用。');
+    '1 外幣 = ? 台幣，<b>每個情境各填一份</b>。填了匯率的幣別才會出現在銷貨成本、開發總投的幣別選單，登打的外幣金額用這個匯率換算；公式裡也可以用 <b>[CNY匯率]</b> 這種寫法取用。');
   const cacheKey = panelCacheKey_('paramfx', 'scenario');
   if (panelDataCache_[cacheKey]) { fxData = panelDataCache_[cacheKey]; drawFxGrid(); }
   google.script.run
@@ -8927,7 +9226,7 @@ function drawFxGrid() {
     <div class="grid-scroll">
     <table class="grid-table">
       <thead><tr><th>幣別</th>${fxData.paramNames.map(n =>
-        `<th>${esc(n)}<div class="th-sub">1 外幣 = ? ${esc(fxData.baseCurrency)}</div></th>`).join('')}</tr></thead>
+        `<th>${esc(n === '現況匯率' ? '匯率（這個情境）' : n)}<div class="th-sub">1 外幣 = ? ${esc(fxData.baseCurrency)}</div></th>`).join('')}</tr></thead>
       <tbody>
         <tr><td class="row-head">${esc(fxData.baseCurrency)}（本位幣）</td>
           ${fxData.paramNames.map(() => '<td class="calc">1</td>').join('')}</tr>
@@ -8944,7 +9243,7 @@ function drawFxGrid() {
       </tbody>
     </table>
     </div>
-    <p class="muted">留白 = 未設定該幣別的匯率；銷貨成本與開發總投以外幣登打時會用這個匯率換算。</p>`;
+    <p class="muted">留白 = 這個情境沒有用這個幣別（不會出現在幣別選單）。</p>`;
 }
 
 function addFxCurrency() {
@@ -10561,7 +10860,7 @@ function loadReport_() {
 function rAmt_(v) { return v === undefined || v === null ? '' : fmt(Number(v) / reportUnit, amountUnitDigits_(reportUnit)); }
 function rSigned_(v) { return v === undefined || v === null ? '' : signed_(Number(v) / reportUnit, amountUnitDigits_(reportUnit)); }
 function rUnit_() { return amountUnitText_(reportUnit) + '/台'; }
-function rPct_(v, base) { return base ? (Number(v) / base * 100).toFixed(1) + '%' : ''; }
+function rPct_(v, base) { return base ? pct1_(Number(v) / base * 100) + '%' : ''; }
 /** 目標情境的營業淨利科目(預設 K；K 被刪掉時後端指定損益表最底下的總計) */
 function rK_() { return profitCodeOf_(reportData); }
 /** 某個情境(目標/現況/前回)的營業淨利：各看自己車型的淨利科目，不同車型可能不是同一個代碼 */
@@ -10842,7 +11141,7 @@ function reportActionsHtml_() {
     <div class="toolbar no-print" style="margin-top:10px;">
       <button type="button" class="btn secondary" onclick="addReportAction()">＋ 新增作法</button>
       <span class="spacer"></span>
-      <span class="muted">效果 = 對營業淨利的單台金額（正數 = 改善、負數 = 惡化，例：規格追加）</span>
+      <span class="muted">效果 = 對營業淨利的單台金額：正數 = 改善（成本降 1 萬填 10000）、負數 = 惡化（例：規格追加）</span>
     </div>`;
 }
 function reportActionsTableHtml_() {
@@ -10861,7 +11160,7 @@ function reportActionsTableHtml_() {
       <td><select onchange="reportActions[${i}].LineCode=this.value;refreshRecon_();${dirty}"><option value="">（不指定）</option>${lineOpts.map(l =>
         `<option value="${esc(l.LineCode)}"${a.LineCode === l.LineCode ? ' selected' : ''}>${esc(shortLineName(l.LineName))}</option>`).join('')}</select></td>
       <td><input type="text" value="${esc(a.Owner)}" style="width:90px;" placeholder="部門" oninput="reportActions[${i}].Owner=this.value;${dirty}"></td>
-      <td><input type="number" step="any" value="${esc(a.Effect)}" oninput="reportActions[${i}].Effect=this.value;updateReportActionTotals_();${dirty}"></td>
+      <td><input type="number" step="any" value="${esc(a.Effect)}" placeholder="正數 = 改善" oninput="reportActions[${i}].Effect=this.value;updateReportActionTotals_();${dirty}"></td>
       <td class="calc" id="rpt-act-month-${i}">${fmt(num(a.Effect) * vol / 10000, 1)}</td>
       <td><select onchange="reportActions[${i}].Status=this.value;${dirty}">${(R.actionStatuses || []).map(st => `<option${a.Status === st ? ' selected' : ''}>${st}</option>`).join('')}</select></td>
       <td><input type="date" value="${esc(a.DueDate)}" onchange="reportActions[${i}].DueDate=this.value;${dirty}"></td>
@@ -11030,6 +11329,10 @@ function reconRows_() {
     let status, tone;
     if (!a) { status = actual > 0 ? '有改善但沒有寫作法' : '變差了，沒有對應說明'; tone = 'warn'; }
     else if (Math.abs(effect - actual) <= tol) { status = '吻合'; tone = 'ok'; }
+    else if (effect * actual < 0 && Math.abs(effect + actual) <= Math.max(tol, Math.abs(actual) * 0.3)) {
+      // 金額對得上、正負相反：通常是把「成本降 1 萬」填成 -10000(效果是對營業淨利的影響，改善要填正數)
+      status = '正負號可能填反了：效果是對營業淨利的影響，成本降低、淨利變好要填正數'; tone = 'err';
+    }
     else if (effect > actual) { status = '作法高估：數字只改善 ' + fmt(actual); tone = 'err'; }
     else { status = '數字改善比作法多 ' + fmt(actual - effect) + '，可補寫作法'; tone = 'warn'; }
     rows.push({ code: l.LineCode, name: shortLineName(l.LineName), effect, actual, diff: effect - actual, status, tone, count: a ? a.actions.length : 0 });
@@ -11529,7 +11832,7 @@ function multiGoalResultHtml_(r) {
         <td class="amt"><b>${fmt(l.value, dg(l.base))}</b> ${esc(l.unit || '')}</td>
         <td class="amt">${l.pct === null ? '' : signed_(l.pct, 2) + '%'}</td>
         <td class="amt${l.contribution < 0 ? ' negative' : ''}">${l.contribution >= 0 ? '+' : ''}${fmt(l.contribution)}</td>
-        <td class="amt">${total ? (l.contribution / total * 100).toFixed(1) + '%' : ''}</td></tr>`).join('')}</tbody>
+        <td class="amt">${total ? pct1_(l.contribution / total * 100) + '%' : ''}</td></tr>`).join('')}</tbody>
     </table></div>
     <p class="help">貢獻依列表順序逐項加入計算（各項之間有交互作用，例如售價變動也會影響佣金與貨物稅），加總 = 總改善 ${total >= 0 ? '+' : ''}${fmt(total)}。只在畫面上試算，不會改到存檔的數字。</p>
     <div class="waterfall-card">${wfSvg_(multiGoalSteps_(r), { width: 900, height: 320, labels: true, fmtV: wfShortFmt_(multiGoalSteps_(r)) })}</div>
@@ -11583,10 +11886,10 @@ const WF_PREFS_KEY_ = 'plWaterfall.prefs.v1';
 let wfPrefs = {
   mode: 'bridge',
   from: { scenarioId: '', vehicleId: '' }, to: { scenarioId: '', vehicleId: '' },
-  end: 'K', level: 'major', basis: 'unit', volumeEffect: true, unit: 1,
+  end: 'K', level: 'detail', basis: 'unit', volumeEffect: true, unit: 1,
   actionLine: '',          // 作法拆解看哪個科目：空白 = 營業淨利
   manualLowerBetter: false, // 自訂：數字變大是變差(成本/費用的瀑布轉成自訂時會帶過來)
-  sort: 'pl', topN: 0, minAbs: 0, subtotals: true, labels: true, titles: {},
+  sort: 'pl', topN: 0, minAbs: 0, subtotals: true, labels: true, axisFrom0: false, titles: {},
   manual: [
     { label: '現況營業淨利', value: -100000, kind: 'total' },
     { label: '售價調整', value: 30000, kind: 'delta' },
@@ -11641,9 +11944,17 @@ function wfSvg_(steps, opts) {
   const vals = [0];
   bars.forEach(b => { vals.push(b.y0, b.y1); });
   let vMin = Math.min.apply(null, vals), vMax = Math.max.apply(null, vals);
+  // 縱軸要不要從 0 開始：全部都是正數、而且變動只佔整根的一小段(例：15 萬 → 15.9 萬)時，從 0 畫起來中間每一根都看不見。
+  // opts.axisFrom0 === false 一律放大；未指定時自動判斷；整根(起點/小計/終點)就從圖的底部畫起，圖上註明「縱軸未從 0 開始」
+  const lows = bars.map(b => b.st.kind === 'total' ? b.y1 : Math.min(b.y0, b.y1));
+  const lowest = Math.min.apply(null, lows);
+  const zoom = opts.axisFrom0 !== true && lowest > 0 && vMax > 0 &&
+    (opts.axisFrom0 === false || (vMax - lowest) < vMax * 0.35);
+  if (zoom) vMin = Math.max(0, lowest - (vMax - lowest) * 0.6);
   const span = (vMax - vMin) || Math.abs(vMax) || 1;
   if (showLabels) { vMax += span * 0.08; if (vMin < 0) vMin -= span * 0.08; }
   const axis = niceTicks_(vMin, vMax, 6);
+  if (zoom && axis.lo > 0) bars.forEach(b => { if (b.st.kind === 'total') b.y0 = axis.lo; });
   const tickFont = 11;
   const leftPad = Math.max.apply(null, axis.ticks.map(t => textWidth_(fmtV(t), tickFont))) + 14;
   const n = bars.length;
@@ -11658,6 +11969,7 @@ function wfSvg_(steps, opts) {
   let out = `<svg class="chart-svg wf-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="100%" role="img" ${font}>`;
   out += `<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
   if (opts.title) out += `<text x="${W / 2}" y="20" text-anchor="middle" font-size="15" font-weight="600" fill="#1a202c">${esc(opts.title)}</text>`;
+  if (zoom && axis.lo > 0) out += `<text x="${W - 12}" y="${12 + titleH}" text-anchor="end" font-size="10.5" fill="#a0aec0">縱軸未從 0 開始</text>`;
   axis.ticks.forEach(t => {
     const yy = y(t);
     out += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="${t === 0 ? '#718096' : '#e2e8f0'}" stroke-width="${t === 0 ? 1.2 : 1}"/>`;
@@ -12023,6 +12335,11 @@ function renderWaterfallPanel() {
     <div id="wf-body"><p class="muted">載入中...</p></div>`;
   google.script.run
     .withSuccessHandler(safeHandler(res => {
+      if (!(res.scenarios || []).length) {
+        panel.innerHTML = emptyStateHtml('📉', '還沒有情境', '瀑布圖要比較情境的損益。先到「車型與情境」建立情境並填好數字。',
+          `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
+        return;
+      }
       wfLists = res;
       wfDefaultsFromContext_();
       drawWaterfallTool_();
@@ -12083,7 +12400,7 @@ function drawWaterfallTool_() {
   }
   const lineOpts = p.mode === 'bridge' || p.mode === 'structure';
   // 不常改的選項收在「進階」；改過(不是預設值)就展開，才不會忘了自己設過
-  const advOpen = p.sort !== 'pl' || num(p.topN) > 0 || num(p.minAbs) > 0 || !p.labels || !!String(wfTitle_()).trim();
+  const advOpen = p.sort !== 'pl' || num(p.topN) > 0 || num(p.minAbs) > 0 || !p.labels || !!p.axisFrom0 || !!String(wfTitle_()).trim();
   body.innerHTML = `
     <div class="card">
       <div class="field-row">${seg('mode', modes, p.mode)}</div>
@@ -12105,6 +12422,7 @@ function drawWaterfallTool_() {
             <label class="field"><span>最多顯示幾項（0 = 全部）</span><input type="number" min="0" style="width:90px;" value="${esc(p.topN)}" onchange="wfPrefs.topN=this.value;saveWfPrefs_();runWaterfall_()"></label>
             <label class="field"><span>小於多少併入「其他」</span><input type="number" min="0" style="width:110px;" value="${esc(p.minAbs)}" onchange="wfPrefs.minAbs=this.value;saveWfPrefs_();runWaterfall_()"></label>` : ''}
           ${chk('labels', '顯示數字')}
+          ${chk('axisFrom0', '縱軸一律從 0 開始（不勾 = 差異很小時自動放大）')}
           <label class="field grow"><span>圖表標題（留空 = 自動）</span><input type="text" id="wf-title" value="${esc(wfTitle_())}" placeholder="自動" oninput="wfSetTitle_(this.value);saveWfPrefs_();wfRedraw_()"></label>
         </div>
       </details>
@@ -12185,7 +12503,7 @@ function wfRedraw_() {
   const heading = document.getElementById('wf-heading');
   if (heading) heading.textContent = title || '瀑布圖';
   const u = num(wfPrefs.unit) || 1;
-  box.innerHTML = wfSvg_(wfLast.steps, { title, labels: wfPrefs.labels, fmtV: wfShortFmt_(wfLast.steps), lowerBetter: !!wfLast.lowerBetter });
+  box.innerHTML = wfSvg_(wfLast.steps, { title, labels: wfPrefs.labels, axisFrom0: wfPrefs.axisFrom0 ? true : undefined, fmtV: wfShortFmt_(wfLast.steps), lowerBetter: !!wfLast.lowerBetter });
   const tbl = document.getElementById('wf-table');
   if (!tbl) return;
   let run = 0;
@@ -12198,7 +12516,7 @@ function wfRedraw_() {
       return `<tr class="${s.kind === 'total' ? 'subtotal' : ''}"><td>${esc(s.label)}</td>
         <td class="amt${(s.kind === 'delta' && wfLast.lowerBetter ? s.value > 0 : s.value < 0) ? ' negative' : ''}">${s.kind === 'delta' && s.value > 0 ? '+' : ''}${wfFmt_(s.value)}</td>
         <td class="amt${run < 0 ? ' negative' : ''}">${wfFmt_(run)}</td>
-        ${total ? `<td class="amt">${s.kind === 'delta' ? (s.value / total * 100).toFixed(1) + '%' : ''}</td>` : ''}</tr>`;
+        ${total ? `<td class="amt">${s.kind === 'delta' ? pct1_(s.value / total * 100) + '%' : ''}</td>` : ''}</tr>`;
     }).join('')}</tbody></table></div>`;
 }
 
@@ -12357,6 +12675,14 @@ function loadComparisonPicker() {
   google.script.run
     .withSuccessHandler(safeHandler(options => {
       comparisonOptions = options || [];
+      // 一個情境都還沒有：直接告訴使用者從哪裡開始(不能進 refreshDashboard，它看到沒有選項會再回頭呼叫這裡，變成無限迴圈)
+      if (!comparisonOptions.length) {
+        document.getElementById('dashboard-content').innerHTML = emptyStateHtml('📊', '還沒有可以比較的情境',
+          currentVehicleTypeId ? '這個車型還沒有情境。到「車型與情境」新增情境、填好銷售構成與成本，這裡就會出現損益表。'
+            : '先到「車型與情境」建立車型、車系與情境，再填銷售構成與成本，這裡就會出現損益表。',
+          `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
+        return;
+      }
       // 第一次進儀表板先把上次的比較欄位/顯示設定從瀏覽器還原回來(見 loadDashPrefs_)，
       // 不必每次打開都重新加一遍欄位；已被刪掉的情境/車系會被濾掉。
       if (!dashPrefsLoaded_) { loadDashPrefs_(); dashPrefsLoaded_ = true; }
@@ -12961,7 +13287,7 @@ function kpiStripHtml(cols, lines) {
       if (v === undefined || v === null) return '';
       return `<div class="kpi-row"><span>${esc(nameOf(code))}</span>
         <span class="kpi-num${v < 0 ? ' negative' : ''}">${fmt(displayAmount_(v, c), amtDigits_())}</span>
-        <span class="kpi-pct">${code === 'A' ? '' : pctOf_(c, code).toFixed(1) + '%'}</span></div>`;
+        <span class="kpi-pct">${code === 'A' ? '' : pct1_(pctOf_(c, code)) + '%'}</span></div>`;
     }).join('');
     let vsBase = '';
     const baseK = base ? base.amounts[profitCodeOf_(base)] : undefined;
@@ -12983,7 +13309,7 @@ function kpiStripHtml(cols, lines) {
           onclick="setBaselineColumnAt(${i})">★</button></div>
       <div class="kpi-main"><span class="kpi-main-label">${esc(nameOf(kCode))}</span>
         <span class="kpi-main-num${k < 0 ? ' negative' : ''}">${k === undefined || k === null ? '—' : fmt(displayAmount_(k, c), amtDigits_())}</span>
-        <span class="kpi-main-pct${kPct < 0 ? ' negative' : ''}">${kPct.toFixed(1)}%</span></div>
+        <span class="kpi-main-pct${kPct < 0 ? ' negative' : ''}">${pct1_(kPct)}%</span></div>
       <div class="kpi-bar"><div class="kpi-bar-fill${kPct < 0 ? ' negative' : ''}" style="width:${barW.toFixed(1)}%"></div></div>
       ${rows}${vsBase}
     </div>`;
@@ -13043,7 +13369,7 @@ function shortAmount_(v) {
   if (amountUnit === 1 && Math.abs(n) >= 1e4) return fmt(n / 1e4, 1) + '萬';
   return fmt(n);
 }
-function pctLabel_(v) { return (Number(v) || 0).toFixed(1) + '%'; }
+function pctLabel_(v) { return pct1_(v) + '%'; }
 
 /** 座標軸刻度：把範圍切成 1/2/2.5/5 × 10^n 的整齊間隔 */
 function niceTicks_(min, max, count) {
@@ -13213,7 +13539,7 @@ function chartBarTip_(col, line) {
 }
 function pctText_(v, base) {
   base = Number(base);
-  return base ? (Number(v) / base * 100).toFixed(1) + '%' : '—';
+  return base ? pct1_(Number(v) / base * 100) + '%' : '—';
 }
 
 /** 科目比較圖(橫軸 = 科目、每組裡一根長條 = 一個比較欄位)，或倒過來(橫軸 = 比較欄位) */
@@ -13602,7 +13928,7 @@ function secondCellHtml(v, col, line, cols, attrs) {
   const base = pctBaseOf_(col);
   if (!base) return `<td class="pct muted"${attrs}>—</td>`;
   const p = Number(v) / base * 100;
-  return `<td class="pct${p < 0 ? ' negative' : ''}"${attrs}>${p.toFixed(1)}%</td>`;
+  return `<td class="pct${Number(pct1_(p)) < 0 ? ' negative' : ''}"${attrs}>${pct1_(p)}%</td>`;
 }
 /** 舊名稱，測試與其他地方仍可能呼叫：只顯示百分比那種第二小欄 */
 function pctCellHtml(v, col) { return secondCellHtml(v, col, null, [], ''); }
@@ -13919,6 +14245,19 @@ window.addEventListener('DOMContentLoaded', () => {
     return node;
   }
 
+  /**
+   * 提示與確認：用前端的對話框(openModal/confirmModal)，跟系統其他地方長得一樣；
+   * 前端還沒載入(理論上不會)才退回瀏覽器原生的 alert/confirm。
+   */
+  function escHtml(t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }).replace(/\n/g, '<br>'); }
+  function say(title, msg) {
+    if (typeof window.openModal === 'function') window.openModal({ title: title, body: '<p>' + escHtml(msg) + '</p>', okText: '知道了', noCancel: true });
+    else window.alert(title + '\n' + msg);
+  }
+  function ask(title, msg, okText, then) {
+    if (typeof window.confirmModal === 'function') window.confirmModal(title, escHtml(msg), okText, true).then(function (ok) { if (ok) then(); });
+    else if (window.confirm(title + '\n' + msg)) then();
+  }
   function fmtTime(iso) {
     if (!iso) return '';
     var d = new Date(iso);
@@ -13970,15 +14309,15 @@ window.addEventListener('DOMContentLoaded', () => {
   } });
   var exportTypeBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出車型（含所有情境）', title: '匯出上方選的車型：所有情境、車系與科目表，交給同事「合併匯入」（對方這個車型會整個換成這一包）', onclick: function () {
     var id = currentVehicleTypeId();
-    if (!id) { window.alert('請先在上方選擇車型。'); return; }
+    if (!id) { say('還沒有選擇車型', '請先在右上角選擇要匯出的車型。'); return; }
     download(host.exportPack([id]), id);
   } });
   var exportScenarioBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出情境（只有這一個）', title: '只匯出上方選的情境，交給同事「合併匯入」（對方只新增/更新這個情境，同車型的其他情境不動）', onclick: function () {
     var id = currentVehicleTypeId(), sc = currentScenario();
-    if (!id || !sc) { window.alert('請先在上方選擇車型與情境。'); return; }
+    if (!id || !sc) { say('還沒有選擇情境', '請先在右上角選擇要匯出的車型與情境。'); return; }
     var pack;
     try { pack = host.exportPack(null, { scenarioIds: [sc.id] }); }
-    catch (e) { window.alert('無法匯出：\n' + e.message); return; }
+    catch (e) { say('無法匯出', e.message); return; }
     download(pack, id + '_' + sc.label);
   } });
   // 三種匯出收在同一顆「匯出 ▾」底下(以前是三顆並排的按鈕)；點了任何一項就把選單收起來
@@ -13991,8 +14330,8 @@ window.addEventListener('DOMContentLoaded', () => {
   var importBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯入資料包…', onclick: function () { fileInput.click(); } });
   var moreSel = el('select', { class: 'fsl-more', title: '其他' }, [
     el('option', { value: '', text: '更多…' }),
-    el('option', { value: 'demo', text: '載入示範資料（取代目前資料）' }),
-    el('option', { value: 'reset', text: '清空所有資料' })
+    el('option', { value: 'demo', text: '載入示範資料…' }),
+    el('option', { value: 'reset', text: '清空所有資料…' })
   ]);
   moreSel.addEventListener('change', function () {
     var v = moreSel.value;
@@ -14017,7 +14356,8 @@ window.addEventListener('DOMContentLoaded', () => {
     parts.push(s.lastExportAt ? '上次整份備份：' + fmtTime(s.lastExportAt) : '還沒整份備份過');
     statusEl.textContent = parts.join(' · ');
     if (s.changesSinceExport > 0) {
-      statusEl.appendChild(el('span', { class: 'fsl-warn', text: ' · ' + s.changesSinceExport + ' 次修改還沒整份備份',
+      // 不顯示「N 次修改」：每存一次表格就加一，建好一個車型就是十幾次，數字很快就沒人看了；改說「從什麼時候開始沒備份」
+      statusEl.appendChild(el('span', { class: 'fsl-warn', text: ' · 有修改還沒整份備份' + (s.firstUnsavedAt ? '（從 ' + fmtTime(s.firstUnsavedAt) + ' 起）' : ''),
         title: '資料暫存在這個瀏覽器裡，清除瀏覽資料或換電腦就會消失。請定期「匯出 ▾ → 匯出全部」備份。\n「匯出車型」「匯出情境」是交給同事用的，只包含一部分資料，所以不算備份（瀏覽器裡只有這個車型時例外）。' }));
     }
     banner.innerHTML = '';
@@ -14027,7 +14367,11 @@ window.addEventListener('DOMContentLoaded', () => {
     } else if (!s.storageOk) {
       showBanner('danger', '瀏覽器無法暫存資料（可能是無痕視窗、空間不足或公司政策封鎖）。資料只在這一頁的記憶體裡，關閉前務必「匯出全部」。');
     } else if (!host.readTables().VehicleTypes.length) {
-      showBanner('info', '目前是空的資料庫。可以從「匯入資料包…」載入同事給的資料，或從「更多…」載入示範資料看看；也可以直接在「車型與情境」開始建立。');
+      showBanner('info', '目前是空的資料庫。從這裡開始：', el('span', { class: 'fsl-banner-actions' }, [
+        el('button', { class: 'fsl-btn primary', type: 'button', text: '建立第一個車型', onclick: function () { if (window.switchTab) window.switchTab('masters'); } }),
+        el('button', { class: 'fsl-btn', type: 'button', text: '匯入資料包…', onclick: function () { fileInput.click(); } }),
+        el('button', { class: 'fsl-btn', type: 'button', text: '載入示範資料看看', onclick: function () { loadDemo(); } })
+      ]));
     } else {
       banner.style.display = 'none';
     }
@@ -14047,10 +14391,10 @@ window.addEventListener('DOMContentLoaded', () => {
     reader.onload = function () {
       var pack;
       try { pack = Pack.parsePack(String(reader.result)); }
-      catch (e) { window.alert('無法讀取「' + file.name + '」：\n' + e.message); return; }
+      catch (e) { say('無法讀取「' + file.name + '」', e.message); return; }
       showImportDialog(pack, file.name);
     };
-    reader.onerror = function () { window.alert('讀取檔案失敗：' + file.name); };
+    reader.onerror = function () { say('讀取檔案失敗', file.name); };
     reader.readAsText(file, 'utf-8');
   }
 
@@ -14074,8 +14418,8 @@ window.addEventListener('DOMContentLoaded', () => {
     var preview = el('pre', { class: 'fsl-pre', text: describePack(pack) });
     var mergeBtn = el('button', { class: 'fsl-btn primary', type: 'button', text: '合併匯入', onclick: function () { confirmMerge(pack); } });
     var replaceBtn = el('button', { class: 'fsl-btn danger', type: 'button', text: '取代整個資料庫', onclick: function () {
-      if (!window.confirm('目前這個瀏覽器裡的所有資料都會被資料包取代（包含資料包裡沒有的車型）。\n建議先「匯出全部」備份。確定要取代嗎？')) return;
-      apply(function () { host.replaceWithPack(pack); });
+      ask('取代整個資料庫？', '目前這個瀏覽器裡的所有資料都會被資料包取代（包含資料包裡沒有的車型）。\n建議先「匯出全部」備份。', '取代',
+        function () { apply(function () { host.replaceWithPack(pack); }); });
     } });
     dialog.appendChild(el('h3', { text: '匯入資料包：' + fileName }));
     dialog.appendChild(preview);
@@ -14096,7 +14440,7 @@ window.addEventListener('DOMContentLoaded', () => {
   function confirmMerge(pack) {
     var result;
     try { result = host.previewMerge(pack); }
-    catch (e) { window.alert('無法合併：\n' + e.message); return; }
+    catch (e) { say('無法合併', e.message); return; }
     dialog.innerHTML = '';
     var text = Pack.describeMerge(result.report) || '資料包裡沒有任何車型，合併不會改變資料。';
     dialog.appendChild(el('h3', { text: '確認合併內容' }));
@@ -14112,19 +14456,19 @@ window.addEventListener('DOMContentLoaded', () => {
   /** 匯入完整頁重新載入：前端各分頁的快取與選單全部從新資料重建，最不容易出錯 */
   function apply(fn) {
     try { fn(); }
-    catch (e) { window.alert('匯入失敗，資料未變更：\n' + e.message); return; }
+    catch (e) { say('匯入失敗，資料未變更', e.message); return; }
     if (dialog.open) dialog.close();
     location.reload();
   }
 
   function loadDemo() {
-    if (host.readTables().VehicleTypes.length &&
-      !window.confirm('示範資料會取代目前瀏覽器裡的所有資料。建議先「匯出全部」備份。確定要載入嗎？')) return;
-    apply(function () { host.replaceWithPack(window.FSLocal.demoPack()); });
+    var go = function () { apply(function () { host.replaceWithPack(window.FSLocal.demoPack()); }); };
+    if (!host.readTables().VehicleTypes.length) { go(); return; }
+    ask('載入示範資料？', '示範資料會取代目前瀏覽器裡的所有資料。建議先「匯出全部」備份。', '載入示範資料', go);
   }
   function resetAll() {
-    if (!window.confirm('確定要清空所有資料嗎？（只留內建科目）\n建議先「匯出全部」備份，這個動作無法復原。')) return;
-    apply(function () { host.resetAll(); });
+    ask('清空所有資料？', '只留內建科目，其他資料全部刪除。這個動作無法復原，建議先「匯出全部」備份。', '清空',
+      function () { apply(function () { host.resetAll(); }); });
   }
 
   host.onChange(render);

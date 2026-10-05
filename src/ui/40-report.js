@@ -125,7 +125,7 @@ function loadReport_() {
 function rAmt_(v) { return v === undefined || v === null ? '' : fmt(Number(v) / reportUnit, amountUnitDigits_(reportUnit)); }
 function rSigned_(v) { return v === undefined || v === null ? '' : signed_(Number(v) / reportUnit, amountUnitDigits_(reportUnit)); }
 function rUnit_() { return amountUnitText_(reportUnit) + '/台'; }
-function rPct_(v, base) { return base ? (Number(v) / base * 100).toFixed(1) + '%' : ''; }
+function rPct_(v, base) { return base ? pct1_(Number(v) / base * 100) + '%' : ''; }
 /** 目標情境的營業淨利科目(預設 K；K 被刪掉時後端指定損益表最底下的總計) */
 function rK_() { return profitCodeOf_(reportData); }
 /** 某個情境(目標/現況/前回)的營業淨利：各看自己車型的淨利科目，不同車型可能不是同一個代碼 */
@@ -406,7 +406,7 @@ function reportActionsHtml_() {
     <div class="toolbar no-print" style="margin-top:10px;">
       <button type="button" class="btn secondary" onclick="addReportAction()">＋ 新增作法</button>
       <span class="spacer"></span>
-      <span class="muted">效果 = 對營業淨利的單台金額（正數 = 改善、負數 = 惡化，例：規格追加）</span>
+      <span class="muted">效果 = 對營業淨利的單台金額：正數 = 改善（成本降 1 萬填 10000）、負數 = 惡化（例：規格追加）</span>
     </div>`;
 }
 function reportActionsTableHtml_() {
@@ -425,7 +425,7 @@ function reportActionsTableHtml_() {
       <td><select onchange="reportActions[${i}].LineCode=this.value;refreshRecon_();${dirty}"><option value="">（不指定）</option>${lineOpts.map(l =>
         `<option value="${esc(l.LineCode)}"${a.LineCode === l.LineCode ? ' selected' : ''}>${esc(shortLineName(l.LineName))}</option>`).join('')}</select></td>
       <td><input type="text" value="${esc(a.Owner)}" style="width:90px;" placeholder="部門" oninput="reportActions[${i}].Owner=this.value;${dirty}"></td>
-      <td><input type="number" step="any" value="${esc(a.Effect)}" oninput="reportActions[${i}].Effect=this.value;updateReportActionTotals_();${dirty}"></td>
+      <td><input type="number" step="any" value="${esc(a.Effect)}" placeholder="正數 = 改善" oninput="reportActions[${i}].Effect=this.value;updateReportActionTotals_();${dirty}"></td>
       <td class="calc" id="rpt-act-month-${i}">${fmt(num(a.Effect) * vol / 10000, 1)}</td>
       <td><select onchange="reportActions[${i}].Status=this.value;${dirty}">${(R.actionStatuses || []).map(st => `<option${a.Status === st ? ' selected' : ''}>${st}</option>`).join('')}</select></td>
       <td><input type="date" value="${esc(a.DueDate)}" onchange="reportActions[${i}].DueDate=this.value;${dirty}"></td>
@@ -594,6 +594,10 @@ function reconRows_() {
     let status, tone;
     if (!a) { status = actual > 0 ? '有改善但沒有寫作法' : '變差了，沒有對應說明'; tone = 'warn'; }
     else if (Math.abs(effect - actual) <= tol) { status = '吻合'; tone = 'ok'; }
+    else if (effect * actual < 0 && Math.abs(effect + actual) <= Math.max(tol, Math.abs(actual) * 0.3)) {
+      // 金額對得上、正負相反：通常是把「成本降 1 萬」填成 -10000(效果是對營業淨利的影響，改善要填正數)
+      status = '正負號可能填反了：效果是對營業淨利的影響，成本降低、淨利變好要填正數'; tone = 'err';
+    }
     else if (effect > actual) { status = '作法高估：數字只改善 ' + fmt(actual); tone = 'err'; }
     else { status = '數字改善比作法多 ' + fmt(actual - effect) + '，可補寫作法'; tone = 'warn'; }
     rows.push({ code: l.LineCode, name: shortLineName(l.LineName), effect, actual, diff: effect - actual, status, tone, count: a ? a.actions.length : 0 });
