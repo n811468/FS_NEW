@@ -180,9 +180,13 @@ function runSensitivity_(targetBox, scenarioId, done) {
       .withFailureHandler(err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; })
       .sensitivityTable(scenarioId || currentScenarioId, { code: s.metric, basis: s.basis }, ri.driver, rv, ci.driver, cv);
   };
-  if (scenarioId && scenarioId !== currentScenarioId) {
-    google.script.run.withSuccessHandler(go).withFailureHandler(err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; }).getWhatIfOptions(scenarioId);
-  } else go(whatIfOptions);
+  // 目標反推頁上按「產生表格」：沿用那一頁已經載入的選項。
+  // 其他地方(GATE 報告)：那一頁不一定開過(whatIfOptions 還是 null)，開過也可能是別的情境或改資料前載的，一律重新抓
+  if (!targetBox && whatIfOptions) go(whatIfOptions);
+  else {
+    google.script.run.withSuccessHandler(safeHandler(go)).withFailureHandler(err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; })
+      .getWhatIfOptions(scenarioId || currentScenarioId);
+  }
 }
 function sensitivityTableHtml_(t, rowSteps, colSteps, s, opts) {
   const all = [].concat.apply([], t.cells);
