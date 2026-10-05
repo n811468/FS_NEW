@@ -152,6 +152,7 @@ function runGoalSeek_() {
       box.innerHTML = `<div class="goal-answer">
         <div class="goal-big">${esc(r.label)}：${fmt(r.base, digits)} → <b>${fmt(r.value, digits)}</b> ${esc(r.unit || '')}
           ${pct !== null ? `<span class="muted">（${signed_(pct, 1)}%）</span>` : ''}</div>
+        ${r.value < 0 && r.base >= 0 ? `<div class="callout warn" style="margin:6px 0;"><div>要調到負數才達得到目標，實務上做不到；只靠「${esc(r.label)}」不夠，請加其他項目一起試（＋ 加一個項目）。</div></div>` : ''}
         <div class="muted">${esc(whatIfMetricLabel_(m.metric, m.basis))}：目前 ${fmt(r.metricBase)} → ${fmt(r.achieved)}（目標 ${fmt(num(m.target))}）。
           ${info.driver && info.driver.type === 'volume' ? '台數變動時，開發總投的攤提台數也一起變。' : ''}其他假設都維持目前的數字。</div>
         <div class="field-row" style="margin-top:8px;"><button type="button" class="btn secondary sm" id="wi-goal-save">另存成新情境…</button></div>
@@ -271,7 +272,7 @@ function runSensitivity_(targetBox, scenarioId, done) {
   }
 }
 function sensitivityTableHtml_(t, rows, cols, s, opts) {
-  const all = [].concat.apply([], t.cells);
+  const all = [].concat.apply([], t.cells).filter(v => v !== null && v !== undefined);
   const maxAbs = Math.max.apply(null, all.map(Math.abs).concat([1]));
   const metric = (opts.metrics.find(m => m.code === s.metric) || {}).label || s.metric;
   const color = v => {
@@ -285,7 +286,9 @@ function sensitivityTableHtml_(t, rows, cols, s, opts) {
     </thead>
     <tbody>${t.cells.map((row, i) => `<tr>
       <td class="row-head">${esc(rows[i].label)} <span class="muted">${esc(rows[i].sub)}${rows[i].isBase || sensMode_('row') === 'pct' ? esc(t.rowUnit ? ' ' + t.rowUnit : '') : ''}</span></td>
-      ${row.map((v, j) => `<td class="${rows[i].isBase && cols[j].isBase ? 'sens-base' : ''}${v < 0 ? ' negative' : ''}" style="background:${color(v)};">${fmt(v)}</td>`).join('')}
+      ${row.map((v, j) => v === null || v === undefined
+        ? '<td class="muted" data-tip="銷量 0 台時算不出單台的數字">—</td>'
+        : `<td class="${rows[i].isBase && cols[j].isBase ? 'sens-base' : ''}${v < 0 ? ' negative' : ''}" style="background:${color(v)};">${fmt(v)}</td>`).join('')}
     </tr>`).join('')}</tbody>
   </table></div>
   <p class="help">表內數字：${esc(metric)}${s.basis === 'month' ? '（月總額，元）' : '（加權平均，元/台）'}。綠色 = 正、紅色 = 負，顏色越深絕對值越大。</p>`;

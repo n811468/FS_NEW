@@ -251,7 +251,14 @@ function loadDashPrefs_() {
 /** 工具列上的每一個開關都走這裡：改狀態 → 記住 → 重畫（不重算） */
 function setDashOption(name, value) {
   switch (name) {
-    case 'pctBase': pctBase = value; break;
+    case 'pctBase':
+      pctBase = value;
+      // 「與基準的差異」要有比較基準才有數字：還沒設定就先用第一欄，不要整排都是「—」
+      if ((value === 'diff' || value === 'diffpct') && !baselineKey && lastComparison && (lastComparison.columns || []).length) {
+        baselineKey = colKey_(lastComparison.columns[0]);
+        toast('比較基準先設為第一欄（' + lastComparison.columns[0].label + '），可以在「比較基準」改，或按欄位標題的 ★', 'ok', 4000);
+      }
+      break;
     case 'showPriceStructure': showPriceStructure = !!value; break;
     case 'amountUnit': amountUnit = normAmountUnit_(value); saveAmountUnit_(amountUnit); break;
     case 'volumeBasis': volumeBasis = value; break;

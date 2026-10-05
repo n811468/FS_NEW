@@ -77,6 +77,17 @@ function codifyFormulaNames_(formula, defs) {
   });
 }
 
+/** 公式裡 REF("情境名稱", …) 的情境換成 ScenarioID：情境之後改名，公式照樣找得到 */
+function codifyRefScenarios_(formula) {
+  if (!formula || !/REF\s*\(/i.test(formula)) return formula;
+  var scenarios = getScenarios();
+  return String(formula).replace(/(REF\s*\(\s*)"([^"]*)"/gi, function (m, head, ref) {
+    var sc = null;
+    try { sc = resolveRefScenario_(ref, scenarios); } catch (e) { sc = null; }
+    return sc ? head + '"' + sc.ScenarioID + '"' : m;
+  });
+}
+
 /** 把公式裡的 [舊名稱] 換成科目代碼(科目改名時用) */
 function replaceNameRef_(formula, oldName, code) {
   if (!formula) return formula;
@@ -410,7 +421,7 @@ function saveChartLine(vehicleTypeId, line) {
     if (!CALC_TYPES[row.CalcType]) throw new Error('計算來源不正確：' + row.CalcType);
     // 公式可以用 [科目名稱] 寫(畫面上就是這樣顯示的)，存檔時一律換成科目代碼：
     // 代碼不會變，之後科目改名也不會讓公式斷掉
-    var normalize = function (f) { return codifyFormulaNames_(cleanFormulaText_(f), defs); };
+    var normalize = function (f) { return codifyRefScenarios_(codifyFormulaNames_(cleanFormulaText_(f), defs)); };
     if (line.VehicleFormulas !== undefined) {
       var vf = parseVehicleFormulas_(line.VehicleFormulas);
       var cleaned = {};
@@ -687,6 +698,8 @@ function chartProblems_(defs, vehicleTypeId) {
   defs.forEach(function (d) { byCode[d.LineCode] = d; });
   var catalog = formulaNameCatalog_(defs);
   var deps = {};
+  var refScenarios = getScenarios();
+  var refExample = refScenarios.length ? '"' + [refScenarios[0].VehicleTypeID, refScenarios[0].Gate, refScenarios[0].ScenarioName].filter(function (x) { return x; }).join(' ') + '"' : '"S3 GATE F 現況"';
 
   defs.forEach(function (d) {
     var formulas = [];
@@ -698,6 +711,12 @@ function chartProblems_(defs, vehicleTypeId) {
       var label = '「' + d.LineName + '」' + (item.who ? '(車系 ' + item.who + ' 個別公式)' : '');
       var info = inspectFormula_(item.f);
       if (!info.ok) { problems.push({ level: 'error', code: d.LineCode, message: label + '公式錯誤：' + info.error }); return; }
+      String(item.f || '').replace(/REF\s*\(\s*"([^"]*)"/gi, function (m, ref) {
+        var sc = null, why = '';
+        try { sc = resolveRefScenario_(ref, refScenarios); } catch (e) { why = e.message; }
+        if (!sc) problems.push({ level: 'error', code: d.LineCode, message: label + (why || 'REF 找不到情境「' + ref + '」（要寫成「車型 GATE 情境名稱」，例如 ' + refExample + '）') });
+        return m;
+      });
       info.refs.codes.forEach(function (c) {
         if (!byCode[c]) problems.push({ level: 'error', code: d.LineCode, message: label + '引用了不存在的科目代碼 ' + c });
         else deps[d.LineCode].push(c);

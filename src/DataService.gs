@@ -344,9 +344,28 @@ function assertUniqueScenarioNames_(vehicleTypeId, rows) {
     seen[key] = true;
   });
 }
+/**
+ * 情境改名前：公式裡用名稱寫的 REF("車型 GATE 情境名稱") 先全部換成 ScenarioID(用改名前的名稱對)，
+ * 不然改名後這些公式就找不到情境了。新存的公式本來就會存成 ScenarioID，這裡是處理舊資料。
+ */
+function codifyAllRefScenarios_() {
+  var rows = (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) {
+    return /REF\s*\(\s*"/i.test(String(r.Formula || '') + String(r.VehicleFormulas || ''));
+  });
+  var changed = [];
+  rows.forEach(function (r) {
+    var f = codifyRefScenarios_(r.Formula);
+    var vf = parseVehicleFormulas_(r.VehicleFormulas);
+    Object.keys(vf).forEach(function (k) { vf[k] = codifyRefScenarios_(vf[k]); });
+    var vfs = Object.keys(vf).length ? JSON.stringify(vf) : r.VehicleFormulas;
+    if (f !== r.Formula || vfs !== r.VehicleFormulas) { r.Formula = f; r.VehicleFormulas = vfs; changed.push(r); }
+  });
+  if (changed.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', changed, []);
+}
 function saveScenario(rowObj) {
   return withLock_(function () {
     validateScenarioRow_(rowObj);
+    if (rowObj.ScenarioID) codifyAllRefScenarios_();
     if (rowObj.VehicleTypeID) assertUniqueScenarioNames_(rowObj.VehicleTypeID, [rowObj]);
     // 用合併式 upsert：情境表單沒有攤提基準台數欄位，直接覆寫會把開發總投頁設定的值清掉
     return upsertRowMerge_(SHEETS.SCENARIOS, 'ScenarioID', rowObj);
@@ -363,6 +382,7 @@ function deleteScenario(scenarioId) {
 /** 情境設定整批儲存（既有情境直接在表格上改名/改性質，按一次儲存） */
 function saveScenarioGrid(vehicleTypeId, rows) {
   return withLock_(function () {
+    codifyAllRefScenarios_();
     var existingByPk = indexByPk_(sheetToObjects_(SHEETS.SCENARIOS), 'ScenarioID');
     var upserts = [];
     (rows || []).forEach(function (r) {
