@@ -263,64 +263,10 @@ function structureChartHtml_(cols, lines) {
  * 損益瀑布圖：每個比較欄位一張小圖，從收入一路扣到營業淨利(收入 → −銷貨成本 → 生產毛利 → −銷售費用 → 銷貨毛利 ...)。
  * 深色 = 小計/毛利/淨利，紅色 = 扣掉的成本費用。幾個欄位並排就能比較「同一段」在不同車系/情境差多少。
  */
-function waterfallChartsHtml_(cols, lines) {
-  const isPct = chartValue === 'pct';
-  const fmtV = isPct ? pctLabel_ : shortAmount_;
-  const nameOf = code => { const l = lines.find(x => x.LineCode === code); return l ? shortLineName(l.LineName) : code; };
-  const steps = [
-    { code: 'A', kind: 'total' }, { code: 'B', kind: 'minus' }, { code: 'C', kind: 'total' },
-    { sum: 'E', kind: 'minus' }, { code: 'E', kind: 'total' },
-    { sum: 'G', kind: 'minus' }, { code: 'G', kind: 'total' },
-    { sum: 'I', kind: 'minus' }, { code: 'I', kind: 'total' },
-    { code: 'J', kind: 'minus' }, { code: 'K', kind: 'total' }
-  ];
-  const charts = cols.map(c => {
-    const a = c.amounts;
-    const kCode = profitCodeOf_(c);
-    const has = code => a[code] !== undefined && a[code] !== null;
-    const base = isPct ? (Number(c.revenue) || 0) : 1;
-    const toV = v => isPct ? (base ? v / base * 100 : 0) : displayAmount_(v, c);
-    const groups = [], bars = [];
-    let running = 0;
-    steps.forEach(st => {
-      let raw, name;
-      if (st.sum) {
-        const parent = st.sum, prev = { E: 'C', G: 'E', I: 'G' }[parent];
-        if (!has(parent) || !has(prev)) return;
-        raw = a[prev] - a[parent]; name = SUM_GROUP_NAMES_[parent];
-      } else {
-        const code = st.code === 'K' ? kCode : st.code;   // 最後一根是營業淨利(K 被刪掉時是替代的淨利科目)
-        if (!has(code)) return;
-        raw = a[code]; name = nameOf(code);
-      }
-      const v = toV(raw);
-      const g = groups.length;
-      groups.push({ label: name, tip: name });
-      if (st.kind === 'total') {
-        bars.push({ g, s: 0, y0: 0, y1: v, color: st.code === 'A' ? '#2b6cb0' : (v < 0 ? '#e53e3e' : '#2d3748'), label: fmtV(v),
-          tip: `${c.label}\n${name}\n${fmt(displayAmount_(raw, c))} ${unitLabel_()}（${basisLabel_()}）\n對收入 ${pctText_(raw, c.revenue)}　對廠價 ${pctText_(raw, c.exFactoryPrice)}` });
-        running = v;
-      } else {
-        // 扣除項本身可能是負數(如索賠取回、負的前瞻費用)，那一步其實是「加回來」——
-        // 一律硬加一個減號會變成 −-5,000，改成照這一步對小計的實際影響(-v)標示正負
-        const deductLabel = v >= 0 ? '−' + fmtV(v) : '+' + fmtV(-v);
-        const deductAmount = (v >= 0 ? '−' : '+') + fmt(Math.abs(displayAmount_(raw, c)));
-        bars.push({ g, s: 0, y0: running, y1: running - v, color: '#f56565', label: v ? deductLabel : fmtV(0),
-          tip: `${c.label}\n扣除 ${name}\n${deductAmount} ${unitLabel_()}（${basisLabel_()}）\n對收入 ${pctText_(raw, c.revenue)}　對廠價 ${pctText_(raw, c.exFactoryPrice)}` });
-        running -= v;
-      }
-    });
-    return `<div class="waterfall-card"><div class="waterfall-title" data-c="${cols.indexOf(c)}" data-tipfn="col">${esc(c.label)}</div>
-      ${svgBarChart_({ groups, series: [{ name: '' }], bars, showLabels: chartLabels, valueFormat: fmtV, width: 720, height: 300 })}</div>`;
-  });
-  return `<div class="waterfall-row">${charts.join('')}</div>`;
-}
-
 const CHART_TYPE_INFO_ = {
   byLine: { label: '科目比較', hint: '橫軸是勾選的科目，同一組裡並排的是各比較欄位，直接看同一個科目誰高誰低。' },
   byColumn: { label: '依欄位', hint: '橫軸是比較欄位，同一組裡並排的是勾選的科目。' },
-  structure: { label: '損益結構', hint: '每個欄位一根堆疊長條：收入被銷貨成本、各段費用吃掉多少、最後剩多少營業淨利。虛線是收入。' },
-  waterfall: { label: '損益瀑布', hint: '每個欄位一張：從收入一路扣到營業淨利，看每一段扣掉多少。' }
+  structure: { label: '損益結構', hint: '每個欄位一根堆疊長條：收入被銷貨成本、各段費用吃掉多少、最後剩多少營業淨利。虛線是收入。' }
 };
 
 /**
@@ -336,7 +282,7 @@ function chartSectionHtml(cols, lines) {
     <div class="chart-card">
       <div class="chart-toolbar">
         <div class="seg">${Object.keys(CHART_TYPE_INFO_).map(k => seg('chartType', k, CHART_TYPE_INFO_[k].label, CHART_TYPE_INFO_[k].hint)).join('')}</div>
-        <div class="seg">${seg('chartValue', 'amount', '金額')}${seg('chartValue', 'pct', '%', '對表格目前的 % 基準；損益結構/瀑布圖以收入為 100%')}</div>
+        <div class="seg">${seg('chartValue', 'amount', '金額')}${seg('chartValue', 'pct', '%', '對表格目前的 % 基準；損益結構以收入為 100%')}</div>
         <label class="chk"><input type="checkbox"${chartLabels ? ' checked' : ''} onchange="setDashOption('chartLabels', this.checked)">數值標籤</label>
         <span class="chart-hint">${esc(info.hint)}　<b>${esc(chartValueUnitText_())}</b></span>
       </div>
@@ -368,7 +314,6 @@ function chartLinePickerHtml_(lines) {
 }
 function chartAreaHtml_(cols, lines) {
   if (chartType === 'structure') return structureChartHtml_(cols, lines);
-  if (chartType === 'waterfall') return waterfallChartsHtml_(cols, lines);
   return lineComparisonChartHtml_(cols, lines);
 }
 /** 勾選科目後只重畫圖本身，不動勾選清單（清單的捲動位置才不會跳掉） */
@@ -602,7 +547,7 @@ function toggleAllGroups() {
 function amountCellHtml(v, col, attrs, mark) {
   const n = displayAmount_(v, col);
   const cls = ['amt', n < 0 ? 'negative' : '', mark ? mark.trim() : ''].filter(c => c).join(' ');
-  return `<td class="${cls}"${attrs || ''}>${fmt(n)}</td>`;
+  return `<td class="${cls}"${attrs || ''}>${fmt(n, amtDigits_())}</td>`;
 }
 
 /**

@@ -64,15 +64,15 @@
     if (file) readPackFile(file);
   });
 
-  var exportAllBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出全部', title: '整份資料庫存成一個資料包（備份用）', onclick: function () {
+  var exportAllBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出全部（備份）', title: '整份資料庫存成一個資料包（備份用）', onclick: function () {
     download(host.exportPack(null), '全部');
   } });
-  var exportTypeBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出車型', title: '匯出上方選的車型：所有情境、車系與科目表，交給同事「合併匯入」（對方這個車型會整個換成這一包）', onclick: function () {
+  var exportTypeBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出車型（含所有情境）', title: '匯出上方選的車型：所有情境、車系與科目表，交給同事「合併匯入」（對方這個車型會整個換成這一包）', onclick: function () {
     var id = currentVehicleTypeId();
     if (!id) { window.alert('請先在上方選擇車型。'); return; }
     download(host.exportPack([id]), id);
   } });
-  var exportScenarioBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出情境', title: '只匯出上方選的情境，交給同事「合併匯入」（對方只新增/更新這個情境，同車型的其他情境不動）', onclick: function () {
+  var exportScenarioBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出情境（只有這一個）', title: '只匯出上方選的情境，交給同事「合併匯入」（對方只新增/更新這個情境，同車型的其他情境不動）', onclick: function () {
     var id = currentVehicleTypeId(), sc = currentScenario();
     if (!id || !sc) { window.alert('請先在上方選擇車型與情境。'); return; }
     var pack;
@@ -80,6 +80,13 @@
     catch (e) { window.alert('無法匯出：\n' + e.message); return; }
     download(pack, id + '_' + sc.label);
   } });
+  // 三種匯出收在同一顆「匯出 ▾」底下(以前是三顆並排的按鈕)；點了任何一項就把選單收起來
+  var exportMenu = el('details', { class: 'fsl-menu' }, [
+    el('summary', { class: 'fsl-btn', text: '匯出 ▾', title: '把資料存成資料包（JSON）' }),
+    el('div', { class: 'fsl-menu-list' }, [exportAllBtn, exportTypeBtn, exportScenarioBtn])
+  ]);
+  exportMenu.addEventListener('click', function (e) { if (e.target.classList && e.target.classList.contains('fsl-menu-item')) exportMenu.open = false; });
+  document.addEventListener('click', function (e) { if (exportMenu.open && !exportMenu.contains(e.target)) exportMenu.open = false; });
   var importBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯入資料包…', onclick: function () { fileInput.click(); } });
   var moreSel = el('select', { class: 'fsl-more', title: '其他' }, [
     el('option', { value: '', text: '更多…' }),
@@ -98,7 +105,7 @@
     el('span', { class: 'fsl-user' }, [document.createTextNode('使用者：'), userBtn]),
     statusEl,
     el('span', { class: 'fsl-spacer' }),
-    exportAllBtn, exportTypeBtn, exportScenarioBtn, importBtn, moreSel, fileInput
+    exportMenu, importBtn, moreSel, fileInput
   ]);
   var banner = el('div', { id: 'fs-local-banner', style: 'display:none' });
 
@@ -119,7 +126,7 @@
     } else if (!s.storageOk) {
       showBanner('danger', '瀏覽器無法暫存資料（可能是無痕視窗、空間不足或公司政策封鎖）。資料只在這一頁的記憶體裡，關閉前務必「匯出全部」。');
     } else if (!host.readTables().VehicleTypes.length) {
-      showBanner('info', '目前是空的資料庫。可以從「匯入資料包…」載入同事給的資料，或從「更多…」載入示範資料看看；也可以直接在「車型主檔」開始建立。');
+      showBanner('info', '目前是空的資料庫。可以從「匯入資料包…」載入同事給的資料，或從「更多…」載入示範資料看看；也可以直接在「車型與情境」開始建立。');
     } else {
       banner.style.display = 'none';
     }

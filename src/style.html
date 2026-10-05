@@ -246,9 +246,6 @@
     padding: 3px 10px 3px 4px; font-size: 12.5px; font-weight: 600; color: var(--text); }
   .chip .drag-handle { width: 18px; height: 20px; }
   .chip.sort-dragging { box-shadow: var(--shadow-2); }
-  .order-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--surface-2); border: 1px dashed var(--border-strong);
-    border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 12px; }
-  .order-strip > .muted { font-weight: 600; }
 
   /* ---------------- 科目設定：左邊科目樹、右邊明細編輯器 ---------------- */
   .chart-layout { display: grid; grid-template-columns: minmax(420px, 540px) 1fr; gap: 16px; align-items: start; }
@@ -295,6 +292,10 @@
   .menu-list button span { font-size: 11.5px; color: var(--muted); font-weight: 400; }
   .menu-list button:hover:not(:disabled) { background: var(--surface-2); }
   .menu-list button:disabled { opacity: .45; cursor: not-allowed; }
+  .menu-list.menu-checks { min-width: 220px; }
+  .menu-checks label.chk { display: flex; padding: 7px 10px; border-radius: 7px; font-size: 13px; }
+  .menu-checks label.chk:hover { background: var(--surface-2); }
+  details.menu > summary.btn { cursor: pointer; }
   .chart-tree-tools { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
   .problem-pill { border: none; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
   .problem-pill.err { background: var(--danger-weak); color: var(--danger); }
@@ -684,7 +685,8 @@
   .st-已確認 { background: #e8f6ef; color: #146c45; }
   .st-已結案 { background: #f1e9ff; color: #6a3dbd; }
   .bridge-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; }
-  .bridge-legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+  .bridge-legend { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+  .bridge-legend .spacer { flex: 1; }
   .rpt-table td.recon-ok { color: var(--success); font-weight: 600; }
   .rpt-table td.recon-warn { color: var(--warning); font-weight: 600; }
   .rpt-table td.recon-err { color: var(--danger); font-weight: 700; }

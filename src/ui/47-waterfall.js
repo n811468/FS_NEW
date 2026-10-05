@@ -1,5 +1,5 @@
 /* ================= 瀑布圖工具 =================
- * 儀表板的「損益瀑布」只能看單一欄位從收入扣到營業淨利；簡報常常要的是「差異拆解」：
+ * 全系統的瀑布圖都集中在這裡(儀表板、GATE 報告、目標反推都有按鈕帶過來)：
  *   兩個情境的差異  現況 → 目標(或任兩個 車型×情境×車系)的營業淨利，差在哪些科目
  *   單一情境損益    一個欄位從收入一路扣到指定的小計，可以看到明細
  *   作法拆解        現況 → 每一項改善作法的效果 → 目標，沒寫作法的差異單獨一根
@@ -28,11 +28,13 @@ function loadWfPrefs_() {
     const p = JSON.parse(localStorage.getItem(WF_PREFS_KEY_) || 'null');
     if (p) Object.keys(wfPrefs).forEach(k => { if (p[k] !== undefined) wfPrefs[k] = p[k]; });
   } catch (e) { /* 用預設 */ }
+  wfPrefs.unit = loadAmountUnit_(wfPrefs.unit);   // 金額單位全系統共用
 }
 /** 圖表標題每個模式各記一份(從反推帶過來的標題不會跑到差異拆解) */
 function wfTitle_() { return (wfPrefs.titles && wfPrefs.titles[wfPrefs.mode]) || ''; }
 function wfSetTitle_(t) { if (!wfPrefs.titles || typeof wfPrefs.titles !== 'object') wfPrefs.titles = {}; wfPrefs.titles[wfPrefs.mode] = t; }
 function saveWfPrefs_() {
+  saveAmountUnit_(wfPrefs.unit);
   try { localStorage.setItem(WF_PREFS_KEY_, JSON.stringify(wfPrefs)); } catch (e) { /* 存不了就算了 */ }
 }
 
@@ -527,6 +529,21 @@ function wfToManual_() {
   saveWfPrefs_();
   drawWaterfallTool_();
   toast('已複製到「自訂」，可以直接改名稱、數字或拖曳順序', 'ok');
+}
+/**
+ * 從其他頁面(儀表板、情境快照、GATE 報告)直接開一張瀑布圖：mode = 'bridge' 兩欄差異 / 'structure' 單一欄位損益 / 'actions' 作法拆解；
+ * from/to = { scenarioId, vehicleId }，null = 不改；extra = 其他要一起設定的選項(如 { end: 'K' })。
+ * 圖表標題清回自動，避免沿用上一次手動打的標題。
+ */
+function openWaterfallTool_(mode, from, to, extra) {
+  loadWfPrefs_();
+  wfPrefs.mode = mode;
+  if (extra) Object.assign(wfPrefs, extra);
+  if (from) wfPrefs.from = { scenarioId: from.scenarioId || '', vehicleId: from.vehicleId || '' };
+  if (to) wfPrefs.to = { scenarioId: to.scenarioId || '', vehicleId: to.vehicleId || '' };
+  wfSetTitle_('');
+  saveWfPrefs_();
+  switchTab('waterfall');
 }
 /** 從其他頁面(例如多項目標反推)把一組 steps 帶到瀑布圖工具 */
 function openInWaterfallTool_(steps, title) {

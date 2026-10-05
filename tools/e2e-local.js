@@ -74,6 +74,33 @@ async function main() {
   await page.click('nav button[data-tab="dashboard"]');
   await page.waitForFunction(() => /營業淨利/.test(document.getElementById('dashboard-content').textContent || ''), null, { timeout: 15000 });
   assert(!(await page.isVisible('#global-error')), '儀表板顯示錯誤：' + (await page.textContent('#global-error')));
+  // 儀表板沒有自己的差異比較/損益瀑布了：「瀑布圖…」選同一欄 = 單一欄位損益，帶到瀑布圖工具
+  assert(!(await page.$('.dash-subnav-btn:has-text("差異比較")')), '儀表板不該再有「差異比較」子頁');
+  await page.click('.dash-subnav button:has-text("瀑布圖…")');
+  await page.waitForSelector('dialog.modal select#mf-1');
+  await page.selectOption('dialog.modal select#mf-1', '0');
+  await page.click('dialog.modal button[value=ok]');
+  await page.waitForFunction(() => document.querySelectorAll('#wf-chart .wf-bar').length >= 3, null, { timeout: 15000 });
+  assert(await page.$('#wf-body .seg-btn.active:has-text("單一欄位損益")'), '儀表板的「瀑布圖…」選同一欄應該開成單一欄位損益');
+
+  // 參數與匯率同一頁：兩個表格都改，Ctrl+S 一次兩個都存
+  await page.click('nav button[data-tab="paramrates"]');
+  await page.waitForSelector('#grid-paramrates .rate-global');
+  await page.waitForSelector('#grid-paramfx .fx-cell');
+  await page.fill('#grid-paramrates .rate-global[data-name="營業稅率"]', '6');
+  await page.fill('#grid-paramfx .fx-cell >> nth=0', '4.321');
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'), null, { timeout: 10000 });
+  const savedParams = await page.evaluate(() => {
+    const sc = document.getElementById('scenario-selector').value;
+    return Promise.all([
+      new Promise(ok => google.script.run.withSuccessHandler(ok).getRateGrid(sc, document.getElementById('vehicletype-selector').value)),
+      new Promise(ok => google.script.run.withSuccessHandler(ok).getFxGrid(sc))
+    ]);
+  });
+  const vat = savedParams[0].rates.find(r => r.ParamName === '營業稅率');
+  const fxVals = [].concat.apply([], savedParams[1].rows.map(r => Object.keys(r.cells).map(k => Number(r.cells[k].Value))));
+  assert(vat && Number(vat.globalValue) === 6 && fxVals.indexOf(4.321) !== -1, 'Ctrl+S 應該把參數與匯率兩個表格都存起來：' + JSON.stringify({ vat: vat && vat.globalValue, fxVals }));
 
   // v2：GATE 報告每一張投影片都畫得出來
   await page.click('nav button[data-tab="report"]');
@@ -172,8 +199,8 @@ async function main() {
   await page.click('nav button[data-tab="whatif"]');
   await page.waitForSelector('button:has-text("損益兩平要賣多少錢")');
   await page.click('button:has-text("損益兩平要賣多少錢")');
-  await page.waitForSelector('.goal-answer, #wi-goal-result .callout', { timeout: 15000 });
-  assert(/建議零售價/.test(await page.textContent('#wi-goal-result')), '目標反推應該回答售價要調到多少');
+  await page.waitForSelector('#wi-multi-result .goal-answer, #wi-multi-result .callout', { timeout: 15000 });
+  assert(/建議零售價/.test(await page.textContent('#wi-multi-result')), '目標反推(只有一項)應該回答售價要調到多少');
   await page.click('nav button[data-tab="report"]');
   await page.waitForFunction(() => /作法對帳/.test(document.getElementById('panel-report').textContent) &&
     document.querySelector('#rpt-sens .sens-table'), null, { timeout: 15000 });
@@ -209,9 +236,11 @@ async function main() {
   assert(await page.$('#wi-sens-result .sens-table .sens-base'), '自訂值的表格也要框出目前的數字');
   await page.click(`.seg-btn[onclick*="setSensMode_('row','pct')"]`);
 
-  // 多項目標反推：營業淨利缺口由售價、材料、開發總投一起分擔，結果表 + 瀑布圖，可以帶到瀑布圖工具
+  // 目標反推加到三項(組合拳)：營業淨利缺口由售價、材料、開發總投一起分擔，結果表 + 瀑布圖，可以帶到瀑布圖工具
   await page.click('nav button[data-tab="whatif"]');
   await page.waitForSelector('#wi-multi');
+  await page.click('button:has-text("缺口由售價、材料、開發總投一起分擔")');
+  await page.waitForFunction(() => document.querySelectorAll('#wi-lever-body tr').length === 3);
   await page.fill('#wi-multi-target', '-150000');
   await page.click('#wi-multi button:has-text("計算")');
   await page.waitForSelector('#wi-multi-result .lever-table', { timeout: 30000 });
@@ -240,8 +269,8 @@ async function main() {
   await page.waitForFunction(() => document.querySelectorAll('#rpt-act-wf .wf-bar').length >= 3, null, { timeout: 15000 });
   assert(/現況 → 作法 → 目標/.test(await page.textContent('#panel-report')), 'GATE 報告應該有「現況 → 作法 → 目標」');
 
-  // 情境快照：情境設定頁存一份 → 出現在清單 → 加到儀表板 → 跟現在比較(瀑布圖)
-  await page.click('nav button[data-tab="scenarios"]');
+  // 情境快照：車型與情境頁存一份 → 出現在清單 → 加到儀表板 → 跟現在比較(瀑布圖)
+  await page.click('nav button[data-tab="masters"]');
   await page.waitForSelector('#snapshot-card button:has-text("把目前情境存成快照")');
   await page.click('#snapshot-card button:has-text("把目前情境存成快照")');
   await page.waitForSelector('dialog.modal input#mf-0');
@@ -255,14 +284,14 @@ async function main() {
     return r ? Array.from(r.querySelectorAll('td.amt')).map(td => td.textContent.trim()) : [];
   });
   assert(snapK.length >= 2 && snapK.some((v, i) => snapK.indexOf(v) !== i), '快照欄位的營業淨利應該跟現在一樣(剛存的)：' + snapK.join(','));
-  await page.click('nav button[data-tab="scenarios"]');
+  await page.click('nav button[data-tab="masters"]');
   await page.waitForSelector('#snapshot-body button:has-text("跟現在比較")');
   await page.click('#snapshot-body button:has-text("跟現在比較")');
   await page.waitForFunction(() => document.querySelectorAll('#wf-chart .wf-bar').length >= 2, null, { timeout: 15000 });
   assert(/快照 審議版E2E/.test(await page.textContent('#wf-heading')), '瀑布圖工具起點應該是快照：' + await page.textContent('#wf-heading'));
 
   // v2：拖曳把手可以用鍵盤 Alt+↓ 調整車系順序，放開(按下)就存檔
-  await page.click('nav button[data-tab="vehicles"]');
+  await page.click('nav button[data-tab="masters"]');
   await page.waitForSelector('#entity-body-vehicles .drag-handle');
   const before = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getVehicles('DA')));
   await page.focus('#entity-body-vehicles tr:first-child .drag-handle');
@@ -296,7 +325,7 @@ async function main() {
   assert((await page.$$eval('#vehicletype-selector option', os => os.map(o => o.value))).includes('DQ'), '重新整理後新增的車型不見了（沒有暫存）');
 
   // 匯出全部
-  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar button:has-text("匯出全部")')]);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar .fsl-menu summary').then(() => page.click('#fs-local-bar button:has-text("匯出全部")'))]);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-local-'));
   const packFile = path.join(tmp, download.suggestedFilename());
   await download.saveAs(packFile);
@@ -308,7 +337,7 @@ async function main() {
   // 只匯出車型(DE)，之後拿來測合併
   await page.selectOption('#vehicletype-selector', 'DE');
   await page.waitForTimeout(300);
-  const [dlDe] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar button:has-text("匯出車型")')]);
+  const [dlDe] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar .fsl-menu summary').then(() => page.click('#fs-local-bar button:has-text("匯出車型")'))]);
   const deFile = path.join(tmp, dlDe.suggestedFilename());
   await dlDe.saveAs(deFile);
   assert(JSON.parse(fs.readFileSync(deFile, 'utf8')).tables.VehicleTypes.map(r => r.VehicleTypeID).join() === 'DE', '「匯出車型」應該只有 DE');
@@ -324,7 +353,7 @@ async function main() {
   }, daIds, { timeout: 10000 });
   const daScenarioCount = await page.$$eval('#scenario-selector option', os => os.filter(o => o.value).length);
   const curScenario = await page.inputValue('#scenario-selector');
-  const [dlSc] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar button:has-text("匯出情境")')]);
+  const [dlSc] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar .fsl-menu summary').then(() => page.click('#fs-local-bar button:has-text("匯出情境")'))]);
   const scPack = JSON.parse(fs.readFileSync(await dlSc.path(), 'utf8'));
   assert(daScenarioCount >= 2 && scPack.scope.kind === 'scenarios' && scPack.tables.Scenarios.length === 1 && scPack.tables.Scenarios[0].ScenarioID === curScenario,
     '「匯出情境」應該只有目前選的情境：' + JSON.stringify(scPack.scope));

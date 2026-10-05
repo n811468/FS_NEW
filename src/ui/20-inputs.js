@@ -23,7 +23,7 @@ function drawSalesMixGrid() {
   const grid = document.getElementById('grid-salesmix');
   if (!salesMixRows.length) {
     document.getElementById('toolbar-salesmix').innerHTML = '';
-    grid.innerHTML = emptyStateHtml('📋', '這個車型還沒有車系', '銷售構成依車系逐列輸入，請先建立車系。', `<button class="btn" onclick="switchTab('vehicles')">前往車系設定</button>`);
+    grid.innerHTML = emptyStateHtml('📋', '這個車型還沒有車系', '銷售構成依車系逐列輸入，請先建立車系。', `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
     return;
   }
   const totalUnits = salesMixRows.reduce((s, r) => s + num(r.MonthlyVolume), 0);
@@ -240,7 +240,7 @@ function drawMatrix(key) {
   `;
 
   if (!data.vehicles.length) {
-    grid.innerHTML = emptyStateHtml('📋', '這個車型還沒有車系', '請先到「車系設定」建立車系。', `<button class="btn" onclick="switchTab('vehicles')">前往車系設定</button>`);
+    grid.innerHTML = emptyStateHtml('📋', '這個車型還沒有車系', '請先到「車型與情境」建立車系。', `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
     return;
   }
   const codeNameMap = {};
@@ -260,10 +260,6 @@ function drawMatrix(key) {
   const mixTotal = data.vehicles.reduce((sum, v) => sum + num(v.SalesMixPct), 0);
   grid.innerHTML = `
     ${mixTotal ? '' : '<div class="callout warn">這個情境還沒有銷售構成比，加權平均無法計算，請先到「銷售構成」頁填構成比。</div>'}
-    ${data.vehicles.length > 1 ? `<div class="order-strip"><span class="muted">車系順序</span>
-      <div class="chip-list" id="${key}-vorder">${data.vehicles.map(v =>
-        `<span class="chip" data-key="${esc(v.VehicleID)}">${dragHandleHtml('拖曳調整車系順序')}${esc(v.VehicleCode || v.VehicleID)}</span>`).join('')}</div>
-      <span class="muted" style="font-weight:400;">拖曳調整，放開立即套用到所有頁面</span></div>` : ''}
     <div class="grid-scroll">
     <table class="grid-table sticky-head-col">
       <thead><tr>
@@ -315,25 +311,6 @@ function drawMatrix(key) {
     </div>
     <p class="muted">加權平均 = 依各車系銷售構成比加權，跟儀表板同口徑。</p>`;
   updateMatrixTotals(key);
-
-  makeSortable(document.getElementById(key + '-vorder'), {
-    items: '.chip', horizontal: true,
-    onEnd: ids => {
-      google.script.run
-        .withSuccessHandler(safeHandler(() => {
-          Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
-          toast('已調整車系順序', 'ok', 1400);
-          if (!isDirty_()) renderMatrixPanel(key);
-          else {
-            const byId = {};
-            data.vehicles.forEach(v => { byId[v.VehicleID] = v; });
-            toast('畫面上還有未儲存的金額，儲存後欄位會照新順序排列', 'warn');
-          }
-        }))
-        .withFailureHandler(err => toast(err.message, 'err'))
-        .setVehicleOrder(currentVehicleTypeId, ids);
-    }
-  });
 }
 /**
  * 從 Excel 貼上整張表：第一欄是科目名稱、有一列是車系名稱(標題)，依名稱自動對應，順序不用一樣。
@@ -585,7 +562,6 @@ function vehicleScopeLabel_(scope) {
 
 function drawDevGrid() {
   const isTarget = !devSummary.isBaseline;
-  const others = scenarioCache.filter(s => s.ScenarioID !== currentScenarioId);
   const toolbar = document.getElementById('toolbar-devinvestment');
   if (!toolbar) return;
 
@@ -599,15 +575,6 @@ function drawDevGrid() {
         <button type="button" class="btn secondary sm" onclick="saveAmortBasis()">套用</button>
       </span>
     </label>
-    ${isTarget ? `
-      <label>從其他情境帶入
-        <span style="display:flex;gap:6px;">
-        <select id="dev-copy-source">
-          <option value="">-- 選擇來源情境 --</option>
-          ${others.map(s => `<option value="${esc(s.ScenarioID)}">${esc(scenarioLabel(s))}</option>`).join('')}
-        </select>
-        <button type="button" class="btn secondary sm" onclick="copyFromScenario()">帶入</button></span>
-      </label>` : ''}
     <span class="spacer"></span>
     <button type="button" class="btn ghost" onclick="addDevAmortTarget()">＋ 新增攤提落點科目</button>
     <button type="button" class="btn secondary" onclick="saveDevGrid()">儲存</button>
@@ -843,36 +810,31 @@ function saveDevGrid() {
     .saveDevInvestmentGrid(currentScenarioId, devRows);
 }
 
-function copyFromScenario() {
-  const source = val('dev-copy-source');
-  if (!source) { toast('請先選擇來源情境', 'warn'); return; }
-  confirmModal('從其他情境帶入？', '會覆蓋目前情境的銷售構成、銷貨成本、開發總投、營業費用、費率與科目說明（挑戰低減目標會清空，請重新填寫）。', '帶入', true).then(ok => {
-    if (!ok) return;
-    setStatus('devinvestment', '帶入中...');
-    google.script.run
-      .withSuccessHandler(safeHandler(() => {
-        clearDirty();
-        Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
-        setStatus('devinvestment', '已帶入來源情境資料，挑戰低減目標已清空，請重新填寫', 'ok');
-        renderDevInvestmentPanel();
-      }))
-      .withFailureHandler(err => setStatus('devinvestment', '錯誤：' + err.message, 'err'))
-      .copyScenarioData(source, currentScenarioId, ['salesmix', 'costofsales', 'devinvestment', 'operatingexpense', 'parameters', 'linenotes']);
-  });
-}
-
-/* ================= 參數與比率(預設參數 + 自訂參數，全部可改、可刪) ================= */
+/* ================= 參數與比率(預設參數 + 自訂參數，全部可改、可刪) + 匯率 =================
+ * 匯率跟參數一樣是「每個情境各填一份、公式用 [名稱] 取用」，所以放在同一頁的下半部(以前是獨立的「匯率設定」分頁)。
+ * 兩個表格各自有儲存鈕；底部的「儲存」/Ctrl+S 兩個一起存(見 markDirtyPart_)。 */
 let rateData = null;
+function rateDirty_() { markDirtyPart_('paramrates', 'paramrates', saveRateGrid, () => { clearDirtyPart_('paramrates'); loadRateGrid_(); }); }
+function fxDirty_() { markDirtyPart_('paramrates', 'paramfx', saveFxGrid, () => { clearDirtyPart_('paramfx'); renderFxPanel(); }); }
 
 function renderRatePanel() {
   if (!requireScope('paramrates', true)) return;
-  document.getElementById('panel-paramrates').innerHTML = gridShell('paramrates', '參數與比率',
+  document.getElementById('panel-paramrates').innerHTML = `<div class="card">
+      <div class="card-head"><h3>參數與比率</h3></div>
+      ${gridShell('paramrates', '參數與比率',
     '公式裡用 <b>[參數名稱]</b> 取用（例：<code>[營業稅率]</code>、<code>[關稅率]</code>）。單位是 % 的參數以百分比輸入(5 = 5%)，公式取出來自動變成小數。' +
-    '「全車系」是這個情境的預設值，個別車系不同時才填車系欄位（留白 = 沿用）。可以自己新增參數，例如關稅率、KD件報價、倍率。');
+    '「全車系」是這個情境的預設值，個別車系不同時才填車系欄位（留白 = 沿用）。可以自己新增參數，例如關稅率、KD件報價、倍率。')}
+    </div>
+    <div class="card" id="fx-section"></div>`;
+  renderFxPanel();
+  loadRateGrid_();
+}
+/** 只重新載入參數表(存檔後用)：不重畫整頁，下面匯率表還沒存的修改才不會不見 */
+function loadRateGrid_() {
   const cacheKey = panelCacheKey_('paramrates');
   if (panelDataCache_[cacheKey]) { rateData = panelDataCache_[cacheKey]; drawRateGrid(); }
   google.script.run
-    .withSuccessHandler(safeHandler(data => { panelDataCache_[cacheKey] = data; if (isDirty_()) return; rateData = data; drawRateGrid(); }))
+    .withSuccessHandler(safeHandler(data => { panelDataCache_[cacheKey] = data; if (dirtyState_ && dirtyState_.parts && dirtyState_.parts.paramrates) return; rateData = data; drawRateGrid(); }))
     .withFailureHandler(showGlobalError)
     .getRateGrid(currentScenarioId, currentVehicleTypeId);
 }
@@ -882,7 +844,7 @@ function drawRateGrid() {
   if (!toolbar) return;
   toolbar.innerHTML = `<button type="button" class="btn" onclick="addParamDialog()">＋ 新增參數</button>
     <span class="spacer"></span><button type="button" class="btn secondary" onclick="saveRateGrid()">儲存</button>`;
-  const dirty = () => "markDirty('paramrates', saveRateGrid, () => { clearDirty(); renderRatePanel(); })";
+  const dirty = () => 'rateDirty_()';
 
   document.getElementById('grid-paramrates').innerHTML = `
     <div class="grid-scroll">
@@ -931,7 +893,7 @@ function saveRateGrid() {
   });
   setStatus('paramrates', '儲存中...');
   google.script.run
-    .withSuccessHandler(() => { clearDirty(); setStatus('paramrates', '已儲存', 'ok'); renderRatePanel(); })
+    .withSuccessHandler(() => { clearDirtyPart_('paramrates'); setStatus('paramrates', '已儲存', 'ok'); loadRateGrid_(); })
     .withFailureHandler(err => setStatus('paramrates', '錯誤：' + err.message, 'err'))
     .saveRateGrid(currentScenarioId, rows);
 }
@@ -987,12 +949,13 @@ function deleteParam(i) {
   });
 }
 
-/* ================= 匯率設定 ================= */
+/* ---------------- 匯率(畫在參數與比率頁的下半部) ---------------- */
 let fxData = null;
 
 function renderFxPanel() {
-  if (!requireScope('paramfx', true)) return;
-  document.getElementById('panel-paramfx').innerHTML = gridShell('paramfx', '匯率設定',
+  const box = document.getElementById('fx-section');
+  if (!box) return;
+  box.innerHTML = '<div class="card-head"><h3>匯率</h3></div>' + gridShell('paramfx', '匯率',
     '1 外幣 = ? 台幣。銷貨成本與開發總投以外幣登打時用這個匯率換算；公式裡也可以用 <b>[CNY匯率]</b> 這種寫法取用。');
   const cacheKey = panelCacheKey_('paramfx', 'scenario');
   if (panelDataCache_[cacheKey]) { fxData = panelDataCache_[cacheKey]; drawFxGrid(); }
@@ -1025,7 +988,7 @@ function drawFxGrid() {
               const cell = row.cells[name] || {};
               return `<td><input type="number" step="any" class="fx-cell" data-currency="${esc(row.Currency)}"
                 data-name="${esc(name)}" data-paramid="${esc(cell.ParamID)}" value="${esc(cell.Value)}"
-                oninput="markDirty('paramfx', saveFxGrid, () => { clearDirty(); renderFxPanel(); })"></td>`;
+                oninput="fxDirty_()"></td>`;
             }).join('')}
           </tr>`).join('')}
       </tbody>
@@ -1055,7 +1018,7 @@ function saveFxGrid() {
   });
   setStatus('paramfx', '儲存中...');
   google.script.run
-    .withSuccessHandler(safeHandler(data => { clearDirty(); fxData = data; drawFxGrid(); setStatus('paramfx', '已儲存', 'ok'); }))
+    .withSuccessHandler(safeHandler(data => { clearDirtyPart_('paramfx'); fxData = data; drawFxGrid(); setStatus('paramfx', '已儲存', 'ok'); }))
     .withFailureHandler(err => setStatus('paramfx', '錯誤：' + err.message, 'err'))
     .saveFxGrid(currentScenarioId, cells);
 }

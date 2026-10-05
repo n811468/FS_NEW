@@ -187,7 +187,8 @@ assert((chartPicker.match(/type="checkbox"/g) || []).length > 10, '每個科目�
 assert((chartPicker.match(/ checked/g) || []).length === 2, '預設應勾選 A 與 K 兩個科目');
 assert(chartPicker.indexOf('onchange="onChartLineToggle') !== -1, '勾選應該即時重畫圖表');
 assert(chartPicker.indexOf('value="P8"') === -1, '售價結構科目不應出現在圖表科目選單');
-['科目比較', '依欄位', '損益結構', '損益瀑布'].forEach(t => assert(chartSection.indexOf(t) !== -1, `圖表類型切換應該有「${t}」`));
+['科目比較', '依欄位', '損益結構'].forEach(t => assert(chartSection.indexOf(t) !== -1, `圖表類型切換應該有「${t}」`));
+assert(chartSection.indexOf('損益瀑布') === -1, '圖表類型不該再有「損益瀑布」(統一用瀑布圖工具)');
 
 // 勾選/取消要真的改變圖表要畫的科目
 api("chartLineCodes = ['A', 'K']");
@@ -334,7 +335,7 @@ csvRows.forEach((r, i) => {
   assert(n === headerCells, `CSV 第 ${i + 1} 列有 ${n} 欄，應為 ${headerCells}`);
 });
 
-/* ---- 8. 圖表 SVG：科目比較 / 依欄位 / 損益結構 / 損益瀑布 / 差異圖 ---- */
+/* ---- 8. 圖表 SVG：科目比較 / 依欄位 / 損益結構，瀑布圖工具 ---- */
 api("pctBase = 'exfactory'"); api('amountUnit = 1'); api("volumeBasis = 'unit'"); api("chartValue = 'amount'"); api('chartLabels = true');
 const countRects = svg => (svg.match(/<rect class="bar"/g) || []).length;
 api("chartType = 'byLine'"); api("chartLineCodes = ['A', 'K']");
@@ -360,19 +361,12 @@ assert((structure.match(/class="marker"/g) || []).length === cols.length, '損�
 const c0 = cols[0].amounts;
 const segSum = c0.B + (c0.C - c0.E) + (c0.E - c0.G) + (c0.G - c0.I) + c0.J + c0.K;
 assert(Math.abs(segSum - c0.A) < 1, `結構圖各段加總 ${segSum} 應等於收入 ${c0.A}`);
-api("chartType = 'waterfall'");
-const waterfall = api('chartAreaHtml_')(cols, lines);
-assert((waterfall.match(/class="waterfall-card"/g) || []).length === cols.length, '瀑布圖每個欄位一張');
-assert(countRects(waterfall) === 11 * cols.length, `瀑布圖每欄 11 步，實際 ${countRects(waterfall)}`);
-api("chartValue = 'pct'");
-const wfPct = api('chartAreaHtml_')(cols, lines);
-assert(wfPct.indexOf('100.0%') !== -1, '百分比模式下瀑布圖的收入應該是 100%');
-api("chartValue = 'amount'"); api("chartType = 'byLine'");
-// 差異圖：綠 = 往好的方向、紅 = 往壞的方向
-const keyLines = api('keyLines_')(lines);
-const diffSvg = api('diffChartSvg_')(cols[0], cols[1], keyLines);
-assert(countRects(diffSvg) === keyLines.length, '差異圖每個關鍵科目一根長條');
-assert(diffSvg.indexOf('#2f855a') !== -1 || diffSvg.indexOf('#e53e3e') !== -1, '差異圖應依好壞方向上色');
+// 儀表板不再自己畫瀑布圖/差異圖(統一用瀑布圖工具)：圖表類型只剩三種，子頁籤沒有「差異比較」
+const subnavNoDiff = api('dashSubNavHtml')(cols);
+assert(subnavNoDiff.indexOf('差異比較') === -1 && subnavNoDiff.indexOf('dashOpenWaterfall_()') !== -1, '子頁籤沒有「差異比較」，改成「瀑布圖…」帶到瀑布圖工具');
+// 瀑布圖工具的單一欄位損益：從收入一路扣到營業淨利，最後一根 = 營業淨利
+const structSteps = api('wfStructureSteps_')({ columns: [cols[0]], lines });
+assert(structSteps.length > 3 && Math.abs(structSteps[structSteps.length - 1].value - cols[0].amounts.K) < 1, '瀑布圖工具的單一欄位損益最後一根應該是營業淨利');
 // 純 SVG 產生器本身：負值往下、零值也要留一根細條可 hover
 const svg = api('svgBarChart_')({ groups: [{ label: 'a' }, { label: 'b' }], series: [{ name: 's' }],
   bars: [{ g: 0, s: 0, y0: 0, y1: -5, tip: 'neg' }, { g: 1, s: 0, y0: 0, y1: 0, tip: 'zero' }], valueFormat: v => String(v) });
@@ -483,13 +477,18 @@ assert(api('mergeComparison_')(null, partial) === partial, '沒有既有結果�
 /* ---- 11. 瀏覽器端記住設定：存/讀要對稱，壞掉的資料要被忽略 ---- */
 let stored = null;
 ctx.localStorage = { setItem: (k, v) => { stored = v; }, getItem: () => stored };
-api("pctBase = 'revenue'"); api("chartType = 'waterfall'"); api('amountUnit = 1000'); api("dashView = 'diff'");
+api("pctBase = 'revenue'"); api("chartType = 'structure'"); api('amountUnit = 1000'); api("dashView = 'chart'");
 api('saveDashPrefs_')();
 api("pctBase = 'exfactory'"); api("chartType = 'byLine'"); api('amountUnit = 1'); api("dashView = 'table'");
 api('loadDashPrefs_')();
-assert(api('pctBase') === 'revenue' && api('chartType') === 'waterfall' && api('amountUnit') === 1000 && api('dashView') === 'diff',
+assert(api('pctBase') === 'revenue' && api('chartType') === 'structure' && api('amountUnit') === 1000 && api('dashView') === 'chart',
   '重新載入後顯示設定(含目前的子頁籤)應該還原');
 api("dashView = 'table'");
+// 已經拿掉的「損益瀑布」「差異比較」：記住的是它們就回到預設
+stored = '{"chartType":"waterfall","dashView":"diff"}';
+api("chartType = 'byLine'"); api("dashView = 'table'");   // 開頁時的預設值
+api('loadDashPrefs_')();
+assert(api('chartType') === 'byLine' && api('dashView') === 'table', '舊設定的損益瀑布/差異比較應該回到科目比較/損益表');
 stored = '{"pctBase":"bogus","amountUnit":7,"chartType":"nope","dashView":"nope"}';
 api("pctBase = 'exfactory'"); api('amountUnit = 1'); api("chartType = 'byLine'"); api("dashView = 'table'");
 api('loadDashPrefs_')();
@@ -604,18 +603,13 @@ assert(zeroVolKpi.indexOf('Infinity') === -1 && zeroVolKpi.indexOf('∞') === -1
   '基準欄台數為 0 時，vs 基準的百分比不該印出 Infinity/NaN');
 api("volumeBasis = 'unit'"); api("baselineKey = ''"); api('lastComparison = __in.comparison');
 
-// 損益瀑布圖：扣除項本身是負數時不該印出 −-5,000
-ctx.__in.negDeduct = {
-  columns: [Object.assign({}, cols[0], { amounts: Object.assign({}, cols[0].amounts, { J: -5000 }) })],
-  lines: lines
-};
-api("chartType = 'waterfall'");
-const negWaterfall = api('waterfallChartsHtml_')(api('__in.negDeduct').columns, lines);
-assert(negWaterfall.indexOf('−-') === -1 && negWaterfall.indexOf('−−') === -1,
-  '扣除項是負數時，瀑布圖不該印出兩個負號');
-assert(negWaterfall.indexOf('+5,000') !== -1 || negWaterfall.indexOf('+5000') !== -1,
-  '扣除項是負數等於加回來，應該標成正號');
-api("chartType = 'byLine'");
+// 瀑布圖工具：扣除項本身是負數時(負的前瞻費用)等於加回來，標正號、不該印出 −-5,000
+const negCol = Object.assign({}, cols[0], { amounts: Object.assign({}, cols[0].amounts, { J: -5000 }) });
+const negSteps = api('wfStructureSteps_')({ columns: [negCol], lines });
+const negJ = negSteps.find(st => st.kind === 'delta' && /前瞻/.test(st.label));
+assert(negJ && Math.abs(negJ.value - 5000) < 1, '負的扣除項在瀑布圖工具應該是 +5,000：' + JSON.stringify(negJ));
+const negSvg = api('wfSvg_')(negSteps, { labels: true });
+assert(negSvg.indexOf('−-') === -1 && negSvg.indexOf('−−') === -1, '扣除項是負數時，瀑布圖不該印出兩個負號');
 
 // 計算失敗/計算中只換內容區，不可以把子頁籤列(含「重新計算」)一起洗掉
 const subnav = api('dashSubNavHtml')(cols);

@@ -9,6 +9,13 @@
 #fs-local-bar .fsl-more { width: auto; flex: none; padding: 4px 8px; font-size: 12.5px; border-radius: 6px; border: 1px solid #cdd4e1; background: #fff; color: #18213a; }
 .fsl-btn { background: #fff; color: #18213a; border: 1px solid #cdd4e1; padding: 4px 11px; border-radius: 6px; cursor: pointer; font-size: 12.5px; font-weight: 600; }
 .fsl-btn:hover { background: #eef1f7; }
+.fsl-menu { position: relative; }
+.fsl-menu > summary { list-style: none; display: inline-block; }
+.fsl-menu > summary::-webkit-details-marker { display: none; }
+.fsl-menu-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 40; background: #fff; border: 1px solid #cdd4e1; border-radius: 8px;
+  box-shadow: 0 8px 24px -10px rgba(16,27,51,.3); padding: 4px; min-width: 190px; display: flex; flex-direction: column; }
+.fsl-menu-item { background: none; border: none; text-align: left; padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 12.5px; font-weight: 600; color: #18213a; }
+.fsl-menu-item:hover { background: #eef1f7; }
 .fsl-btn.primary { background: #3157d5; color: #fff; border-color: transparent; }
 .fsl-btn.primary:hover { background: #2445b4; }
 .fsl-btn.danger { background: #d23c3c; color: #fff; border-color: transparent; }

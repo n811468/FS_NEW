@@ -921,7 +921,7 @@ function getParamDefs() {
 function validateParamName_(name) {
   if (!name) throw new Error('請輸入參數名稱');
   if (/[\[\]"]/.test(name)) throw new Error('參數名稱不能包含 [ ] 或引號');
-  if (FX_PARAM_NAMES.indexOf(name) !== -1) throw new Error('「' + name + '」是匯率，請到匯率設定頁維護');
+  if (FX_PARAM_NAMES.indexOf(name) !== -1) throw new Error('「' + name + '」是匯率，請到「參數與比率」頁下方的匯率表維護');
   if (SYSTEM_VARIABLES.some(function (v) { return v.name === name; })) throw new Error('「' + name + '」是系統變數名稱，請換一個名稱');
 }
 
