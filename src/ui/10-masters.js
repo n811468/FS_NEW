@@ -1,14 +1,28 @@
-/* ---------------- 主檔維護（表格直接編輯，不需要先按「編輯」） ---------------- */
+/* ---------------- 主檔維護（表格直接編輯，不需要先按「編輯」） ----------------
+ * 車型、車系、情境三個表格放在同一頁「車型與情境」(以前是三個分頁)：每個表格各有自己的儲存鈕，
+ * 底部的「儲存」/Ctrl+S 會把每個改過的表格都存起來(見 markDirtyPart_)。 */
 let entityRows = {};        // key -> 目前表格上的資料列（__existing 標記是否已存在於後端）
 let pendingStatus = null;   // 重畫表格後才顯示的訊息（例如建立情境後整個面板會被重繪）
 
-function renderEntityPanel(key) {
-  const cfg = ENTITIES[key];
-  const panel = document.getElementById('panel-' + key);
-  if (cfg.scopedBy === 'vehicleType' && !requireScope(key, false)) return;
-  panel.innerHTML = gridShell(key, cfg.label, cfg.intro) + (key === 'scenarios' ? snapshotCardShellHtml_() : '');
-  loadEntityData(key);
-  if (key === 'scenarios') loadSnapshotCard_();
+function renderMastersPanel() {
+  const panel = document.getElementById('panel-masters');
+  if (!panel) return;
+  const vt = currentVehicleTypeId;
+  const section = (key, title) => `<div class="card master-card" id="master-${key}">
+      <div class="card-head"><h3>${title}</h3></div>
+      ${ENTITIES[key].scopedBy === 'vehicleType' && !vt
+        ? '<p class="muted">請先在上面建立車型，或在右上角選擇車型。</p>'
+        : gridShell(key, ENTITIES[key].label, ENTITIES[key].intro)}
+    </div>`;
+  panel.innerHTML = section('vehicletypes', '車型') +
+    section('vehicles', `車系${vt ? `<span class="muted">（${esc(vt)}）</span>` : ''}`) +
+    section('scenarios', `情境${vt ? `<span class="muted">（${esc(vt)}）</span>` : ''}`) +
+    (vt ? snapshotCardShellHtml_() : '');
+  Object.keys(ENTITIES).forEach(key => { if (ENTITIES[key].scopedBy !== 'vehicleType' || vt) loadEntityData(key); });
+  if (vt) loadSnapshotCard_();
+}
+function entityDirty_(key) {
+  markDirtyPart_('masters', key, () => saveEntityGrid(key), () => { clearDirtyPart_(key); loadEntityData(key); });
 }
 
 /** ENTITIES 的 scopedBy 只有 'vehicleType' 或 null，剛好對應到快取鍵要區分到什麼程度 */
@@ -19,7 +33,8 @@ function loadEntityData(key) {
   const args = cfg.scopedBy === 'vehicleType' ? [currentVehicleTypeId] : [];
   const cacheKey = panelCacheKey_(key, entityCacheScope_(cfg));
   const apply = rows => {
-    if (isDirty_()) return;   // 使用者已經開始改了，背景回來的資料不要蓋掉畫面
+    // 使用者已經開始改這個表格了，背景回來的資料不要蓋掉畫面
+    if (dirtyState_ && (dirtyState_.parts ? dirtyState_.parts[key] : dirtyState_.key === key)) return;
     entityRows[key] = (rows || []).map(r => Object.assign({}, r, { __existing: true }));
     drawEntityGrid(key);
   };
@@ -146,8 +161,9 @@ function renameEntityRow(key, i) {
     google.script.run
       .withSuccessHandler(safeHandler(() => {
         Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
-        if (key === 'vehicletypes' && currentVehicleTypeId === oldId) currentVehicleTypeId = newId;
         pendingStatus = { key: key, text: `已將「${oldId}」改為「${newId}」`, cls: 'ok' };
+        // 改的是目前的車型：同一頁下面的車系/情境標題也要跟著換，整頁重新載入
+        if (key === 'vehicletypes' && currentVehicleTypeId === oldId) { currentVehicleTypeId = newId; loadVehicleTypeSelector(newId); return; }
         loadEntityData(key);
         afterEntityChange(key);
       }))
@@ -158,7 +174,7 @@ function renameEntityRow(key, i) {
 
 function onEntityField(key, i, field, value) {
   entityRows[key][i][field] = value;
-  markDirty(key, () => saveEntityGrid(key), () => { clearDirty(); loadEntityData(key); });
+  entityDirty_(key);
   if (key === 'scenarios' && (field === 'CreatedDate' || field === 'ScenarioType')) {
     autoFillScenarioName_(i);
   }
@@ -193,7 +209,7 @@ function addEntityRow(key) {
   if (cfg.pk) row[cfg.pk] = '';
   entityRows[key].push(row);
   drawEntityGrid(key);
-  markDirty(key, () => saveEntityGrid(key), () => { clearDirty(); loadEntityData(key); });
+  entityDirty_(key);
   const inputs = document.querySelectorAll(`#entity-body-${key} tr:last-child input`);
   if (inputs[0]) inputs[0].focus();
 }
@@ -217,6 +233,8 @@ function deleteEntityRow(key, i) {
       .withSuccessHandler(safeHandler(() => {
         Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
         pendingStatus = { key: key, text: '已刪除', cls: 'ok' };
+        // 刪掉的是目前的車型：換到剩下的車型，同一頁下面的車系/情境一起換
+        if (key === 'vehicletypes' && currentVehicleTypeId === row[cfg.pk]) { currentVehicleTypeId = ''; loadVehicleTypeSelector(''); return; }
         loadEntityData(key);
         afterEntityChange(key);
       }))
@@ -238,7 +256,7 @@ function saveEntityGrid(key) {
   setStatus(key, '儲存中...');
   google.script.run
     .withSuccessHandler(safeHandler(saved => {
-      clearDirty();
+      clearDirtyPart_(key);
       panelDataCache_[panelCacheKey_(key, entityCacheScope_(cfg))] = saved;
       entityRows[key] = (saved || []).map(r => Object.assign({}, r, { __existing: true }));
       drawEntityGrid(key);

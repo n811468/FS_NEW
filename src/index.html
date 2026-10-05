@@ -7,7 +7,7 @@
 <body>
   <!--
     v2 版面：左側導覽依工作流程分四組 ——
-      結果呈現(看數字、做簡報) → 輸入資料(每個情境要填的數字) → 計算設定(科目與公式、參數、匯率) → 主檔(車型/車系/情境)
+      結果呈現(看數字、做簡報) → 輸入資料(每個情境要填的數字) → 計算設定(科目與公式、參數與匯率) → 主檔(車型與情境：車型/車系/情境同一頁)
     右側上方固定顯示「目前在哪個車型、哪個情境」，所有輸入頁都以它為範圍。
   -->
   <div class="app">
@@ -40,22 +40,16 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>營業費用</button>
         </div>
         <div class="nav-group">
-          <div class="nav-group-label">計算設定（目前車型）</div>
+          <div class="nav-group-label">計算設定</div>
           <button class="nav-item" data-tab="lineitems" onclick="switchTab('lineitems')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>科目與公式</button>
           <button class="nav-item" data-tab="paramrates" onclick="switchTab('paramrates')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5L5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>參數與比率</button>
-          <button class="nav-item" data-tab="paramfx" onclick="switchTab('paramfx')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4M3 8l4-4 4 4M17 8v12M21 16l-4 4-4-4"/></svg>匯率設定</button>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5L5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>參數與匯率</button>
         </div>
         <div class="nav-group">
           <div class="nav-group-label">主檔</div>
-          <button class="nav-item" data-tab="vehicletypes" onclick="switchTab('vehicletypes')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M6 17l1.5-6h9L18 17M7 17v2M17 17v2"/><circle cx="8" cy="14.5" r=".5"/><circle cx="16" cy="14.5" r=".5"/></svg>車型主檔</button>
-          <button class="nav-item" data-tab="vehicles" onclick="switchTab('vehicles')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>車系設定</button>
-          <button class="nav-item" data-tab="scenarios" onclick="switchTab('scenarios')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"/></svg>情境設定</button>
+          <button class="nav-item" data-tab="masters" onclick="switchTab('masters')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M6 17l1.5-6h9L18 17M7 17v2M17 17v2"/><circle cx="8" cy="14.5" r=".5"/><circle cx="16" cy="14.5" r=".5"/></svg>車型與情境</button>
         </div>
       </nav>
       <div class="sidebar-foot">v2 · 每個車型各自一份科目表<br>公式式計算來源 · 拖曳排序</div>
@@ -97,10 +91,7 @@
         <div id="panel-operatingexpense" class="panel"></div>
         <div id="panel-lineitems" class="panel"></div>
         <div id="panel-paramrates" class="panel"></div>
-        <div id="panel-paramfx" class="panel"></div>
-        <div id="panel-vehicletypes" class="panel active"></div>
-        <div id="panel-vehicles" class="panel"></div>
-        <div id="panel-scenarios" class="panel"></div>
+        <div id="panel-masters" class="panel active"></div>
       </main>
     </div>
   </div>

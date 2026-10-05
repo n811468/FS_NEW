@@ -157,7 +157,7 @@ function showComparisonCsv() {
           if (showPct) row.push('');
           return;
         }
-        row.push(Math.round(displayAmount_(v, c)));
+        row.push(amtDigits_() ? Math.round(displayAmount_(v, c) * 10) / 10 : Math.round(displayAmount_(v, c)));
         if (showPct) {
           const base = pctBaseOf_(c);
           row.push(base ? (v / base * 100).toFixed(1) : '');

@@ -3,7 +3,7 @@ let comparisonOptions = [];
 let comparisonSelections = [];
 let lastComparison = null;
 let dashPrefsLoaded_ = false;
-let dashView = 'table';               // 目前顯示哪個子頁：'columns' 比較欄位 / 'table' 損益表 / 'chart' 圖表 / 'diff' 差異比較
+let dashView = 'table';               // 目前顯示哪個子頁：'columns' 比較欄位 / 'table' 損益表 / 'chart' 圖表
 // 新增比較欄位那一列還沒送出的草稿(車型/情境/車系)，跟已經加入的 comparisonSelections 分開放
 let builderDraft_ = { vehicleTypeId: '', scenarioId: '', vehicleId: '' };
 
@@ -14,6 +14,7 @@ function loadComparisonPicker() {
       // 第一次進儀表板先把上次的比較欄位/顯示設定從瀏覽器還原回來(見 loadDashPrefs_)，
       // 不必每次打開都重新加一遍欄位；已被刪掉的情境/車系會被濾掉。
       if (!dashPrefsLoaded_) { loadDashPrefs_(); dashPrefsLoaded_ = true; }
+      amountUnit = loadAmountUnit_(amountUnit);   // 金額單位全系統共用：別頁改過就跟著變
       comparisonSelections = comparisonSelections.filter(selectionExists_);
       // 上方選了哪個情境，儀表板就該看得到那個情境 —— 不管是第一次進來(還沒加任何比較欄位)，
       // 還是已經加過其他欄位、中途把上方情境切到別的(如切去改「目標」的開發總投再回來看儀表板)，
@@ -45,7 +46,7 @@ function selectionExists_(sel) {
  * 最後一列永遠是「新增」列，選好車型/情境/車系後按「加入」才會變成一個真正的比較欄位。
  */
 function comparisonBuilderHtml_() {
-  if (!comparisonOptions.length) return '<p class="muted">尚無車型資料，請先在「車型主檔」建立車型。</p>';
+  if (!comparisonOptions.length) return '<p class="muted">尚無車型資料，請先在「車型與情境」建立車型。</p>';
   if (!builderDraft_.vehicleTypeId || !comparisonOptions.some(t => t.VehicleTypeID === builderDraft_.vehicleTypeId)) {
     builderDraft_.vehicleTypeId = comparisonOptions[0].VehicleTypeID;
     builderDraft_.scenarioId = ''; builderDraft_.vehicleId = '';
@@ -150,7 +151,7 @@ function applyBuilderEdit_(i, next) {
 }
 
 function addComparisonColumn() {
-  if (!builderDraft_.scenarioId) { showGlobalError('此車型尚無情境，請先在「情境設定」建立情境。'); return; }
+  if (!builderDraft_.scenarioId) { showGlobalError('此車型尚無情境，請先在「車型與情境」建立情境。'); return; }
   pushSelection(builderDraft_.scenarioId, builderDraft_.vehicleId);
   refreshDashboard();
 }
@@ -197,20 +198,19 @@ let pctBase = 'exfactory';            // 第二小欄：'exfactory' 對廠價% /
 let showPriceStructure = true;        // 是否顯示 P1~P9 售價結構
 let chartLineCodes = ['A', 'K'];      // 「科目比較」圖要畫哪幾個科目
 let collapsedGroups = new Set();      // 目前收合中的大項(B/E/G/I)，切換 % 基準等重畫時要保留住
-let diffPairs = [];                   // 使用者自己選的差異比較組合 [{aKey, bKey}]，key 見 colKey_()
 let baselineKey = '';                 // 比較基準欄位(colKey_)；空字串 = 不設定比較基準
-let amountUnit = 1;                   // 金額單位：1 = 元、1000 = 千元
+let amountUnit = 1;                   // 金額單位：1 = 元、1000 = 千元、10000 = 萬元(全系統共用，見 loadAmountUnit_)
 let volumeBasis = 'unit';             // 金額基礎：'unit' 單台 / 'year' 年度總額(×月銷量×12) / 'lc' LC 總額(×LC 總台數)
 let highlightBest = false;            // 每一列標示最佳/最差的欄位
 let showKpi = true;                   // 顯示重點指標卡片
-let chartType = 'byLine';             // 'byLine' 科目比較(橫軸=科目) / 'byColumn' (橫軸=比較欄位) / 'structure' 損益結構 / 'waterfall' 損益瀑布
+let chartType = 'byLine';             // 'byLine' 科目比較(橫軸=科目) / 'byColumn' (橫軸=比較欄位) / 'structure' 損益結構；瀑布圖統一用瀑布圖工具
 let chartValue = 'amount';            // 圖表數值：'amount' 金額 / 'pct' 百分比
 let chartLabels = true;               // 圖上顯示數值標籤
 
 const DASH_PREFS_KEY_ = 'plDashboard.prefs.v1';
 function dashPrefsSnapshot_() {
   return {
-    selections: comparisonSelections, diffPairs, pctBase, showPriceStructure, chartLineCodes,
+    selections: comparisonSelections, pctBase, showPriceStructure, chartLineCodes,
     baselineKey, amountUnit, volumeBasis, highlightBest, showKpi, chartType, chartValue, chartLabels,
     dashView, collapsed: Array.from(collapsedGroups)
   };
@@ -223,19 +223,20 @@ function loadDashPrefs_() {
   try { p = JSON.parse(localStorage.getItem(DASH_PREFS_KEY_) || 'null'); } catch (e) { p = null; }
   if (!p || typeof p !== 'object') return;
   if (Array.isArray(p.selections)) comparisonSelections = p.selections.filter(s => s && s.ScenarioID).map(s => ({ ScenarioID: String(s.ScenarioID), VehicleID: String(s.VehicleID || '') }));
-  if (Array.isArray(p.diffPairs)) diffPairs = p.diffPairs.filter(d => d && d.aKey && d.bKey);
   if (['exfactory', 'revenue', 'diff', 'diffpct', 'none'].indexOf(p.pctBase) !== -1) pctBase = p.pctBase;
   if (typeof p.showPriceStructure === 'boolean') showPriceStructure = p.showPriceStructure;
   if (Array.isArray(p.chartLineCodes) && p.chartLineCodes.length) chartLineCodes = p.chartLineCodes.map(String);
   if (typeof p.baselineKey === 'string') baselineKey = p.baselineKey;
-  if (p.amountUnit === 1 || p.amountUnit === 1000) amountUnit = p.amountUnit;
+  if ([1, 1000, 10000].indexOf(p.amountUnit) !== -1) amountUnit = p.amountUnit;
   if (['unit', 'year', 'lc'].indexOf(p.volumeBasis) !== -1) volumeBasis = p.volumeBasis;
   if (typeof p.highlightBest === 'boolean') highlightBest = p.highlightBest;
   if (typeof p.showKpi === 'boolean') showKpi = p.showKpi;
-  if (['byLine', 'byColumn', 'structure', 'waterfall'].indexOf(p.chartType) !== -1) chartType = p.chartType;
+  // 以前的「損益瀑布」已經移到瀑布圖工具，記住的是它就回到科目比較
+  if (['byLine', 'byColumn', 'structure'].indexOf(p.chartType) !== -1) chartType = p.chartType;
   if (p.chartValue === 'amount' || p.chartValue === 'pct') chartValue = p.chartValue;
   if (typeof p.chartLabels === 'boolean') chartLabels = p.chartLabels;
-  if (['columns', 'table', 'chart', 'diff'].indexOf(p.dashView) !== -1) dashView = p.dashView;
+  // 以前的「差異比較」子頁已經拿掉(差異看損益表的「與基準的差異」或瀑布圖工具)，記住的是它就回到損益表
+  if (['columns', 'table', 'chart'].indexOf(p.dashView) !== -1) dashView = p.dashView;
   if (Array.isArray(p.collapsed)) collapsedGroups = new Set(p.collapsed.map(String));
 }
 
@@ -244,7 +245,7 @@ function setDashOption(name, value) {
   switch (name) {
     case 'pctBase': pctBase = value; break;
     case 'showPriceStructure': showPriceStructure = !!value; break;
-    case 'amountUnit': amountUnit = Number(value) === 1000 ? 1000 : 1; break;
+    case 'amountUnit': amountUnit = normAmountUnit_(value); saveAmountUnit_(amountUnit); break;
     case 'volumeBasis': volumeBasis = value; break;
     case 'highlightBest': highlightBest = !!value; break;
     case 'showKpi': showKpi = !!value; break;
@@ -418,15 +419,16 @@ function dashSubNavHtml(cols) {
   const tabs = [
     ['columns', '比較欄位' + (cols.length ? `（${cols.length}）` : '')],
     ['table', '損益表'],
-    ['chart', '圖表'],
-    ['diff', '差異比較']
+    ['chart', '圖表']
   ];
   return `
     <div class="dash-subnav">
       ${tabs.map(([key, label]) => `<button type="button" class="dash-subnav-btn${dashView === key ? ' active' : ''}"
           onclick="setDashView('${key}')">${esc(label)}</button>`).join('')}
       <span class="dash-subnav-status" id="dash-status"></span>
-      <button type="button" class="btn secondary dash-subnav-refresh" onclick="refreshDashboard(true)"
+      ${cols.length ? `<button type="button" class="btn secondary dash-subnav-refresh" onclick="dashOpenWaterfall_()"
+        data-tip="用瀑布圖工具看：兩個比較欄位差在哪些科目，或單一欄位從收入一路扣到營業淨利">瀑布圖…</button>` : ''}
+      <button type="button" class="btn secondary${cols.length ? '' : ' dash-subnav-refresh'}" onclick="refreshDashboard(true)"
         data-tip="整份重新跟後端計算（平常加入欄位只算新加的那幾欄）">重新計算</button>
     </div>`;
 }
@@ -440,7 +442,6 @@ function dashViewHtml_(cols, lines) {
   if (dashView === 'columns') return comparisonBuilderHtml_();
   if (!cols.length) return '<p class="muted">請先切到「比較欄位」加入至少一個比較欄位。</p>';
   if (dashView === 'chart') return chartSectionHtml(cols, lines);
-  if (dashView === 'diff') return diffSectionHtml_(cols, lines);
   return tableViewHtml_(cols, lines);
 }
 
@@ -475,7 +476,9 @@ function basisFactor_(col) {
 function displayAmount_(v, col) {
   return Number(v) * basisFactor_(col) / amountUnit;
 }
-function unitLabel_() { return amountUnit === 1000 ? '千元' : '元'; }
+function unitLabel_() { return amountUnitText_(amountUnit); }
+/** 表格/卡片的金額小數位：萬元留一位(不然 -162,237 元只剩 -16)，元與千元維持整數 */
+function amtDigits_() { return amountUnit === 10000 ? 1 : 0; }
 function basisLabel_() {
   return volumeBasis === 'year' ? '年度總額' : volumeBasis === 'lc' ? 'LC 總額' : '單台';
 }
@@ -566,10 +569,9 @@ function dashboardToolbarHtml(cols) {
           ${cols.map(c => `<option value="${esc(colKey_(c))}"${colKey_(c) === baselineKey ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}
         </select>
       </label>
-      <label>金額單位
+      <label data-tip="全系統共用：儀表板、GATE 報告、瀑布圖工具用同一個金額單位">金額單位
         <select onchange="setDashOption('amountUnit', this.value)">
-          ${opt('1', '元', String(amountUnit))}
-          ${opt('1000', '千元', String(amountUnit))}
+          ${AMOUNT_UNITS_.map(([v, t]) => opt(String(v), t, String(amountUnit))).join('')}
         </select>
       </label>
       <label data-tip="單台：損益表原本的口徑&#10;年度總額：單台 × 月銷量 × 12&#10;LC 總額：單台 × LC 總台數（月銷量 × 12 × LC 年限）&#10;百分比不受影響">金額基礎
@@ -580,11 +582,15 @@ function dashboardToolbarHtml(cols) {
         </select>
       </label>
       <span class="toolbar-sep"></span>
-      ${chk('showKpi', showKpi, '重點指標')}
-      ${chk('showPriceStructure', showPriceStructure, '售價結構(P1~P9)')}
-      ${chk('highlightBest', highlightBest, '標示最佳/最差', '每一列把數字最好的欄位標 ▲、最差的標 ▼：收入/毛利/淨利越高越好，成本/費用越低越好')}
-      <span class="toolbar-sep"></span>
-      <button type="button" class="btn secondary" onclick="toggleAllGroups()">全部收合/展開大項</button>
+      <details class="menu dash-display-menu">
+        <summary class="btn secondary" data-tip="不常改的顯示選項">⚙ 顯示設定</summary>
+        <div class="menu-list menu-checks">
+          ${chk('showKpi', showKpi, '重點指標卡片')}
+          ${chk('showPriceStructure', showPriceStructure, '售價結構(P1~P9)')}
+          ${chk('highlightBest', highlightBest, '標示最佳/最差', '每一列把數字最好的欄位標 ▲、最差的標 ▼：收入/毛利/淨利越高越好，成本/費用越低越好')}
+          <button type="button" onclick="toggleAllGroups()">全部收合/展開大項</button>
+        </div>
+      </details>
       <button type="button" class="btn secondary" onclick="showComparisonCsv()">匯出 CSV</button>
     </div>`;
 }
@@ -608,7 +614,7 @@ function kpiStripHtml(cols, lines) {
       const v = c.amounts[code];
       if (v === undefined || v === null) return '';
       return `<div class="kpi-row"><span>${esc(nameOf(code))}</span>
-        <span class="kpi-num${v < 0 ? ' negative' : ''}">${fmt(displayAmount_(v, c))}</span>
+        <span class="kpi-num${v < 0 ? ' negative' : ''}">${fmt(displayAmount_(v, c), amtDigits_())}</span>
         <span class="kpi-pct">${code === 'A' ? '' : pctOf_(c, code).toFixed(1) + '%'}</span></div>`;
     }).join('');
     let vsBase = '';
@@ -630,7 +636,7 @@ function kpiStripHtml(cols, lines) {
         <button type="button" class="star${isBase ? ' on' : ''}" data-tip="${isBase ? '目前的比較基準（再點一次取消）' : '設為比較基準'}"
           onclick="setBaselineColumnAt(${i})">★</button></div>
       <div class="kpi-main"><span class="kpi-main-label">${esc(nameOf(kCode))}</span>
-        <span class="kpi-main-num${k < 0 ? ' negative' : ''}">${k === undefined || k === null ? '—' : fmt(displayAmount_(k, c))}</span>
+        <span class="kpi-main-num${k < 0 ? ' negative' : ''}">${k === undefined || k === null ? '—' : fmt(displayAmount_(k, c), amtDigits_())}</span>
         <span class="kpi-main-pct${kPct < 0 ? ' negative' : ''}">${kPct.toFixed(1)}%</span></div>
       <div class="kpi-bar"><div class="kpi-bar-fill${kPct < 0 ? ' negative' : ''}" style="width:${barW.toFixed(1)}%"></div></div>
       ${rows}${vsBase}
@@ -645,115 +651,32 @@ function pctOf_(col, code) {
   return base && !isNaN(v) ? v / base * 100 : 0;
 }
 
-/**
- * 差異比較挑選器：使用者自己選「比較基準」跟「比較對象」兩個欄位，按「加入差異比較」
- * 才會產生一組差異卡片(可以同時加好幾組，如「現況 vs 目標」再加一組「A情境 vs B情境」)。
- * 不像原本自動兩兩相減整排欄位、被迫照順序來 —— 使用者要比哪兩欄就直接選那兩欄。
- */
-function diffPairPickerHtml(cols) {
-  if (cols.length < 2) return '<p class="muted">差異比較至少要有兩個比較欄位。</p>';
-  const options = cols.map((c, i) => `<option value="${i}">${esc(c.label)}</option>`).join('');
-  const chips = diffPairs.map((p, i) => {
-    const a = cols.find(c => colKey_(c) === p.aKey);
-    const b = cols.find(c => colKey_(c) === p.bKey);
-    if (!a || !b) return '';
-    return `<span class="cmp-chip">
-      <span class="chip-label">${esc(a.label)} <span class="diff-arrow">→</span> ${esc(b.label)}</span>
-      <button type="button" class="btn danger" onclick="removeDiffPair(${i})">✕</button></span>`;
-  }).join('');
-  return `
-    <div class="toolbar">
-      <label>比較基準
-        <select id="diff-a-select">${options}</select>
-      </label>
-      <label>比較對象
-        <select id="diff-b-select">${cols.map((c, i) => `<option value="${i}"${i === 1 ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select>
-      </label>
-      <button type="button" class="btn secondary" onclick="addDiffPair()">加入差異比較</button>
-    </div>
-    ${diffPairs.length ? `<div class="toolbar">${chips}
-      <button type="button" class="btn secondary" onclick="clearDiffPairs()">全部清除</button></div>` : ''}`;
-}
-
-function addDiffPair() {
-  if (!lastComparison) return;
-  const cols = lastComparison.columns || [];
-  const aIdx = Number(val('diff-a-select'));
-  const bIdx = Number(val('diff-b-select'));
-  if (isNaN(aIdx) || isNaN(bIdx) || aIdx === bIdx || !cols[aIdx] || !cols[bIdx]) return;
-  const aKey = colKey_(cols[aIdx]), bKey = colKey_(cols[bIdx]);
-  if (diffPairs.some(p => p.aKey === aKey && p.bKey === bKey)) return;
-  diffPairs.push({ aKey: aKey, bKey: bKey });
-  saveDashPrefs_();
-  renderDashboard(lastComparison);
-}
-function removeDiffPair(i) { diffPairs.splice(i, 1); saveDashPrefs_(); renderDashboard(lastComparison); }
-function clearDiffPairs() { diffPairs = []; saveDashPrefs_(); renderDashboard(lastComparison); }
-
-/** 差異卡片與差異柱狀圖共用的關鍵科目：收入 + 各段小計/毛利/淨利 */
-function keyLines_(lines) {
-  return lines.filter(l => !l.isPriceStructure && (l.isSubtotal || l.LineCode === 'A'));
-}
 
 /**
- * 情境差異卡片：只算使用者自己選過的組合(diffPairs)，只挑小計/毛利/淨利等關鍵科目，
- * 避免每個明細都列出來反而看不出重點。每張卡下面附一個差異柱狀圖，
- * 綠色 = 往好的方向變(成本降、利潤升)、紅色 = 往壞的方向變。
+ * 儀表板不再自己畫瀑布圖/差異圖(以前有「損益瀑布」「差異比較」兩套，跟瀑布圖工具重複)：
+ * 選好要看哪兩欄(或一欄)就直接帶到瀑布圖工具，起點預設是比較基準。
  */
-function diffSectionHtml_(cols, lines) {
-  const picker = diffPairPickerHtml(cols);
-  if (!diffPairs.length) {
-    return `<div class="diff-section">${picker}
-      <p class="muted">選好要比較的兩個欄位後按「加入差異比較」，下面會列出金額/百分比差異與差異柱狀圖。</p></div>`;
-  }
-  const keyLines = keyLines_(lines);
-  const cards = diffPairs.map((pair, i) => {
-    const a = cols.find(c => colKey_(c) === pair.aKey);
-    const b = cols.find(c => colKey_(c) === pair.bKey);
-    if (!a || !b) return '';
-    const rows = keyLines.map(l => {
-      const va = a.amounts[l.LineCode], vb = b.amounts[l.LineCode];
-      if (va === undefined || va === null || vb === undefined || vb === null) return '';
-      const da = displayAmount_(va, a), db = displayAmount_(vb, b);
-      const delta = db - da;
-      const pct = da ? (delta / Math.abs(da) * 100) : null;
-      const tone = deltaTone_(l, delta);
-      return `<tr class="${l.isSubtotal ? 'subtotal' : ''}">
-        <td class="row-head">${esc(shortLineName(l.LineName))}</td>
-        <td class="${da < 0 ? 'negative' : ''}">${fmt(da)}</td><td class="${db < 0 ? 'negative' : ''}">${fmt(db)}</td>
-        <td class="delta ${tone}">${signed_(delta)}</td>
-        <td class="delta ${tone}">${pct === null ? '—' : signed_(pct, 1) + '%'}</td>
-      </tr>`;
-    }).join('');
-    return `<div class="diff-card">
-      <div class="diff-card-title">${esc(a.label)} <span class="diff-arrow">→</span> ${esc(b.label)}
-        <span class="muted">（${esc(unitLabel_())}・${esc(basisLabel_())}）</span></div>
-      <table class="grid-table diff-table">
-        <thead><tr><th>項目</th><th>${esc(a.vehicleLabel || a.label)}</th><th>${esc(b.vehicleLabel || b.label)}</th><th>差異</th><th>差異%</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div class="chart-box diff-chart-box">${diffChartSvg_(a, b, keyLines)}</div>
-    </div>`;
-  }).join('');
-  return `<div class="diff-section">${picker}<div class="diff-cards-row">${cards}</div></div>`;
-}
-
-/** 每組差異比較底下的柱狀圖：關鍵科目的差異金額(b-a)，跟差異卡片的表格是同一組數字 */
-function diffChartSvg_(a, b, keyLines) {
-  const groups = [], bars = [];
-  keyLines.forEach(l => {
-    const va = a.amounts[l.LineCode], vb = b.amounts[l.LineCode];
-    if (va === undefined || va === null || vb === undefined || vb === null) return;
-    const da = displayAmount_(va, a), db = displayAmount_(vb, b);
-    const delta = db - da;
-    const tone = deltaTone_(l, delta);
-    const g = groups.length;
-    groups.push({ label: shortLineName(l.LineName) });
-    bars.push({
-      g: g, s: 0, y0: 0, y1: delta,
-      color: tone === 'good' ? '#2f855a' : tone === 'bad' ? '#e53e3e' : '#718096',
-      tip: `${shortLineName(l.LineName)}\n${a.label}：${fmt(da)}\n${b.label}：${fmt(db)}\n差異：${signed_(delta)}${da ? `（${signed_(delta / Math.abs(da) * 100, 1)}%）` : ''}${tone === 'good' ? '\n✔ 往好的方向' : tone === 'bad' ? '\n✘ 往壞的方向' : ''}`
-    });
+function dashOpenWaterfall_() {
+  const cols = (lastComparison && lastComparison.columns) || [];
+  if (!cols.length) return;
+  const base = baselineCol_(cols);
+  const fromIdx = base ? cols.indexOf(base) : 0;
+  const toIdx = cols.length > 1 ? (fromIdx === 0 ? 1 : 0) : 0;
+  const options = cols.map((c, i) => [String(i), c.label]);
+  openModal({
+    title: '用瀑布圖看',
+    body: '<p class="help">兩個欄位不同 = 起點 → 終點差在哪些科目；兩個選同一欄 = 這一欄從收入一路扣到營業淨利。之後可以在瀑布圖工具改明細程度、下載 PNG。</p>',
+    fields: [
+      { name: 'from', label: '起點', type: 'select', options, value: String(fromIdx) },
+      { name: 'to', label: '終點', type: 'select', options, value: String(toIdx) }
+    ],
+    okText: '開啟瀑布圖工具'
+  }).then(v => {
+    if (!v) return;
+    const a = cols[Number(v.from)], b = cols[Number(v.to)];
+    if (!a || !b) return;
+    const side = c => ({ scenarioId: c.scenarioId, vehicleId: c.vehicleId || '' });
+    if (a === b) openWaterfallTool_('structure', null, side(a));
+    else openWaterfallTool_('bridge', side(a), side(b));
   });
-  return svgBarChart_({ groups, series: [{ name: '差異' }], bars, width: 640, height: 240, showLabels: chartLabels, valueFormat: shortAmount_ });
 }

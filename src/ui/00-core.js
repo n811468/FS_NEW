@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------
  * 前端分成兩種頁面：
- *   1. ENTITIES  — 單純的主檔維護(車型/車系/情境/科目)，沿用「表單 + 列表」通用元件。
- *   2. 表格編輯頁 — 銷售構成、銷貨成本、營業費用、開發總投、費率、匯率，
+ *   1. ENTITIES  — 單純的主檔維護(車型/車系/情境)，沿用「表單 + 列表」通用元件，三個表格放在同一頁「車型與情境」。
+ *   2. 表格編輯頁 — 銷售構成、銷貨成本、營業費用、開發總投、參數與比率(含匯率)，
  *      改成一次看到全部、直接在格子裡改、最後按一次「儲存」的表格式介面。
  * ------------------------------------------------------------- */
 const GATE_OPTIONS = ['GATE F', 'GATE E', 'GATE D', 'GATE C', 'GATE B', 'GATE A', 'GATE Z'];
@@ -88,15 +88,14 @@ const GRID_PANELS = {
   costofsales: 'renderCostOfSalesPanel',
   operatingexpense: 'renderOperatingExpensePanel',
   devinvestment: 'renderDevInvestmentPanel',
-  paramrates: 'renderRatePanel',
-  paramfx: 'renderFxPanel'
+  paramrates: 'renderRatePanel'      // 匯率(renderFxPanel)畫在同一頁下半部
 };
 
 let currentVehicleTypeId = '';
 let currentScenarioId = '';
 let currentScenario = null;      // 目前情境的完整資料(含 Gate / ScenarioType)
 let scenarioCache = [];
-let currentTab = 'vehicletypes';
+let currentTab = 'masters';
 
 /**
  * 表格編輯頁的資料快取：切分頁很常常常是「切回剛剛看過的那頁」，
@@ -156,6 +155,25 @@ function fmt(v, digits) {
   if (Math.abs(n) < 0.5 * Math.pow(10, -d)) return '0';
   return n.toLocaleString(undefined, { maximumFractionDigits: d });
 }
+/**
+ * 金額單位：全系統共用一個設定(儀表板、GATE 報告、瀑布圖工具、目標反推的瀑布圖)，任何一頁改了，其他頁下次打開就跟著變。
+ * 以前每頁各記一份，常常儀表板看千元、報告還是元。
+ */
+const AMOUNT_UNIT_KEY_ = 'plApp.amountUnit.v1';
+const AMOUNT_UNITS_ = [[1, '元'], [1000, '千元'], [10000, '萬元']];
+function normAmountUnit_(u) { u = Number(u); return u === 1000 || u === 10000 ? u : 1; }
+function loadAmountUnit_(fallback) {
+  try {
+    const raw = localStorage.getItem(AMOUNT_UNIT_KEY_);
+    if (raw !== null && raw !== '') return normAmountUnit_(raw);
+  } catch (e) { /* 存不了就用各頁原本的值 */ }
+  return normAmountUnit_(fallback);
+}
+function saveAmountUnit_(u) {
+  try { localStorage.setItem(AMOUNT_UNIT_KEY_, String(normAmountUnit_(u))); } catch (e) { /* 無痕模式等情況存不了就算了 */ }
+}
+function amountUnitText_(u) { u = normAmountUnit_(u); return u === 1000 ? '千元' : u === 10000 ? '萬元' : '元'; }
+function amountUnitDigits_(u) { return normAmountUnit_(u) === 1 ? 0 : 1; }
 /** 科目名稱/備註等使用者輸入會被塞進 HTML，& < > " 都要轉義，否則表格會被破壞 */
 function esc(s) {
   return String(s === undefined || s === null ? '' : s)
@@ -210,13 +228,13 @@ function scenarioLabel(s) {
 function requireScope(key, needScenario) {
   const panel = document.getElementById('panel-' + key);
   if (!currentVehicleTypeId) {
-    panel.innerHTML = emptyStateHtml('🚗', '還沒有選擇車型', '請先在右上角選擇車型；還沒有車型的話，到「車型主檔」建立一個。',
-      `<button class="btn" onclick="switchTab('vehicletypes')">前往車型主檔</button>`);
+    panel.innerHTML = emptyStateHtml('🚗', '還沒有選擇車型', '請先在右上角選擇車型；還沒有車型的話，到「車型與情境」建立一個。',
+      `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
     return false;
   }
   if (needScenario && !currentScenarioId) {
-    panel.innerHTML = emptyStateHtml('🧭', '還沒有選擇情境', '請先在右上角選擇情境；這個車型還沒有情境的話，到「情境設定」建立。',
-      `<button class="btn" onclick="switchTab('scenarios')">前往情境設定</button>`);
+    panel.innerHTML = emptyStateHtml('🧭', '還沒有選擇情境', '請先在右上角選擇情境；這個車型還沒有情境的話，到「車型與情境」建立。',
+      `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
     return false;
   }
   return true;
@@ -310,6 +328,29 @@ function markDirty(key, save, discard) {
   dirtyState_.count++;
   const bar = document.getElementById('savebar');
   if (bar) bar.classList.add('show');
+}
+/**
+ * 同一頁有好幾個可以各自編輯的表格(車型與情境頁的車型/車系/情境、參數頁的參數/匯率)：
+ * 每個表格是一個 part，底部的「儲存」(Ctrl+S)會把每個改過的表格都存起來；某個表格自己存好了只清掉它自己，
+ * 其他表格還有沒存的修改時，提醒列不會消失。
+ */
+function markDirtyPart_(page, part, save, discard) {
+  if (!dirtyState_ || dirtyState_.key !== page || !dirtyState_.parts) dirtyState_ = { key: page, parts: {}, count: 0 };
+  const st = dirtyState_;
+  st.parts[part] = { save, discard };
+  st.count++;
+  st.save = () => Object.keys(st.parts).forEach(k => st.parts[k].save());
+  st.discard = () => Object.keys(st.parts).forEach(k => { if (st.parts[k].discard) st.parts[k].discard(); });
+  const bar = document.getElementById('savebar');
+  if (bar) bar.classList.add('show');
+}
+/** 某個表格存好了：只清掉它；沒有分 part 的頁面就是整頁清掉 */
+function clearDirtyPart_(part) {
+  if (dirtyState_ && dirtyState_.parts) {
+    delete dirtyState_.parts[part];
+    if (Object.keys(dirtyState_.parts).length) return;
+  }
+  clearDirty();
 }
 function clearDirty() {
   dirtyState_ = null;
@@ -448,12 +489,15 @@ const PAGE_META = {
   dashboard: ['結果呈現', '損益儀表板'], report: ['結果呈現', 'GATE 審議報告'], whatif: ['結果呈現', '目標反推與敏感度分析'], waterfall: ['結果呈現', '瀑布圖工具'],
   salesmix: ['輸入資料', '銷售構成與售價'], costofsales: ['輸入資料', '銷貨成本'],
   devinvestment: ['輸入資料', '開發總投'], operatingexpense: ['輸入資料', '營業費用'],
-  lineitems: ['計算設定', '科目與公式'], paramrates: ['計算設定', '參數與比率'], paramfx: ['計算設定', '匯率設定'],
-  vehicletypes: ['主檔', '車型主檔'], vehicles: ['主檔', '車系設定'], scenarios: ['主檔', '情境設定']
+  lineitems: ['計算設定', '科目與公式'], paramrates: ['計算設定', '參數與匯率'],
+  masters: ['主檔', '車型與情境']
 };
+/** 已經併到別頁的舊分頁(記在瀏覽器裡的上次位置、其他頁的「前往」按鈕)：導到新的那一頁 */
+const MERGED_TABS_ = { vehicletypes: 'masters', vehicles: 'masters', scenarios: 'masters', paramfx: 'paramrates' };
 
 /* ---------------- 頁籤 / 上方選單 ---------------- */
 function switchTab(key, force) {
+  key = MERGED_TABS_[key] || key;
   if (!force && key !== currentTab && isDirty_()) {
     confirmLeave_().then(ok => { if (ok) switchTab(key, true); });
     return;
@@ -501,7 +545,7 @@ function renderTab(key) {
   else if (key === 'waterfall') renderWaterfallPanel();
   else if (key === 'lineitems') renderChartPanel();
   else if (GRID_PANELS[key]) window[GRID_PANELS[key]]();
-  else if (ENTITIES[key]) renderEntityPanel(key);
+  else if (key === 'masters') renderMastersPanel();
 }
 
 /** 開場：車型 + 情境一次取回，期間不重繪，最後只渲染一次目前分頁 */

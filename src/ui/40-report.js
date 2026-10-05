@@ -1,7 +1,7 @@
 /* ================= GATE 審議報告(簡報)：現況與目標的差距、作法、說明 ================= */
 let reportData = null;
 let reportSel = { target: '', base: '', prev: '' };
-let reportUnit = 1;              // 1 元 / 1000 千元
+let reportUnit = 1;              // 1 元 / 1000 千元 / 10000 萬元(全系統共用，見 loadAmountUnit_)
 let reportActions = [];          // 編輯中的作法(目標情境)
 let reportNoteEdits = {};        // { scenarioId: { LineCode: 說明 } } 還沒存的說明
 let reportShowPrice = false;
@@ -15,10 +15,11 @@ function loadReportPrefs_() {
     const p = JSON.parse(localStorage.getItem(REPORT_PREFS_KEY_) || 'null') || {};
     if (p.sel && p.sel[currentVehicleTypeId]) reportSel = Object.assign({ target: '', base: '', prev: '' }, p.sel[currentVehicleTypeId]);
     else reportSel = { target: '', base: '', prev: '' };
-    if (p.unit === 1000 || p.unit === 1) reportUnit = p.unit;
+    if ([1, 1000, 10000].indexOf(p.unit) !== -1) reportUnit = p.unit;
     if (typeof p.showPrice === 'boolean') reportShowPrice = p.showPrice;
     reportBridgeCfg = Object.assign(defaultBridgeCfg_(), p.bridge && p.bridge[currentVehicleTypeId]);
   } catch (e) { reportBridgeCfg = defaultBridgeCfg_(); }
+  reportUnit = loadAmountUnit_(reportUnit);   // 金額單位全系統共用
 }
 function saveReportPrefs_() {
   try {
@@ -56,7 +57,7 @@ function renderReportPanel() {
   const panel = document.getElementById('panel-report');
   if (!requireScope('report', false)) return;
   if (!scenarioCache.length) {
-    panel.innerHTML = emptyStateHtml('🗂', '這個車型還沒有情境', '報告比較「現況」與「目標」兩個情境，請先建立情境。', `<button class="btn" onclick="switchTab('scenarios')">前往情境設定</button>`);
+    panel.innerHTML = emptyStateHtml('🗂', '這個車型還沒有情境', '報告比較「現況」與「目標」兩個情境，請先建立情境。', `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
     return;
   }
   loadReportPrefs_();
@@ -72,9 +73,8 @@ function renderReportPanel() {
         <label class="field rpt-pick prev"><span>前回（選填，跟本回比）</span><select id="rpt-sel-prev" onchange="setReportSel('prev', this.value)">${opt(reportSel.prev, true, '（不比較）')}</select></label>
       </div>
       <div class="report-controls" style="margin-top:12px;">
-        <label class="field"><span>金額單位</span><div class="seg">
-          <button type="button" class="seg-btn${reportUnit === 1 ? ' active' : ''}" onclick="setReportUnit(1)">元/台</button>
-          <button type="button" class="seg-btn${reportUnit === 1000 ? ' active' : ''}" onclick="setReportUnit(1000)">千元/台</button></div></label>
+        <label class="field" data-tip="全系統共用：儀表板、GATE 報告、瀑布圖工具用同一個金額單位"><span>金額單位</span><div class="seg">
+          ${AMOUNT_UNITS_.map(([u, t]) => `<button type="button" class="seg-btn${reportUnit === u ? ' active' : ''}" data-unit="${u}" onclick="setReportUnit(${u})">${t}/台</button>`).join('')}</div></label>
         <label class="chk" style="align-self:center;"><input type="checkbox" ${reportShowPrice ? 'checked' : ''} onchange="reportShowPrice=this.checked;saveReportPrefs_();drawReport_()"> 顯示售價結構</label>
         <span style="flex:1"></span>
         <button type="button" class="btn secondary" onclick="createSnapshotDialog_(reportSel.target, (scenarioCache.find(s => s.ScenarioID === reportSel.target) || {}).ScenarioName ? scenarioLabel(scenarioCache.find(s => s.ScenarioID === reportSel.target)) : '')" data-tip="把目標情境現在的數字存一份，之後可以比較改了什麼">存成快照</button>
@@ -96,9 +96,10 @@ function setReportSel(field, value) {
   if (isDirty_()) confirmLeave_().then(ok => { if (ok) go(); }); else go();
 }
 function setReportUnit(u) {
-  reportUnit = u;
+  reportUnit = normAmountUnit_(u);
+  saveAmountUnit_(reportUnit);
   saveReportPrefs_();
-  document.querySelectorAll('#panel-report .report-controls .seg-btn').forEach((b, i) => b.classList.toggle('active', (i === 0 && u === 1) || (i === 1 && u === 1000)));
+  document.querySelectorAll('#panel-report .report-controls .seg-btn[data-unit]').forEach(b => b.classList.toggle('active', Number(b.dataset.unit) === reportUnit));
   drawReport_();
 }
 
@@ -119,9 +120,9 @@ function loadReport_() {
 }
 
 /* ---- 報告用的小工具 ---- */
-function rAmt_(v) { return v === undefined || v === null ? '' : fmt(Number(v) / reportUnit, reportUnit === 1000 ? 1 : 0); }
-function rSigned_(v) { return v === undefined || v === null ? '' : signed_(Number(v) / reportUnit, reportUnit === 1000 ? 1 : 0); }
-function rUnit_() { return reportUnit === 1000 ? '千元/台' : '元/台'; }
+function rAmt_(v) { return v === undefined || v === null ? '' : fmt(Number(v) / reportUnit, amountUnitDigits_(reportUnit)); }
+function rSigned_(v) { return v === undefined || v === null ? '' : signed_(Number(v) / reportUnit, amountUnitDigits_(reportUnit)); }
+function rUnit_() { return amountUnitText_(reportUnit) + '/台'; }
 function rPct_(v, base) { return base ? (Number(v) / base * 100).toFixed(1) + '%' : ''; }
 /** 目標情境的營業淨利科目(預設 K；K 被刪掉時後端指定損益表最底下的總計) */
 function rK_() { return profitCodeOf_(reportData); }
@@ -286,26 +287,31 @@ function bridgeBars_(contribs, cfg) {
   }
   return bars;
 }
-/** 差距拆解(瀑布圖)：現況營業淨利 → 各科目的影響 → 目標營業淨利。根數、合併方式可以在「調整長條」設定 */
-function reportBridgeHtml_() {
+/** 差距拆解的每一根(跟瀑布圖工具同一種 steps 格式，所以可以直接「在瀑布圖工具開啟」) */
+function reportBridgeSteps_() {
   const R = reportData, T = R.target, B = R.base;
   const contribs = reportBridgeContribs_();
-  const cfg = reportBridgeCfg || defaultBridgeCfg_();
   const start = rProfit_(B), end = rProfit_(T);
-  const steps = bridgeBars_(contribs, cfg);
-  const explained = contribs.reduce((s, c) => s + c.value, 0);
-  const other = (end - start) - explained;
-  if (Math.abs(other) >= 1) steps.push({ label: '公式/取整差異', value: other });
+  const steps = bridgeBars_(contribs, reportBridgeCfg || defaultBridgeCfg_()).map(b => ({ label: b.label, value: b.value, kind: 'delta', tip: b.tip }));
+  const other = (end - start) - contribs.reduce((s, c) => s + c.value, 0);
+  if (Math.abs(other) >= 1) steps.push({ label: '公式/取整差異', value: other, kind: 'delta' });
+  return [{ label: '現況 營業淨利', value: start, kind: 'total' }].concat(steps, [{ label: '目標 營業淨利', value: end, kind: 'total' }]);
+}
+/** 差距拆解(瀑布圖)：現況營業淨利 → 各科目的影響 → 目標營業淨利。根數、合併方式可以在「調整長條」設定 */
+function reportBridgeHtml_() {
+  const contribs = reportBridgeContribs_();
+  const cfg = reportBridgeCfg || defaultBridgeCfg_();
   const nGroups = Object.keys(cfg.groups || {}).filter(k => String(cfg.groups[k] || '').trim() && contribs.some(c => c.code === k)).length;
   const actionsByCode = {};
   reportActions.forEach(a => { if (a.LineCode) (actionsByCode[a.LineCode] = actionsByCode[a.LineCode] || []).push(a); });
   return `
     <div class="bridge-tools no-print"><button type="button" class="btn secondary sm" id="rpt-bridge-edit" onclick="editBridgeCfg_()">調整長條（合併科目／顯示幾根）…</button>
       <span class="muted">${num(cfg.topN) > 0 ? `最多 ${Math.floor(num(cfg.topN))} 根` : '不限根數'}${num(cfg.minAbs) > 0 ? `・影響小於 ${fmt(num(cfg.minAbs))} 元/台併入「其他」` : ''}${nGroups ? `・${nGroups} 個科目已合併` : ''}</span></div>
-    <div class="bridge-legend"><span><i style="display:inline-block;width:10px;height:10px;background:#3157d5;border-radius:2px;"></i> 營業淨利</span>
-      <span><i style="display:inline-block;width:10px;height:10px;background:#1c8a59;border-radius:2px;"></i> 改善</span>
-      <span><i style="display:inline-block;width:10px;height:10px;background:#d23c3c;border-radius:2px;"></i> 惡化</span></div>
-    ${bridgeSvg_(start, steps, end)}
+    <div class="bridge-legend"><span><i style="display:inline-block;width:10px;height:10px;background:#2d3748;border-radius:2px;"></i> 營業淨利</span>
+      <span><i style="display:inline-block;width:10px;height:10px;background:#38a169;border-radius:2px;"></i> 改善</span>
+      <span><i style="display:inline-block;width:10px;height:10px;background:#e53e3e;border-radius:2px;"></i> 惡化</span>
+      <span class="spacer"></span><button type="button" class="btn secondary sm no-print" onclick="openInWaterfallTool_(reportBridgeSteps_(), '營業淨利：現況 → 目標 差距拆解')">在瀑布圖工具開啟</button></div>
+    ${wfSvg_(reportBridgeSteps_(), { width: 1180, height: 380, labels: true, fmtV: v => shortAmount_(v / reportUnit) })}
     <div class="two-col" style="margin-top:10px;">
       <div><b style="font-size:13px;">改善最多</b><ul class="problem-list">${contribs.filter(c => c.value > 0).slice(0, 5).map(c =>
         `<li>${esc(c.label)} <b class="good">${rSigned_(c.value)}</b>${actionsByCode[c.code] ? ` — 作法：${actionsByCode[c.code].map(a => esc(a.Title)).join('、')}` : ''}</li>`).join('') || '<li class="muted">（無）</li>'}</ul></div>
@@ -347,40 +353,6 @@ function editBridgeCfg_() {
     if (box && reportData) box.innerHTML = reportBridgeHtml_();
   });
 }
-function bridgeSvg_(start, steps, end) {
-  const bars = [{ label: '現況 營業淨利', y0: 0, y1: start, kind: 'total' }];
-  let acc = start;
-  steps.forEach(s => { bars.push({ label: s.label, y0: acc, y1: acc + s.value, kind: s.value >= 0 ? 'up' : 'down', value: s.value, tip: s.tip }); acc += s.value; });
-  bars.push({ label: '目標 營業淨利', y0: 0, y1: end, kind: 'total' });
-  const vals = [0];
-  bars.forEach(b => { vals.push(b.y0, b.y1); });
-  const nt = niceTicks_(Math.min.apply(null, vals), Math.max.apply(null, vals), 5);
-  const min = nt.lo, max = nt.hi, ticks = nt.ticks;
-  const W = 1180, H = 380, padL = 70, padR = 10, padT = 24, padB = 92;
-  const span = (max - min) || 1;
-  const y = v => padT + (max - v) / span * (H - padT - padB);
-  const bw = (W - padL - padR) / bars.length;
-  const color = { total: '#3157d5', up: '#1c8a59', down: '#d23c3c' };
-  return `<svg class="chart-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="營業淨利差距瀑布圖">
-    ${ticks.map(t => `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" stroke="${t === 0 ? '#8a93a8' : '#e3e7ef'}" stroke-width="${t === 0 ? 1.2 : 1}"/>
-      <text x="${padL - 8}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="#8a93a8">${esc(shortAmount_(t / reportUnit))}</text>`).join('')}
-    ${bars.map((b, i) => {
-      const x = padL + i * bw + bw * 0.16, w = bw * 0.68;
-      const top = y(Math.max(b.y0, b.y1)), h = Math.max(1.5, Math.abs(y(b.y0) - y(b.y1)));
-      const v = b.kind === 'total' ? b.y1 : b.value;
-      const labelY = b.kind === 'down' ? top + h + 13 : top - 6;
-      const next = bars[i + 1];
-      const conn = next ? `<line x1="${x + w}" x2="${x + bw}" y1="${y(b.y1)}" y2="${y(b.y1)}" stroke="#a3acc0" stroke-dasharray="3,3"/>` : '';
-      return `<g><rect class="bar" x="${x}" y="${top}" width="${w}" height="${h}" rx="3" fill="${color[b.kind]}"
-          data-tip="${esc(b.tip || (b.label + '\n' + (b.kind === 'total' ? fmt(v) : signed_(v)) + ' 元/台'))}"/>
-        ${conn}
-        <text x="${x + w / 2}" y="${labelY}" text-anchor="middle" font-size="11.5" font-weight="700" fill="${color[b.kind]}">${esc(b.kind === 'total' ? shortAmount_(v / reportUnit) : (v >= 0 ? '+' : '') + shortAmount_(v / reportUnit))}</text>
-        ${wrapLabel_(b.label, bw - 6, 11, 3).map((ln, k) => `<text x="${x + w / 2}" y="${H - padB + 18 + k * 14}" text-anchor="middle" font-size="11" fill="#475069">${esc(ln)}</text>`).join('')}
-      </g>`;
-    }).join('')}
-  </svg>`;
-}
-
 function reportCompareHtml_() {
   const R = reportData, T = R.target, B = R.base;
   const tRev = T.weighted.P8 || 0, bRev = B.weighted.P8 || 0;

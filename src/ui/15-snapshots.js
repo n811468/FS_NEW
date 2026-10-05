@@ -70,13 +70,7 @@ function drawSnapshotCard_() {
 function compareSnapshotNow_(i) {
   const s = snapshotList_[i];
   if (!s) return;
-  loadWfPrefs_();
-  wfPrefs.mode = 'bridge';
-  wfPrefs.from = { scenarioId: 'snap:' + s.SnapshotID, vehicleId: '' };
-  wfPrefs.to = { scenarioId: s.ScenarioID, vehicleId: '' };
-  wfPrefs.end = 'K';
-  saveWfPrefs_();
-  switchTab('waterfall');
+  openWaterfallTool_('bridge', { scenarioId: 'snap:' + s.SnapshotID }, { scenarioId: s.ScenarioID }, { end: 'K' });
 }
 function addSnapshotToDashboard_(i) {
   const s = snapshotList_[i];
