@@ -36,6 +36,11 @@
     var sel = document.getElementById('vehicletype-selector');
     return sel ? sel.value : '';
   }
+  function currentScenario() {
+    var sel = document.getElementById('scenario-selector');
+    var opt = sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
+    return sel && sel.value ? { id: sel.value, label: opt ? opt.textContent.trim() : sel.value } : null;
+  }
 
   function download(pack, label) {
     var blob = new Blob([JSON.stringify(pack, null, 1)], { type: 'application/json' });
@@ -62,10 +67,18 @@
   var exportAllBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出全部', title: '整份資料庫存成一個資料包（備份用）', onclick: function () {
     download(host.exportPack(null), '全部');
   } });
-  var exportTypeBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出目前車型', title: '只匯出上方選的車型，交給同事「合併匯入」', onclick: function () {
+  var exportTypeBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出車型', title: '匯出上方選的車型：所有情境、車系與科目表，交給同事「合併匯入」（對方這個車型會整個換成這一包）', onclick: function () {
     var id = currentVehicleTypeId();
     if (!id) { window.alert('請先在上方選擇車型。'); return; }
     download(host.exportPack([id]), id);
+  } });
+  var exportScenarioBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出情境', title: '只匯出上方選的情境，交給同事「合併匯入」（對方只新增/更新這個情境，同車型的其他情境不動）', onclick: function () {
+    var id = currentVehicleTypeId(), sc = currentScenario();
+    if (!id || !sc) { window.alert('請先在上方選擇車型與情境。'); return; }
+    var pack;
+    try { pack = host.exportPack(null, { scenarioIds: [sc.id] }); }
+    catch (e) { window.alert('無法匯出：\n' + e.message); return; }
+    download(pack, id + '_' + sc.label);
   } });
   var importBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯入資料包…', onclick: function () { fileInput.click(); } });
   var moreSel = el('select', { class: 'fsl-more', title: '其他' }, [
@@ -85,7 +98,7 @@
     el('span', { class: 'fsl-user' }, [document.createTextNode('使用者：'), userBtn]),
     statusEl,
     el('span', { class: 'fsl-spacer' }),
-    exportAllBtn, exportTypeBtn, importBtn, moreSel, fileInput
+    exportAllBtn, exportTypeBtn, exportScenarioBtn, importBtn, moreSel, fileInput
   ]);
   var banner = el('div', { id: 'fs-local-banner', style: 'display:none' });
 
@@ -137,7 +150,11 @@
     var summary = Pack.summarize(pack.tables);
     var ids = Object.keys(summary);
     var lines = ['匯出時間：' + (fmtTime(pack.exportedAt) || '未知') + (pack.exportedBy ? '　匯出者：' + pack.exportedBy : ''),
-      '範圍：' + (pack.scope.kind === 'all' ? '整份資料庫' : '部分車型')];
+      '範圍：' + (pack.scope.kind === 'all' ? '整份資料庫' : pack.scope.kind === 'scenarios' ? '單一情境' : '車型（含所有情境）')];
+    if (pack.scope.kind === 'scenarios') {
+      lines.push('情境：' + (pack.tables.Scenarios.map(function (r) { return r.VehicleTypeID + ' ' + Pack.scenarioLabel(r); }).join('、') || '（沒有）'));
+      return lines.join('\n');
+    }
     lines.push(ids.length
       ? '車型：' + ids.map(function (id) { return id + '（' + summary[id].vehicles + ' 個車系、' + summary[id].scenarios + ' 個情境）'; }).join('、')
       : '車型：（沒有）');
@@ -155,7 +172,9 @@
     dialog.appendChild(el('h3', { text: '匯入資料包：' + fileName }));
     dialog.appendChild(preview);
     dialog.appendChild(el('ul', { class: 'fsl-help' }, [
-      el('li', { text: '合併匯入：只更新資料包裡有的車型（以資料包為準），其他車型不動。適合把同事負責的車型併進來比較。' }),
+      el('li', { text: pack.scope.kind === 'scenarios'
+        ? '合併匯入：只新增或更新資料包裡的情境，同車型的其他情境、車系、科目表都不動（本機沒有這個車型時才連車型一起新增）。'
+        : '合併匯入：只更新資料包裡有的車型（以資料包為準，這個車型的所有情境都會換成資料包的），其他車型不動。適合把同事負責的車型併進來比較。' }),
       el('li', { text: '取代整個資料庫：清掉目前所有資料，換成資料包的內容。適合還原備份或換電腦。' }),
       el('li', { text: '畫面上還沒按「儲存」的修改，匯入後會遺失。' })
     ]));

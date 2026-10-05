@@ -241,6 +241,68 @@ apiX.saveVehicleType({ VehicleTypeID: 'DZ', Notes: '' });
 apiX.saveVehicle({ VehicleID: 'V1', VehicleTypeID: 'DZ', VehicleCode: '撞名車系' });
 throws(() => hostM.previewMerge(Pack.parsePack(JSON.stringify(hostX.exportPack(['DZ'])))), /V1/, '車系代號跟本機其他車型衝突時應該擋下合併');
 
+// 情境資料包：只新增/更新那一個情境，本機同車型的其他情境(包括自己另外建的)、車系、科目表都不動
+{
+  // 小明在合併進來的 DX 底下自己另外建了一個試算情境
+  const mineSc = apiM.createScenarioFrom({ ScenarioID: '', Gate: 'GATE D', ScenarioName: '小明試算', ScenarioType: '現況', VehicleTypeID: 'DX' }, dxSc.ScenarioID, []);
+  const selMine = [{ ScenarioID: mineSc.ScenarioID, VehicleID: 'DX1' }, { ScenarioID: mineSc.ScenarioID, VehicleID: '' }];
+  const mineBefore = numbers(apiM.calculateComparison(selMine), true);
+  const dxCostRows = hostM.readTables().CostOfSales.filter(r => r.ScenarioID === dxSc.ScenarioID).length;
+  // 小華新增一個目標情境：多一個車系 DX2、科目表多一個「保險」
+  apiH.saveVehicle({ VehicleID: 'DX2', VehicleTypeID: 'DX', VehicleCode: '電動客車' });
+  const ins = apiH.addLineItemInline('B', '保險', 'DX');
+  const tgt = apiH.createScenarioFrom({ ScenarioID: '', Gate: 'GATE D', ScenarioName: '目標', ScenarioType: '目標', VehicleTypeID: 'DX' }, dxSc.ScenarioID, []);
+  apiH.saveSalesMixGrid(tgt.ScenarioID, 'DX', [
+    { RowID: '', VehicleID: 'DX1', SalesMixPct: 60, MonthlyVolume: 60, LifeCycleYears: 6, ListPriceTaxIncl: 1800000, ScrapFee: 3990, ScrapFeeTaxStatus: '含稅' },
+    { RowID: '', VehicleID: 'DX2', SalesMixPct: 40, MonthlyVolume: 40, LifeCycleYears: 6, ListPriceTaxIncl: 2100000, ScrapFee: 3990, ScrapFeeTaxStatus: '含稅' }]);
+  apiH.saveCostOfSalesMatrix(tgt.ScenarioID, [{ RowID: '', VehicleID: 'DX2', LineCode: ins.LineCode, Amount: 4321, Currency: 'TWD' }]);
+  const selT = [{ ScenarioID: tgt.ScenarioID, VehicleID: 'DX1' }, { ScenarioID: tgt.ScenarioID, VehicleID: 'DX2' }, { ScenarioID: tgt.ScenarioID, VehicleID: '' }];
+  const tH = numbers(apiH.calculateComparison(selT), true);
+
+  const scPack = Pack.parsePack(JSON.stringify(hostH.exportPack(null, { scenarioIds: [tgt.ScenarioID] })));
+  assert(scPack.scope.kind === 'scenarios' && same(scPack.scope.scenarioIds, [tgt.ScenarioID]) && scPack.tables.Scenarios.length === 1, '情境資料包只該有那一個情境');
+  assert(scPack.tables.CostOfSales.every(r => r.ScenarioID === tgt.ScenarioID), '情境資料包不該帶到其他情境的輸入資料');
+  assert(hostH.state.changesSinceExport > 0, '只匯出一個情境不該被當成「整份備份過了」');
+  const r = hostM.mergePack(scPack);
+  assert(r.mode === 'scenarios' && r.addedScenarios.length === 1 && r.replacedScenarios.length === 0, '情境合併報告不對：' + JSON.stringify(r.addedScenarios));
+  assert(same(r.vehiclesAdded.map(v => v.VehicleID), ['DX2']) && r.linesAdded.some(l => l.LineName === '保險'), '本機缺的車系、科目要補上');
+  assert(/新增/.test(Pack.describeMerge(r)) && /其他情境/.test(Pack.describeMerge(r)), '情境合併說明要講清楚其他情境不動：' + Pack.describeMerge(r));
+  assert(apiM.getScenarios('DX').length === 3, '情境合併後 DX 應該有原本 2 個 + 新的 1 個情境');
+  assert(same(numbers(apiM.calculateComparison(selMine), true), mineBefore), '情境合併不該動到本機自己建的情境');
+  assert(hostM.readTables().CostOfSales.filter(x => x.ScenarioID === dxSc.ScenarioID).length === dxCostRows, '情境合併不該動到同車型其他情境的資料');
+  assert(same(numbers(apiM.calculateComparison(selT), true), tH), '合併進來的情境數字跟對方原本的不同');
+  assert(same(numbers(apiM.calculateComparison(selM), true), mBefore), '情境合併後 DA 的數字變了');
+
+  // 小華改了數字再給一包：同一個情境取代，不會重複
+  apiH.saveCostOfSalesMatrix(tgt.ScenarioID, [{ RowID: '', VehicleID: 'DX1', LineCode: 'b1', Amount: 777777, Currency: 'TWD' }]);
+  const tH2 = numbers(apiH.calculateComparison(selT), true);
+  const r2 = hostM.mergePack(Pack.parsePack(JSON.stringify(hostH.exportPack(null, { scenarioIds: [tgt.ScenarioID] }))));
+  assert(r2.replacedScenarios.length === 1 && r2.addedScenarios.length === 0 && r2.linesAdded.length === 0 && r2.vehiclesAdded.length === 0, '第二次合併同一個情境應該是「取代」，不再補車系科目');
+  assert(apiM.getScenarios('DX').length === 3 && same(numbers(apiM.calculateComparison(selT), true), tH2), '第二次情境合併後數字要更新、情境不重複');
+  assert(same(numbers(apiM.calculateComparison(selMine), true), mineBefore), '第二次情境合併也不該動到本機自己建的情境');
+
+  // 本機沒有這個車型：連同車型、車系、科目表一起新增
+  const hostE = newHost(memoryStorage());
+  apiOf(hostE).getBootstrap('');
+  const rE = hostE.mergePack(Pack.parsePack(JSON.stringify(hostH.exportPack(null, { scenarioIds: [tgt.ScenarioID] }))));
+  assert(rE.addedTypes.length === 1 && apiOf(hostE).getScenarios('DX').length === 1, '本機沒有的車型要整個新增，但只有那一個情境');
+  assert(same(numbers(apiOf(hostE).calculateComparison(selT), true), tH2), '新增車型的情境數字跟對方原本的不同');
+
+  // 同一個科目代碼兩邊名稱不同：合併前要提醒
+  const mineLine = apiM.addLineItemInline('B', '物流費', 'DX');
+  const hisLine = apiH.addLineItemInline('B', '雜支', 'DX');
+  assert(mineLine.LineCode === hisLine.LineCode, '測試前提不成立：兩邊新增的科目應該拿到同一個代碼');
+  const r3 = hostM.previewMerge(Pack.parsePack(JSON.stringify(hostH.exportPack(null, { scenarioIds: [tgt.ScenarioID] })))).report;
+  assert(r3.lineNameConflicts.length === 1 && /⚠/.test(Pack.describeMerge(r3)) && /物流費/.test(Pack.describeMerge(r3)), '科目代碼相同名稱不同時要提醒');
+
+  // 情境代號在本機屬於別的車型：擋下來
+  const daSc = apiM.getScenarios('DA')[0];
+  const fake = Pack.parsePack(JSON.stringify(hostH.exportPack(null, { scenarioIds: [tgt.ScenarioID] })));
+  fake.tables.Scenarios[0].ScenarioID = daSc.ScenarioID;
+  throws(() => hostM.previewMerge(fake), /無法合併/, '情境代號跟本機別的車型衝突時應該擋下');
+  throws(() => hostM.exportPack(null, { scenarioIds: ['不存在'] }), /找不到/, '匯出不存在的情境要有清楚的錯誤');
+}
+
 /* ---- 5. 其他保護 --------------------------------------------------------------------------------- */
 throws(() => hostA.call('sheetToObjects_', ['Vehicles']), /沒有這個後端函式/, '前端不該能呼叫私有函式');
 throws(() => Pack.parsePack('not json'), /JSON/, '壞掉的檔案要有清楚的錯誤');

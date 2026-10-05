@@ -131,13 +131,17 @@
       return result === undefined ? null : JSON.parse(JSON.stringify(result));
     }
 
-    function exportPack(vehicleTypeIds) {
+    /** 匯出資料包：vehicleTypeIds 有值 = 只匯出這幾個車型；opts2.scenarioIds 有值 = 只匯出這幾個情境；都沒有 = 整份 */
+    function exportPack(vehicleTypeIds, opts2) {
+      var scenarioIds = opts2 && opts2.scenarioIds && opts2.scenarioIds.length ? opts2.scenarioIds : null;
       var pack = Pack.buildPack(readTables(), {
         vehicleTypeIds: vehicleTypeIds && vehicleTypeIds.length ? vehicleTypeIds : null,
+        scenarioIds: scenarioIds,
         exportedBy: opts.getUser ? opts.getUser() : ''
       });
-      // 只有整份匯出才算「備份過了」；只匯出某個車型不代表其他車型也有備份
-      if (!vehicleTypeIds || !vehicleTypeIds.length) {
+      if (scenarioIds && !pack.tables.Scenarios.length) throw new Error('找不到要匯出的情境。');
+      // 只有整份匯出才算「備份過了」；只匯出某個車型/情境不代表其他資料也有備份
+      if ((!vehicleTypeIds || !vehicleTypeIds.length) && !scenarioIds) {
         state.changesSinceExport = 0;
         state.lastExportAt = pack.exportedAt;
         persist();
@@ -158,9 +162,9 @@
       return { lineCodePrefix: C.LINE_CODE_PREFIX, builtInLineCodes: C.PL_LINE_ITEMS.map(function (d) { return d.LineCode; }) };
     }
     /** 合併匯入的預覽：不改資料，回傳要給使用者確認的報告 */
-    function previewMerge(pack) { return Pack.mergePack(readTables(), pack.tables, mergeContext()); }
+    function previewMerge(pack) { return Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope); }
     function mergePack(pack) {
-      var merged = Pack.mergePack(readTables(), pack.tables, mergeContext());
+      var merged = Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope);
       writeTables(merged.tables);
       state.changesSinceExport++;
       persist();

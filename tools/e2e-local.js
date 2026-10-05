@@ -305,13 +305,30 @@ async function main() {
   assert(pack.tables.VehicleTypes.length === 3, '匯出的資料包應該有 3 個車型');
   assert(!/尚未匯出/.test(await page.textContent('#fs-local-bar')), '整份匯出後「尚未匯出」提示應該消失');
 
-  // 只匯出目前車型(DE)，之後拿來測合併
+  // 只匯出車型(DE)，之後拿來測合併
   await page.selectOption('#vehicletype-selector', 'DE');
   await page.waitForTimeout(300);
-  const [dlDe] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar button:has-text("匯出目前車型")')]);
+  const [dlDe] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar button:has-text("匯出車型")')]);
   const deFile = path.join(tmp, dlDe.suggestedFilename());
   await dlDe.saveAs(deFile);
-  assert(JSON.parse(fs.readFileSync(deFile, 'utf8')).tables.VehicleTypes.map(r => r.VehicleTypeID).join() === 'DE', '「匯出目前車型」應該只有 DE');
+  assert(JSON.parse(fs.readFileSync(deFile, 'utf8')).tables.VehicleTypes.map(r => r.VehicleTypeID).join() === 'DE', '「匯出車型」應該只有 DE');
+
+  // 匯出情境：只有上方選的那一個情境
+  await page.selectOption('#vehicletype-selector', 'DA');
+  const daIds = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getScenarios('DA'))).then(l => l.map(x => x.ScenarioID).sort());
+  // 換車型後情境選單會重建：等到選單裡剛好是 DA 的情境、而且已經選定一個
+  await page.waitForFunction(ids => {
+    const sel = document.getElementById('scenario-selector');
+    const vals = Array.from(sel.options).map(o => o.value).filter(v => v).sort();
+    return JSON.stringify(vals) === JSON.stringify(ids) && ids.indexOf(sel.value) !== -1;
+  }, daIds, { timeout: 10000 });
+  const daScenarioCount = await page.$$eval('#scenario-selector option', os => os.filter(o => o.value).length);
+  const curScenario = await page.inputValue('#scenario-selector');
+  const [dlSc] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar button:has-text("匯出情境")')]);
+  const scPack = JSON.parse(fs.readFileSync(await dlSc.path(), 'utf8'));
+  assert(daScenarioCount >= 2 && scPack.scope.kind === 'scenarios' && scPack.tables.Scenarios.length === 1 && scPack.tables.Scenarios[0].ScenarioID === curScenario,
+    '「匯出情境」應該只有目前選的情境：' + JSON.stringify(scPack.scope));
+  assert(/^FS資料包_DA_/.test(dlSc.suggestedFilename()), '情境資料包的檔名應該帶車型與情境：' + dlSc.suggestedFilename());
 
   // 清空 → 用匯入取代 → 資料回來
   await Promise.all([page.waitForNavigation(), page.selectOption('#fs-local-bar .fsl-more', 'reset')]);

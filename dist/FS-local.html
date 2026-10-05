@@ -984,8 +984,10 @@
  * 地端版的資料平常暫存在瀏覽器裡，但瀏覽器暫存不是可靠的保存方式(清快取、換電腦就沒了)，
  * 也沒辦法跟同事共用。資料包就是「把資料庫整份(或某幾個車型)抽成一個檔案」：
  *   - 封存 / 備份：定期匯出一包，就是一份完整的快照
- *   - 交換：每個人負責自己的車型，匯出「目前車型」那一包給別人；別人用「合併匯入」併進自己的資料庫，
+ *   - 交換：每個人負責自己的車型，「匯出車型」(含這個車型的所有情境)那一包給別人；別人用「合併匯入」併進自己的資料庫，
  *     就能在儀表板上跨車型並排比較
+ *   - 只交一個情境：「匯出情境」只帶目前選的情境(加上對方沒有這個車型時需要的車型、車系、科目表)，
+ *     合併匯入時只新增/更新這個情境，對方同車型的其他情境不動
  *
  * 內容就是各張表的列(欄位名稱跟 Constants.gs 的 SCHEMA 一致)，沒有公式；PLResult 是計算快照，
  * 隨時可以重算，所以不放。舊版資料包少了的欄位一律視為空白，多出來(已經不用)的欄位載入時忽略。
@@ -1074,23 +1076,46 @@
   }
 
   /**
-   * 建立資料包。meta.vehicleTypeIds 有值時只匯出這幾個車型(一個人負責的範圍)，否則整份資料庫。
+   * 只留指定的情境：情境本身、掛在情境底下的資料、這些情境的快照；
+   * 車型主檔、車系、科目表、全域參數照「整個車型」帶著，對方沒有這個車型時才建得起來。
+   */
+  function filterByScenarios(tables, scenarioIds) {
+    var ids = set_(scenarioIds);
+    var scenarios = (tables.Scenarios || []).filter(function (r) { return ids[str_(r.ScenarioID)]; });
+    var typeIds = Object.keys(set_(scenarios.map(function (r) { return r.VehicleTypeID; })));
+    var out = filterByVehicleTypes(tables, typeIds);
+    out.Scenarios = scenarios;
+    Object.keys(SCENARIO_TABLES).forEach(function (name) {
+      out[name] = out[name].filter(function (r) { return ids[str_(r.ScenarioID)] || (name === 'Parameters' && !str_(r.ScenarioID)); });
+    });
+    out.Snapshots = out.Snapshots.filter(function (r) { return ids[str_(r.ScenarioID)]; });
+    return out;
+  }
+
+  /**
+   * 建立資料包。meta.scenarioIds 有值時只匯出這幾個情境；meta.vehicleTypeIds 有值時只匯出這幾個車型(一個人負責的範圍)；
+   * 都沒有就是整份資料庫。
    */
   function buildPack(tables, meta) {
     meta = meta || {};
-    var partial = meta.vehicleTypeIds && meta.vehicleTypeIds.length;
-    var data = partial ? filterByVehicleTypes(tables, meta.vehicleTypeIds) : tables;
+    var byScenario = meta.scenarioIds && meta.scenarioIds.length;
+    var partial = byScenario || (meta.vehicleTypeIds && meta.vehicleTypeIds.length);
+    var data = byScenario ? filterByScenarios(tables, meta.scenarioIds)
+      : partial ? filterByVehicleTypes(tables, meta.vehicleTypeIds) : tables;
     var outTables = {};
     PACK_TABLES.forEach(function (n) { outTables[n] = clone_(data[n] || []); });
     if (!partial && data[AUDIT_TABLE] && data[AUDIT_TABLE].length) outTables[AUDIT_TABLE] = clone_(data[AUDIT_TABLE]);
+    var typeIdsOf = function () { return (outTables.VehicleTypes || []).map(function (r) { return str_(r.VehicleTypeID); }); };
     return {
       format: FORMAT,
       formatVersion: FORMAT_VERSION,
       exportedAt: meta.exportedAt || new Date().toISOString(),
       exportedBy: meta.exportedBy || '',
-      scope: partial
-        ? { kind: 'vehicleTypes', vehicleTypeIds: meta.vehicleTypeIds.map(str_) }
-        : { kind: 'all', vehicleTypeIds: (outTables.VehicleTypes || []).map(function (r) { return str_(r.VehicleTypeID); }) },
+      scope: byScenario
+        ? { kind: 'scenarios', vehicleTypeIds: typeIdsOf(), scenarioIds: outTables.Scenarios.map(function (r) { return str_(r.ScenarioID); }) }
+        : partial
+          ? { kind: 'vehicleTypes', vehicleTypeIds: meta.vehicleTypeIds.map(str_) }
+          : { kind: 'all', vehicleTypeIds: typeIdsOf() },
       tables: outTables
     };
   }
@@ -1131,19 +1156,23 @@
   }
 
   /**
-   * 合併匯入：資料包裡有的車型，以資料包為準整個換掉(本機這幾個車型的車系、情境、科目表與所有輸入資料都會被取代)；
-   * 資料包裡沒有的車型完全不動。對應「每個人負責自己的車型」：誰負責的車型，誰的資料包說了算。
+   * 合併匯入。回傳 { tables, report }，不修改傳進來的資料。
+   *
+   * 車型資料包(scope.kind 不是 'scenarios')：資料包裡有的車型，以資料包為準整個換掉(本機這幾個車型的車系、情境、
+   * 科目表與所有輸入資料都會被取代)；資料包裡沒有的車型完全不動。對應「每個人負責自己的車型」：誰負責的車型，誰的資料包說了算。
+   *
+   * 情境資料包(scope.kind === 'scenarios')：只新增/更新資料包裡的情境(同一個情境代號 = 同一個情境，整個換成資料包的)，
+   * 本機同車型的其他情境、車系、科目表都不動；本機沒有的車系、科目才補進來。本機根本沒有這個車型時，連同車型、車系、科目表一起新增。
    *
    * 科目表是跟著車型走的(每個車型各一份)，所以兩個人各自新增的科目就算拿到同一個代碼也不會互相干擾，
    * 不需要再逐一比對、改號。舊版資料包(只有一份全域科目表)的科目表，視為資料包裡每個車型各自的科目表。
    * 自訂參數(ParamDefs)是全域共用的：本機沒有的參數才加進來，同名參數保留本機的設定。
-   *
-   * 回傳 { tables, report }，不修改傳進來的資料。
    */
-  function mergePack(localTables, incomingTables, ctx) {
+  function mergePack(localTables, incomingTables, ctx, scope) {
     var local = clone_(localTables);
     var incoming = clone_(incomingTables);
     PACK_TABLES.concat([AUDIT_TABLE]).forEach(function (n) { local[n] = local[n] || []; incoming[n] = incoming[n] || []; });
+    var byScenario = !!(scope && scope.kind === 'scenarios');
 
     var types = set_([].concat(
       incoming.VehicleTypes.map(function (r) { return r.VehicleTypeID; }),
@@ -1151,10 +1180,14 @@
       incoming.Scenarios.map(function (r) { return r.VehicleTypeID; })
     ).filter(function (id) { return str_(id); }));
     var typeIds = Object.keys(types);
+    var localTypes = set_(local.VehicleTypes.map(function (r) { return r.VehicleTypeID; })
+      .concat(local.Scenarios.map(function (r) { return r.VehicleTypeID; })));
 
     var report = {
+      mode: byScenario ? 'scenarios' : 'vehicleTypes',
       replacedTypes: [], addedTypes: [], chartsReplaced: [], paramDefsAdded: [],
-      globalParamsAdded: 0, globalParamsKept: [], rowIdsReassigned: 0
+      globalParamsAdded: 0, globalParamsKept: [], rowIdsReassigned: 0,
+      replacedScenarios: [], addedScenarios: [], vehiclesAdded: [], linesAdded: [], lineNameConflicts: []
     };
     var localSummary = summarize(local);
     var incomingSummary = summarize(incoming);
@@ -1168,7 +1201,7 @@
     local.Vehicles.forEach(function (r) { localVehicleType[str_(r.VehicleID)] = str_(r.VehicleTypeID); });
     incoming.Vehicles.forEach(function (r) {
       var owner = localVehicleType[str_(r.VehicleID)];
-      if (owner && !types[owner]) {
+      if (owner && owner !== str_(r.VehicleTypeID) && (byScenario || !types[owner])) {
         throw new Error('車系代號「' + r.VehicleID + '」在本機屬於車型 ' + owner + '，資料包裡卻屬於車型 ' +
           r.VehicleTypeID + '。請先在其中一邊把車系改名後再合併。');
       }
@@ -1177,19 +1210,63 @@
     local.Scenarios.forEach(function (r) { localScenarioType[str_(r.ScenarioID)] = str_(r.VehicleTypeID); });
     incoming.Scenarios.forEach(function (r) {
       var owner = localScenarioType[str_(r.ScenarioID)];
-      if (owner && !types[owner]) {
+      if (owner && owner !== str_(r.VehicleTypeID) && (byScenario || !types[owner])) {
         throw new Error('情境代號「' + r.ScenarioID + '」同時出現在本機車型 ' + owner + ' 與資料包車型 ' + r.VehicleTypeID + '，無法合併。');
       }
     });
 
-    // ---- 科目表：資料包裡的車型換成資料包的那一份 ----
+    // ---- 科目表、車型主檔、車系，以及要拿掉的本機情境 ----
     var incomingCharts = chartsByType_(incoming.PLLineItems, typeIds);
     var localTemplateEmpty = !local.PLLineItems.some(function (r) { return !str_(r.VehicleTypeID) && str_(r.LineID); });
-    local.PLLineItems = local.PLLineItems.filter(function (r) { return !types[str_(r.VehicleTypeID)]; });
-    typeIds.forEach(function (id) {
-      if (incomingCharts[id].length) report.chartsReplaced.push(id);
-      local.PLLineItems = local.PLLineItems.concat(incomingCharts[id]);
-    });
+    var dropScenarios;
+    if (!byScenario) {
+      // 車型資料包：這幾個車型整個換成資料包的
+      local.PLLineItems = local.PLLineItems.filter(function (r) { return !types[str_(r.VehicleTypeID)]; });
+      typeIds.forEach(function (id) {
+        if (incomingCharts[id].length) report.chartsReplaced.push(id);
+        local.PLLineItems = local.PLLineItems.concat(incomingCharts[id]);
+      });
+      dropScenarios = set_(local.Scenarios.filter(function (r) { return types[str_(r.VehicleTypeID)]; })
+        .map(function (r) { return r.ScenarioID; }));
+      local.VehicleTypes = local.VehicleTypes.filter(function (r) { return !types[str_(r.VehicleTypeID)]; });
+      local.Vehicles = local.Vehicles.filter(function (r) { return !types[str_(r.VehicleTypeID)]; });
+      local.VehicleTypes = local.VehicleTypes.concat(incoming.VehicleTypes);
+      local.Vehicles = local.Vehicles.concat(incoming.Vehicles);
+    } else {
+      // 情境資料包：本機沒有的車型整個新增；本機已有的車型只補本機缺的車系、科目
+      var localCharts = chartsByType_(local.PLLineItems, typeIds.filter(function (id) { return localTypes[id]; }));
+      typeIds.forEach(function (id) {
+        if (!localTypes[id]) {
+          local.VehicleTypes = local.VehicleTypes.concat(incoming.VehicleTypes.filter(function (r) { return str_(r.VehicleTypeID) === id; }));
+          local.Vehicles = local.Vehicles.concat(incoming.Vehicles.filter(function (r) { return str_(r.VehicleTypeID) === id; }));
+          local.PLLineItems = local.PLLineItems.concat(incomingCharts[id]);
+          return;
+        }
+        // 本機這個車型還在沿用範本(沒有自己的一份)：先把範本複製成它自己的，才補得進科目
+        if (!local.PLLineItems.some(function (r) { return str_(r.VehicleTypeID) === id; })) local.PLLineItems = local.PLLineItems.concat(localCharts[id]);
+        var byCode = {};
+        localCharts[id].forEach(function (r) { byCode[str_(r.LineCode)] = r; });
+        incomingCharts[id].forEach(function (r) {
+          var mine = byCode[str_(r.LineCode)];
+          if (!mine) {
+            local.PLLineItems.push(r);
+            report.linesAdded.push({ VehicleTypeID: id, LineCode: str_(r.LineCode), LineName: str_(r.LineName) });
+          } else if (str_(mine.LineName) !== str_(r.LineName)) {
+            report.lineNameConflicts.push({ VehicleTypeID: id, LineCode: str_(r.LineCode), local: str_(mine.LineName), incoming: str_(r.LineName) });
+          }
+        });
+        var haveVehicle = set_(local.Vehicles.map(function (r) { return r.VehicleID; }));
+        incoming.Vehicles.filter(function (r) { return str_(r.VehicleTypeID) === id && !haveVehicle[str_(r.VehicleID)]; }).forEach(function (r) {
+          local.Vehicles.push(r);
+          report.vehiclesAdded.push({ VehicleTypeID: id, VehicleID: str_(r.VehicleID), VehicleCode: str_(r.VehicleCode) });
+        });
+      });
+      dropScenarios = set_(incoming.Scenarios.map(function (r) { return r.ScenarioID; }));
+      incoming.Scenarios.forEach(function (r) {
+        var entry = { VehicleTypeID: str_(r.VehicleTypeID), ScenarioID: str_(r.ScenarioID), label: scenarioLabel_(r) };
+        (localScenarioType[str_(r.ScenarioID)] ? report.replacedScenarios : report.addedScenarios).push(entry);
+      });
+    }
     // 本機還是全新資料庫(沒有範本)時，順便把資料包的範本帶進來
     if (localTemplateEmpty) {
       incoming.PLLineItems.filter(function (r) { return !str_(r.VehicleTypeID) && str_(r.LineID); })
@@ -1203,20 +1280,11 @@
       report.paramDefsAdded.push(str_(r.ParamName));
     });
 
-    // ---- 拿掉本機這幾個車型的舊資料 ----
-    var dropScenarios = set_(local.Scenarios.filter(function (r) { return types[str_(r.VehicleTypeID)]; })
-      .map(function (r) { return r.ScenarioID; }));
-    local.VehicleTypes = local.VehicleTypes.filter(function (r) { return !types[str_(r.VehicleTypeID)]; });
-    local.Vehicles = local.Vehicles.filter(function (r) { return !types[str_(r.VehicleTypeID)]; });
-    local.Scenarios = local.Scenarios.filter(function (r) { return !types[str_(r.VehicleTypeID)]; });
+    // ---- 情境：拿掉本機要被取代的，放進資料包的 ----
+    local.Scenarios = local.Scenarios.filter(function (r) { return !dropScenarios[str_(r.ScenarioID)]; }).concat(incoming.Scenarios);
     Object.keys(SCENARIO_TABLES).forEach(function (name) {
       local[name] = local[name].filter(function (r) { return !dropScenarios[str_(r.ScenarioID)]; });
     });
-
-    // ---- 放進資料包的資料 ----
-    local.VehicleTypes = local.VehicleTypes.concat(incoming.VehicleTypes);
-    local.Vehicles = local.Vehicles.concat(incoming.Vehicles);
-    local.Scenarios = local.Scenarios.concat(incoming.Scenarios);
     Object.keys(SCENARIO_TABLES).forEach(function (name) {
       var pk = SCENARIO_TABLES[name];
       var usedPk = set_(local[name].map(function (r) { return r[pk]; }));
@@ -1264,19 +1332,45 @@
 
     return { tables: local, report: report };
   }
+  function scenarioLabel_(r) {
+    return [str_(r.Gate), str_(r.ScenarioName)].filter(function (x) { return x; }).join(' ') + (str_(r.ScenarioType) ? '（' + str_(r.ScenarioType) + '）' : '');
+  }
 
   /** 合併結果寫成給使用者確認的文字 */
   function describeMerge(report) {
     var lines = [];
     function counts(s) { return s ? s.vehicles + ' 個車系、' + s.scenarios + ' 個情境' : '無資料'; }
-    report.replacedTypes.forEach(function (t) {
-      lines.push('・車型 ' + t.VehicleTypeID + '：本機的資料（' + counts(t.local) + '）會被資料包（' + counts(t.incoming) + '）取代');
-    });
-    report.addedTypes.forEach(function (t) {
-      lines.push('・車型 ' + t.VehicleTypeID + '：新增（' + counts(t.incoming) + '）');
-    });
-    if (report.chartsReplaced.length) {
-      lines.push('・科目表跟著車型一起換成資料包的版本：' + report.chartsReplaced.join('、') + '（其他車型的科目表不受影響）');
+    if (report.mode === 'scenarios') {
+      report.replacedScenarios.forEach(function (s) {
+        lines.push('・車型 ' + s.VehicleTypeID + ' 的情境「' + s.label + '」：本機已有，會被資料包的版本取代');
+      });
+      report.addedScenarios.forEach(function (s) {
+        lines.push('・車型 ' + s.VehicleTypeID + ' 的情境「' + s.label + '」：新增');
+      });
+      report.addedTypes.forEach(function (t) {
+        lines.push('・車型 ' + t.VehicleTypeID + '：本機沒有這個車型，連同車型、' + t.incoming.vehicles + ' 個車系與科目表一起新增');
+      });
+      if (report.replacedTypes.length) lines.push('・本機同車型的其他情境、車系、科目表都不動');
+      if (report.vehiclesAdded.length) {
+        lines.push('・補上本機沒有的車系：' + report.vehiclesAdded.map(function (v) { return v.VehicleTypeID + ' ' + (v.VehicleCode || v.VehicleID); }).join('、'));
+      }
+      if (report.linesAdded.length) {
+        lines.push('・補上本機科目表沒有的科目：' + report.linesAdded.map(function (l) { return l.VehicleTypeID + ' ' + l.LineName + '(' + l.LineCode + ')'; }).join('、'));
+      }
+      report.lineNameConflicts.forEach(function (c) {
+        lines.push('・⚠ 車型 ' + c.VehicleTypeID + ' 的科目代碼 ' + c.LineCode + ' 兩邊名稱不同（本機「' + c.local + '」、資料包「' + c.incoming +
+          '」），這一列的數字會記在本機的「' + c.local + '」');
+      });
+    } else {
+      report.replacedTypes.forEach(function (t) {
+        lines.push('・車型 ' + t.VehicleTypeID + '：本機的資料（' + counts(t.local) + '）會被資料包（' + counts(t.incoming) + '）取代');
+      });
+      report.addedTypes.forEach(function (t) {
+        lines.push('・車型 ' + t.VehicleTypeID + '：新增（' + counts(t.incoming) + '）');
+      });
+      if (report.chartsReplaced.length) {
+        lines.push('・科目表跟著車型一起換成資料包的版本：' + report.chartsReplaced.join('、') + '（其他車型的科目表不受影響）');
+      }
     }
     if (report.snapshotsAdded) lines.push('・新增 ' + report.snapshotsAdded + ' 份情境快照（本機原有的快照保留）');
     if (report.paramDefsAdded.length) {
@@ -1291,7 +1385,8 @@
   return {
     FORMAT: FORMAT, FORMAT_VERSION: FORMAT_VERSION, PACK_TABLES: PACK_TABLES,
     AUDIT_TABLE: AUDIT_TABLE, AUDIT_HEADERS: AUDIT_HEADERS,
-    buildPack: buildPack, parsePack: parsePack, filterByVehicleTypes: filterByVehicleTypes,
+    buildPack: buildPack, parsePack: parsePack, filterByVehicleTypes: filterByVehicleTypes, filterByScenarios: filterByScenarios,
+    scenarioLabel: scenarioLabel_,
     mergePack: mergePack, describeMerge: describeMerge, summarize: summarize
   };
 }));
@@ -6298,13 +6393,17 @@ function reportMaintenance_(message) {
       return result === undefined ? null : JSON.parse(JSON.stringify(result));
     }
 
-    function exportPack(vehicleTypeIds) {
+    /** 匯出資料包：vehicleTypeIds 有值 = 只匯出這幾個車型；opts2.scenarioIds 有值 = 只匯出這幾個情境；都沒有 = 整份 */
+    function exportPack(vehicleTypeIds, opts2) {
+      var scenarioIds = opts2 && opts2.scenarioIds && opts2.scenarioIds.length ? opts2.scenarioIds : null;
       var pack = Pack.buildPack(readTables(), {
         vehicleTypeIds: vehicleTypeIds && vehicleTypeIds.length ? vehicleTypeIds : null,
+        scenarioIds: scenarioIds,
         exportedBy: opts.getUser ? opts.getUser() : ''
       });
-      // 只有整份匯出才算「備份過了」；只匯出某個車型不代表其他車型也有備份
-      if (!vehicleTypeIds || !vehicleTypeIds.length) {
+      if (scenarioIds && !pack.tables.Scenarios.length) throw new Error('找不到要匯出的情境。');
+      // 只有整份匯出才算「備份過了」；只匯出某個車型/情境不代表其他資料也有備份
+      if ((!vehicleTypeIds || !vehicleTypeIds.length) && !scenarioIds) {
         state.changesSinceExport = 0;
         state.lastExportAt = pack.exportedAt;
         persist();
@@ -6325,9 +6424,9 @@ function reportMaintenance_(message) {
       return { lineCodePrefix: C.LINE_CODE_PREFIX, builtInLineCodes: C.PL_LINE_ITEMS.map(function (d) { return d.LineCode; }) };
     }
     /** 合併匯入的預覽：不改資料，回傳要給使用者確認的報告 */
-    function previewMerge(pack) { return Pack.mergePack(readTables(), pack.tables, mergeContext()); }
+    function previewMerge(pack) { return Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope); }
     function mergePack(pack) {
-      var merged = Pack.mergePack(readTables(), pack.tables, mergeContext());
+      var merged = Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope);
       writeTables(merged.tables);
       state.changesSinceExport++;
       persist();
@@ -13700,6 +13799,11 @@ window.addEventListener('DOMContentLoaded', () => {
     var sel = document.getElementById('vehicletype-selector');
     return sel ? sel.value : '';
   }
+  function currentScenario() {
+    var sel = document.getElementById('scenario-selector');
+    var opt = sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
+    return sel && sel.value ? { id: sel.value, label: opt ? opt.textContent.trim() : sel.value } : null;
+  }
 
   function download(pack, label) {
     var blob = new Blob([JSON.stringify(pack, null, 1)], { type: 'application/json' });
@@ -13726,10 +13830,18 @@ window.addEventListener('DOMContentLoaded', () => {
   var exportAllBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出全部', title: '整份資料庫存成一個資料包（備份用）', onclick: function () {
     download(host.exportPack(null), '全部');
   } });
-  var exportTypeBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出目前車型', title: '只匯出上方選的車型，交給同事「合併匯入」', onclick: function () {
+  var exportTypeBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出車型', title: '匯出上方選的車型：所有情境、車系與科目表，交給同事「合併匯入」（對方這個車型會整個換成這一包）', onclick: function () {
     var id = currentVehicleTypeId();
     if (!id) { window.alert('請先在上方選擇車型。'); return; }
     download(host.exportPack([id]), id);
+  } });
+  var exportScenarioBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯出情境', title: '只匯出上方選的情境，交給同事「合併匯入」（對方只新增/更新這個情境，同車型的其他情境不動）', onclick: function () {
+    var id = currentVehicleTypeId(), sc = currentScenario();
+    if (!id || !sc) { window.alert('請先在上方選擇車型與情境。'); return; }
+    var pack;
+    try { pack = host.exportPack(null, { scenarioIds: [sc.id] }); }
+    catch (e) { window.alert('無法匯出：\n' + e.message); return; }
+    download(pack, id + '_' + sc.label);
   } });
   var importBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯入資料包…', onclick: function () { fileInput.click(); } });
   var moreSel = el('select', { class: 'fsl-more', title: '其他' }, [
@@ -13749,7 +13861,7 @@ window.addEventListener('DOMContentLoaded', () => {
     el('span', { class: 'fsl-user' }, [document.createTextNode('使用者：'), userBtn]),
     statusEl,
     el('span', { class: 'fsl-spacer' }),
-    exportAllBtn, exportTypeBtn, importBtn, moreSel, fileInput
+    exportAllBtn, exportTypeBtn, exportScenarioBtn, importBtn, moreSel, fileInput
   ]);
   var banner = el('div', { id: 'fs-local-banner', style: 'display:none' });
 
@@ -13801,7 +13913,11 @@ window.addEventListener('DOMContentLoaded', () => {
     var summary = Pack.summarize(pack.tables);
     var ids = Object.keys(summary);
     var lines = ['匯出時間：' + (fmtTime(pack.exportedAt) || '未知') + (pack.exportedBy ? '　匯出者：' + pack.exportedBy : ''),
-      '範圍：' + (pack.scope.kind === 'all' ? '整份資料庫' : '部分車型')];
+      '範圍：' + (pack.scope.kind === 'all' ? '整份資料庫' : pack.scope.kind === 'scenarios' ? '單一情境' : '車型（含所有情境）')];
+    if (pack.scope.kind === 'scenarios') {
+      lines.push('情境：' + (pack.tables.Scenarios.map(function (r) { return r.VehicleTypeID + ' ' + Pack.scenarioLabel(r); }).join('、') || '（沒有）'));
+      return lines.join('\n');
+    }
     lines.push(ids.length
       ? '車型：' + ids.map(function (id) { return id + '（' + summary[id].vehicles + ' 個車系、' + summary[id].scenarios + ' 個情境）'; }).join('、')
       : '車型：（沒有）');
@@ -13819,7 +13935,9 @@ window.addEventListener('DOMContentLoaded', () => {
     dialog.appendChild(el('h3', { text: '匯入資料包：' + fileName }));
     dialog.appendChild(preview);
     dialog.appendChild(el('ul', { class: 'fsl-help' }, [
-      el('li', { text: '合併匯入：只更新資料包裡有的車型（以資料包為準），其他車型不動。適合把同事負責的車型併進來比較。' }),
+      el('li', { text: pack.scope.kind === 'scenarios'
+        ? '合併匯入：只新增或更新資料包裡的情境，同車型的其他情境、車系、科目表都不動（本機沒有這個車型時才連車型一起新增）。'
+        : '合併匯入：只更新資料包裡有的車型（以資料包為準，這個車型的所有情境都會換成資料包的），其他車型不動。適合把同事負責的車型併進來比較。' }),
       el('li', { text: '取代整個資料庫：清掉目前所有資料，換成資料包的內容。適合還原備份或換電腦。' }),
       el('li', { text: '畫面上還沒按「儲存」的修改，匯入後會遺失。' })
     ]));
