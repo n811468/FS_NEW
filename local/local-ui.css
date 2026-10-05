@@ -23,10 +23,17 @@
 #fs-local-banner { align-items: center; gap: 12px; padding: 9px 28px; font-size: 13px; }
 #fs-local-banner.fsl-banner-info { background: #edf1fe; color: #213c91; }
 #fs-local-banner.fsl-banner-danger { background: #fdeeee; color: #8b1f1f; }
+#fs-local-banner .fsl-banner-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; margin-left: 8px; }
 #fs-local-dialog { border: none; border-radius: 14px; padding: 22px 24px; max-width: 640px; width: calc(100% - 32px); box-shadow: 0 10px 30px -12px rgba(16,27,51,.35); }
 #fs-local-dialog::backdrop { background: rgba(16,27,51,.42); }
 #fs-local-dialog h3 { margin: 0 0 12px; font-size: 16px; }
 #fs-local-dialog .fsl-pre { white-space: pre-wrap; background: #f8f9fc; border: 1px solid #e3e7ef; border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: 13px; line-height: 1.6; max-height: 50vh; overflow: auto; }
 #fs-local-dialog .fsl-help { font-size: 12px; color: #475069; padding-left: 18px; line-height: 1.7; }
 #fs-local-dialog .fsl-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+@media (max-width: 600px) {
+  #fs-local-bar { padding: 6px 14px; gap: 6px; }
+  #fs-local-bar .fsl-badge { display: none; }
+  #fs-local-bar .fsl-status { order: 9; width: 100%; font-size: 11.5px; }
+  #fs-local-banner { padding: 8px 14px; flex-wrap: wrap; }
+}
 @media print { #fs-local-bar, #fs-local-banner { display: none !important; } }

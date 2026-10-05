@@ -14,7 +14,7 @@ function renderMastersPanel() {
         ? '<p class="muted">請先在上面建立車型，或在右上角選擇車型。</p>'
         : gridShell(key, ENTITIES[key].label, ENTITIES[key].intro)}
     </div>`;
-  panel.innerHTML = section('vehicletypes', '車型') +
+  panel.innerHTML = '<div id="master-next"></div>' + section('vehicletypes', '車型') +
     section('vehicles', `車系${vt ? `<span class="muted">（${esc(vt)}）</span>` : ''}`) +
     section('scenarios', `情境${vt ? `<span class="muted">（${esc(vt)}）</span>` : ''}`) +
     (vt ? snapshotCardShellHtml_() : '');
@@ -58,7 +58,7 @@ function drawEntityGrid(key) {
 
   const sortable = cfg.sortable && rows.length > 1;
   const body = rows.length
-    ? rows.map((r, i) => `<tr${r.__existing ? '' : ' class="new-row"'} data-key="${i}">
+    ? rows.map((r, i) => `<tr${!r.__existing ? ' class="new-row"' : key === 'scenarios' && r.ScenarioID === currentScenarioId ? ' class="current-row" data-tip="右上角目前選的情境"' : ''} data-key="${i}">
         ${sortable ? `<td class="row-actions">${r.__existing ? dragHandleHtml() : ''}</td>` : ''}
         ${cfg.columns.map(col => entityCellHtml(key, i, col, r)).join('')}
         <td class="row-actions">${entityRowActionHtml(key, i, r, rows.length)}</td>
@@ -102,7 +102,47 @@ function drawEntityGrid(key) {
     setStatus(key, pendingStatus.text, pendingStatus.cls);
     pendingStatus = null;
   }
+  updateMasterNext_();
 }
+
+/** 右上角換了情境(例如剛建立的情境自動被選起來)：情境表格的標示列、快照按鈕跟著換，不必整頁重畫 */
+function syncMastersScenarioMarks_() {
+  const rows = entityRows.scenarios || [];
+  document.querySelectorAll('#entity-body-scenarios tr[data-key]').forEach(tr => {
+    const r = rows[Number(tr.dataset.key)];
+    const on = !!(r && r.__existing && r.ScenarioID === currentScenarioId);
+    tr.classList.toggle('current-row', on);
+    if (on) tr.setAttribute('data-tip', '右上角目前選的情境'); else if (r && r.__existing) tr.removeAttribute('data-tip');
+  });
+  const snapBtn = document.querySelector('#snapshot-card .card-head button');
+  if (snapBtn) { snapBtn.disabled = !currentScenarioId; if (currentScenarioId) snapBtn.removeAttribute('data-tip'); }
+}
+
+/** 頁首的「下一步」：剛建好車型的人不知道接著要做什麼，照 車系 → 情境 → 輸入資料 的順序提示一次 */
+function updateMasterNext_() {
+  const box = document.getElementById('master-next');
+  if (!box) return;
+  const has = key => (entityRows[key] || []).some(r => r.__existing);
+  let html = '';
+  if (!currentVehicleTypeId) {
+    if (entityRows.vehicletypes && !has('vehicletypes')) html = '<b>第 1 步</b>：按「＋ 新增車型」建立第一個車型。';
+  } else if (entityRows.vehicles && !has('vehicles')) {
+    html = `<b>下一步</b>：在下面「車系」按「＋ 新增一列」，加上 ${esc(currentVehicleTypeId)} 的車系（標準型、豪華型…），按儲存。`;
+  } else if (entityRows.scenarios && !has('scenarios')) {
+    html = '<b>下一步</b>：在下面「情境」按「＋ 新增情境…」，先建立「現況」情境。';
+  } else if (entityRows.scenarios && has('scenarios') && entityRows.vehicles && has('vehicles') && !localStorage_get_('fs-master-next-done')) {
+    html = `<b>下一步</b>：右上角選好情境後，依序填
+      <button type="button" class="link-btn" onclick="switchTab('salesmix')">銷售構成與售價</button> →
+      <button type="button" class="link-btn" onclick="switchTab('costs')">成本與費用</button> →
+      <button type="button" class="link-btn" onclick="switchTab('devinvestment')">開發總投</button>，
+      就能在 <button type="button" class="link-btn" onclick="switchTab('dashboard')">損益儀表板</button> 看到結果。
+      要做目標情境時，新增情境選「目標」並以現況為基礎帶入資料。
+      <button type="button" class="link-btn" onclick="localStorage_set_('fs-master-next-done', '1');updateMasterNext_()">不再顯示</button>`;
+  }
+  box.innerHTML = html ? `<div class="callout info master-next"><div>${html}</div></div>` : '';
+}
+function localStorage_get_(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function localStorage_set_(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 暫存被封鎖就算了 */ } }
 
 function entityCellHtml(key, i, col, row) {
   const value = row[col.name] === undefined || row[col.name] === null ? '' : row[col.name];
@@ -149,7 +189,7 @@ function renameEntityRow(key, i) {
     body: '<p class="help">所有引用這個代號的資料（車系、情境、銷售構成、成本、科目表…）會一起改成新代號。</p>',
     fields: [{ name: 'id', label: '新的代號', value: oldId }],
     okText: '修改',
-    validate: v => !v.id.trim() ? '代號不能空白' : ''
+    validate: v => !v.id.trim() ? '代號不能空白' : codeProblem_('代號', v.id.trim())
   }).then(v => {
     if (!v) return;
     const newId = v.id.trim();
@@ -222,9 +262,12 @@ function deleteEntityRow(key, i) {
   const cfg = ENTITIES[key];
   const row = entityRows[key][i];
   const label = row[cfg.pk] && cfg.pk !== 'ScenarioID' ? row[cfg.pk] : scenarioLabel(row);
-  confirmModal('刪除「' + label + '」？', key === 'vehicletypes'
-    ? '車型與它自己的科目表會一起刪除。底下的車系與情境資料不會被刪，但會看不到。這個動作無法復原。'
-    : '這個動作無法復原。', '刪除', true).then(ok => {
+  const body = key === 'vehicletypes'
+    ? '底下的車系、情境（含所有輸入的數字、作法、說明）、情境快照與這個車型的科目表會<b>一起刪除</b>。這個動作無法復原，建議先「匯出車型」留一份。'
+    : key === 'scenarios'
+      ? '這個情境的銷售構成、成本、費用、開發總投、參數、作法與說明會一起刪除（情境快照保留）。這個動作無法復原。'
+      : '這個動作無法復原。';
+  confirmModal('刪除「' + label + '」？', body, '刪除', true).then(ok => {
     if (!ok) return;
     setStatus(key, '刪除中...');
     google.script.run
@@ -241,8 +284,49 @@ function deleteEntityRow(key, i) {
   });
 }
 
+/** 存檔前先擋下會被默默丟掉或互相覆蓋的列：填了名稱卻沒填代號、代號重複、同一個 GATE 情境名稱重複 */
+function entityGridProblem_(key) {
+  const cfg = ENTITIES[key];
+  const rows = entityRows[key] || [];
+  if (cfg.pk && cfg.pk !== 'ScenarioID') {
+    const noCode = rows.filter(r => !r.__existing && !String(r[cfg.pk] || '').trim() &&
+      cfg.columns.some(c => c.name !== cfg.pk && String(r[c.name] || '').trim()));
+    if (noCode.length) return `有 ${noCode.length} 列還沒填「${cfg.columns[0].label}」，填好再儲存（不要的列按「移除」）`;
+    const seen = {};
+    for (const r of rows) {
+      const id = String(r[cfg.pk] || '').trim();
+      if (!id) continue;
+      if (seen[id]) return `${cfg.columns[0].label}「${id}」重複了`;
+      seen[id] = true;
+      if (!r.__existing && codeProblem_(cfg.columns[0].label, id)) return codeProblem_(cfg.columns[0].label, id);
+    }
+  }
+  if (key === 'scenarios') {
+    const dup = duplicateScenarioName_(rows);
+    if (dup) return dup;
+  }
+  return '';
+}
+/** 代號不能有空白、逗號、| 或引號(分攤車系用逗號分隔、科目表主鍵用 |、REF("…") 公式用引號)；後端也會擋 */
+function codeProblem_(label, id) {
+  return /[\s,，|"'“”]/.test(id) ? `${label}「${id}」不能有空白、逗號、| 或引號` : '';
+}
+/** 同一個車型裡「GATE 別 + 情境名稱」重複時，選單上會出現兩個一模一樣的選項，分不出來 */
+function duplicateScenarioName_(rows) {
+  const seen = {};
+  for (const r of rows) {
+    if (!r.Gate && !r.ScenarioName) continue;
+    const k = (r.Gate || '') + ' ' + String(r.ScenarioName || '').trim();
+    if (seen[k]) return `已經有一個「${k}」，情境名稱請取不一樣的（例如加上日期或版次）`;
+    seen[k] = true;
+  }
+  return '';
+}
+
 function saveEntityGrid(key) {
   const cfg = ENTITIES[key];
+  const problem = entityGridProblem_(key);
+  if (problem) { setStatus(key, problem, 'err'); return; }
   const rows = (entityRows[key] || []).map(r => {
     const copy = {};
     cfg.columns.forEach(c => { copy[c.name] = r[c.name] === undefined ? '' : r[c.name]; });
@@ -278,7 +362,7 @@ function createVehicleTypeDialog() {
         options: [['', '標準範本']].concat(others.map(id => [id, '複製「' + id + '」的科目表'])) }
     ],
     okText: '建立',
-    validate: v => !v.id.trim() ? '請輸入車型代號' : ''
+    validate: v => !v.id.trim() ? '請輸入車型代號' : codeProblem_('車型代號', v.id.trim())
   }).then(v => {
     if (!v) return;
     google.script.run
@@ -340,7 +424,9 @@ function createScenarioDialog() {
       Object.assign(COPY_PARTS_FIELD_(), { help: '有選「以既有情境為基礎」時才會帶入' })
     ],
     okText: '建立情境',
-    validate: v => !v.name.trim() ? '請輸入情境名稱' : (v.source && !v.parts.length ? '請至少勾選一項要帶入的資料，或把來源改成「不帶入」' : '')
+    validate: v => !v.name.trim() ? '請輸入情境名稱'
+      : duplicateScenarioName_((entityRows.scenarios || []).concat([{ Gate: v.gate, ScenarioName: v.name }]))
+      || (v.source && !v.parts.length ? '請至少勾選一項要帶入的資料，或把來源改成「不帶入」' : '')
   });
   // 情境名稱還是自動帶入的值時，改情境性質就跟著換(現況0901 → 目標0901)
   const dlg = document.querySelector('dialog.modal:last-of-type');

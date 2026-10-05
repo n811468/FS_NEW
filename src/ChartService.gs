@@ -330,7 +330,10 @@ function inputLineOptions_(vehicleTypeId, costSection) {
   var defs = getPLLineItems(vehicleTypeId);
   return defs.filter(function (d) {
     return d.CalcType === CALC_TYPES.INPUT && isCostSectionLine_(d, defs) === costSection;
-  }).map(function (d) { return { value: d.LineCode, label: d.LineCode + ' ' + d.LineName, parentLine: d.ParentLine }; });
+  }).map(function (d) {
+    var parent = defs.filter(function (p) { return p.LineCode === d.ParentLine; })[0];
+    return { value: d.LineCode, label: d.LineCode + ' ' + d.LineName, parentLine: d.ParentLine, parentName: parent ? parent.LineName : '' };
+  });
 }
 /** 銷貨成本頁的成本項目(B 段底下、手動輸入) */
 function getCostOfSalesLineOptions(vehicleTypeId) { return inputLineOptions_(vehicleTypeId, true); }
@@ -1145,6 +1148,7 @@ function createVehicleType(vehicleTypeId, notes, chartSourceTypeId) {
   return withLock_(function () {
     var id = String(vehicleTypeId || '').trim();
     if (!id) throw new Error('請輸入車型代號');
+    validateCode_('車型代號', id);
     if (getVehicleTypes().some(function (t) { return String(t.VehicleTypeID) === id; })) throw new Error('車型「' + id + '」已經存在');
     upsertRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', { VehicleTypeID: id, Notes: notes || '' });
     ensureTypeChart_(id, chartSourceTypeId || '');

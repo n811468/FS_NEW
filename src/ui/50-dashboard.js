@@ -11,6 +11,14 @@ function loadComparisonPicker() {
   google.script.run
     .withSuccessHandler(safeHandler(options => {
       comparisonOptions = options || [];
+      // 一個情境都還沒有：直接告訴使用者從哪裡開始(不能進 refreshDashboard，它看到沒有選項會再回頭呼叫這裡，變成無限迴圈)
+      if (!comparisonOptions.length) {
+        document.getElementById('dashboard-content').innerHTML = emptyStateHtml('📊', '還沒有可以比較的情境',
+          currentVehicleTypeId ? '這個車型還沒有情境。到「車型與情境」新增情境、填好銷售構成與成本，這裡就會出現損益表。'
+            : '先到「車型與情境」建立車型、車系與情境，再填銷售構成與成本，這裡就會出現損益表。',
+          `<button class="btn" onclick="switchTab('masters')">前往車型與情境</button>`);
+        return;
+      }
       // 第一次進儀表板先把上次的比較欄位/顯示設定從瀏覽器還原回來(見 loadDashPrefs_)，
       // 不必每次打開都重新加一遍欄位；已被刪掉的情境/車系會被濾掉。
       if (!dashPrefsLoaded_) { loadDashPrefs_(); dashPrefsLoaded_ = true; }
@@ -615,7 +623,7 @@ function kpiStripHtml(cols, lines) {
       if (v === undefined || v === null) return '';
       return `<div class="kpi-row"><span>${esc(nameOf(code))}</span>
         <span class="kpi-num${v < 0 ? ' negative' : ''}">${fmt(displayAmount_(v, c), amtDigits_())}</span>
-        <span class="kpi-pct">${code === 'A' ? '' : pctOf_(c, code).toFixed(1) + '%'}</span></div>`;
+        <span class="kpi-pct">${code === 'A' ? '' : pct1_(pctOf_(c, code)) + '%'}</span></div>`;
     }).join('');
     let vsBase = '';
     const baseK = base ? base.amounts[profitCodeOf_(base)] : undefined;
@@ -637,7 +645,7 @@ function kpiStripHtml(cols, lines) {
           onclick="setBaselineColumnAt(${i})">★</button></div>
       <div class="kpi-main"><span class="kpi-main-label">${esc(nameOf(kCode))}</span>
         <span class="kpi-main-num${k < 0 ? ' negative' : ''}">${k === undefined || k === null ? '—' : fmt(displayAmount_(k, c), amtDigits_())}</span>
-        <span class="kpi-main-pct${kPct < 0 ? ' negative' : ''}">${kPct.toFixed(1)}%</span></div>
+        <span class="kpi-main-pct${kPct < 0 ? ' negative' : ''}">${pct1_(kPct)}%</span></div>
       <div class="kpi-bar"><div class="kpi-bar-fill${kPct < 0 ? ' negative' : ''}" style="width:${barW.toFixed(1)}%"></div></div>
       ${rows}${vsBase}
     </div>`;

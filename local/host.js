@@ -36,7 +36,7 @@
     var shim = opts.shim, Pack = opts.pack;
     var storage = opts.storage || null;
     var changed = false;
-    var state = { savedAt: '', changesSinceExport: 0, lastExportAt: '', storageOk: true, stale: false, firstRun: false };
+    var state = { savedAt: '', changesSinceExport: 0, firstUnsavedAt: '', lastExportAt: '', storageOk: true, stale: false, firstRun: false };
     var listeners = [];
 
     var spreadsheet = new shim.Spreadsheet(function (sheetName) {
@@ -73,7 +73,7 @@
       state.savedAt = new Date().toISOString();
       try {
         storage.setItem(STORAGE_KEY, JSON.stringify({
-          savedAt: state.savedAt, changesSinceExport: state.changesSinceExport,
+          savedAt: state.savedAt, changesSinceExport: state.changesSinceExport, firstUnsavedAt: state.firstUnsavedAt,
           lastExportAt: state.lastExportAt, tables: tables
         }));
         state.storageOk = true;
@@ -98,6 +98,7 @@
         writeTables(saved.tables);
         state.savedAt = saved.savedAt || '';
         state.changesSinceExport = saved.changesSinceExport || 0;
+        state.firstUnsavedAt = saved.firstUnsavedAt || '';
         state.lastExportAt = saved.lastExportAt || '';
       } else {
         writeTables({});
@@ -106,6 +107,12 @@
       }
       changed = false;
       notify();
+    }
+
+    /** 記一筆「還沒整份備份的修改」；第一筆的時間拿來提醒「從什麼時候開始沒備份」 */
+    function markChanged() {
+      if (!state.changesSinceExport) state.firstUnsavedAt = new Date().toISOString();
+      state.changesSinceExport++;
     }
 
     /** 前端呼叫後端函式。跟 google.script.run 一樣只開放公開函式(結尾不是底線)，參數與回傳值都走一次 JSON。 */
@@ -122,7 +129,7 @@
         result = fn.apply(null, JSON.parse(JSON.stringify(args || [])));
       } finally {
         if (changed) {
-          state.changesSinceExport++;
+          markChanged();
           persist();
           notify();
         }
@@ -150,6 +157,7 @@
         : !vehicleTypeIds || !vehicleTypeIds.length || coversAll(vehicleTypeIds.map(String), ids(tables.VehicleTypes, 'VehicleTypeID'));
       if (whole) {
         state.changesSinceExport = 0;
+        state.firstUnsavedAt = '';
         state.lastExportAt = pack.exportedAt;
         persist();
         notify();
@@ -160,7 +168,9 @@
     /** 取代匯入：整份資料庫換成資料包的內容 */
     function replaceWithPack(pack) {
       writeTables(pack.tables);
-      state.changesSinceExport = pack.scope && pack.scope.kind === 'all' ? 0 : 1;
+      state.changesSinceExport = 0;
+      state.firstUnsavedAt = '';
+      if (!(pack.scope && pack.scope.kind === 'all')) markChanged();
       persist();
       notify();
     }
@@ -173,7 +183,7 @@
     function mergePack(pack) {
       var merged = Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope);
       writeTables(merged.tables);
-      state.changesSinceExport++;
+      markChanged();
       persist();
       notify();
       return merged.report;
@@ -183,6 +193,7 @@
     function resetAll() {
       writeTables({});
       state.changesSinceExport = 0;
+      state.firstUnsavedAt = '';
       persist();
       notify();
     }

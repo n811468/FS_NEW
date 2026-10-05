@@ -6,6 +6,17 @@ function getSheet_(name) {
   if (!sheet) throw new Error('找不到分頁：' + name + '，請先執行 setupSpreadsheet()');
   return sheet;
 }
+/**
+ * 車型/車系代號：不能有空白、逗號、直線、引號。
+ * 逗號是「分攤車系」的分隔符號、| 是科目表主鍵的分隔符號、引號會讓 REF("…") 公式斷掉，空白則容易在比對時對不上。
+ */
+function validateCode_(label, id) {
+  if (/[\s,，|"'“”]/.test(String(id))) throw new Error(label + '「' + id + '」不能有空白、逗號、| 或引號');
+}
+/** 分頁存不存在(舊的試算表可能還沒有 Snapshots 等後來加的分頁) */
+function sheetExists_(name) {
+  return !!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+}
 
 // 同一次執行內的流水號：整批寫入(如一次存下整張表格)會連續產生很多 ID，
 // 只取 UUID 前 8 碼有機會撞號，撞號的後果是後一列直接覆蓋前一列、而且不會報錯。

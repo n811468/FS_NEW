@@ -190,6 +190,10 @@
   td.row-actions { white-space: nowrap; text-align: center !important; }
   .row-move { padding: 3px 7px; font-size: 11px; line-height: 1; }
   .auto-tag { font-size: 10.5px; color: var(--primary); background: var(--primary-weak); border-radius: 4px; padding: 1px 5px; margin-left: 6px; font-weight: 600; }
+  .auto-tag.warn { color: var(--warning); background: var(--warning-weak); }
+  td.paste-skip { box-shadow: inset 0 0 0 2px var(--danger); background: var(--danger-weak); }
+  tr.current-row > td { background: var(--primary-weak); }
+  tr.current-row > td:first-child { box-shadow: inset 3px 0 0 var(--primary); }
   tr.auto-line td { color: var(--text-2); }
   tr.auto-line td.row-head { font-weight: 500; }
   .summary-box { display: flex; flex-wrap: wrap; gap: 28px; margin: 14px 0; padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -563,6 +567,8 @@
   .wf-manual input[type=text] { width: 100%; }
   .wf-manual input[type=number] { width: 140px; }
   .wf-table { margin-top: 12px; max-width: 760px; }
+  #wf-table .grid-scroll { max-width: 760px; }
+  #wf-table .wf-table { width: 100%; margin-top: 0; }
   table.grid-table.wf-table td:first-child, table.grid-table.lever-table td:not(.amt) { text-align: left; }
   .wf-table td.amt { text-align: right; font-variant-numeric: tabular-nums; }
   .wf-table tr.subtotal td { font-weight: 600; background: var(--surface-2); }
@@ -716,6 +722,16 @@
     .topbar { padding: 10px 14px; flex-wrap: wrap; }
     main { padding: 16px 14px 120px; }
     .calc-type-cards { grid-template-columns: 1fr; }
+  }
+  /* 手機：車型/情境選單併成一列、拿掉小標籤，頁首不要佔掉三分之一個畫面 */
+  @media (max-width: 600px) {
+    .topbar { gap: 8px; }
+    .page-title h1 { font-size: 18px; }
+    .context-bar { width: 100%; flex-wrap: nowrap; margin-left: 0; }
+    .ctx-picker { flex: 1 1 0; min-width: 0; padding-left: 10px; }
+    .ctx-picker label { display: none; }
+    .ctx-picker select { min-width: 0; width: 100%; }
+    .type-badge { display: none !important; }
   }
 
   /* ---------------- 列印：GATE 報告每一張投影片一頁(16:9 橫式) ---------------- */

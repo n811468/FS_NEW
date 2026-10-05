@@ -33,7 +33,7 @@ function snapshotCardShellHtml_() {
   return `<div class="card" id="snapshot-card" style="margin-top:16px;">
     <div class="card-head"><h3>情境快照（版本紀錄）</h3><span class="muted">存下某個時間點的損益數字，之後跟現在比較「差在哪」</span>
       <span class="spacer"></span>
-      <button type="button" class="btn sm" onclick="createSnapshotDialog_(currentScenarioId, currentScenario ? scenarioLabel(currentScenario) : '')">把目前情境存成快照</button></div>
+      <button type="button" class="btn sm" onclick="createSnapshotDialog_(currentScenarioId, currentScenario ? scenarioLabel(currentScenario) : '')"${currentScenarioId ? '' : ' disabled data-tip="先建立並選擇情境"'}>把目前情境存成快照</button></div>
     <div id="snapshot-body"><p class="muted">載入中...</p></div></div>`;
 }
 function loadSnapshotCard_() {

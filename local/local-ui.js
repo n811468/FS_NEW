@@ -18,6 +18,19 @@
     return node;
   }
 
+  /**
+   * 提示與確認：用前端的對話框(openModal/confirmModal)，跟系統其他地方長得一樣；
+   * 前端還沒載入(理論上不會)才退回瀏覽器原生的 alert/confirm。
+   */
+  function escHtml(t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }).replace(/\n/g, '<br>'); }
+  function say(title, msg) {
+    if (typeof window.openModal === 'function') window.openModal({ title: title, body: '<p>' + escHtml(msg) + '</p>', okText: '知道了', noCancel: true });
+    else window.alert(title + '\n' + msg);
+  }
+  function ask(title, msg, okText, then) {
+    if (typeof window.confirmModal === 'function') window.confirmModal(title, escHtml(msg), okText, true).then(function (ok) { if (ok) then(); });
+    else if (window.confirm(title + '\n' + msg)) then();
+  }
   function fmtTime(iso) {
     if (!iso) return '';
     var d = new Date(iso);
@@ -69,15 +82,15 @@
   } });
   var exportTypeBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出車型（含所有情境）', title: '匯出上方選的車型：所有情境、車系與科目表，交給同事「合併匯入」（對方這個車型會整個換成這一包）', onclick: function () {
     var id = currentVehicleTypeId();
-    if (!id) { window.alert('請先在上方選擇車型。'); return; }
+    if (!id) { say('還沒有選擇車型', '請先在右上角選擇要匯出的車型。'); return; }
     download(host.exportPack([id]), id);
   } });
   var exportScenarioBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出情境（只有這一個）', title: '只匯出上方選的情境，交給同事「合併匯入」（對方只新增/更新這個情境，同車型的其他情境不動）', onclick: function () {
     var id = currentVehicleTypeId(), sc = currentScenario();
-    if (!id || !sc) { window.alert('請先在上方選擇車型與情境。'); return; }
+    if (!id || !sc) { say('還沒有選擇情境', '請先在右上角選擇要匯出的車型與情境。'); return; }
     var pack;
     try { pack = host.exportPack(null, { scenarioIds: [sc.id] }); }
-    catch (e) { window.alert('無法匯出：\n' + e.message); return; }
+    catch (e) { say('無法匯出', e.message); return; }
     download(pack, id + '_' + sc.label);
   } });
   // 三種匯出收在同一顆「匯出 ▾」底下(以前是三顆並排的按鈕)；點了任何一項就把選單收起來
@@ -90,8 +103,8 @@
   var importBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯入資料包…', onclick: function () { fileInput.click(); } });
   var moreSel = el('select', { class: 'fsl-more', title: '其他' }, [
     el('option', { value: '', text: '更多…' }),
-    el('option', { value: 'demo', text: '載入示範資料（取代目前資料）' }),
-    el('option', { value: 'reset', text: '清空所有資料' })
+    el('option', { value: 'demo', text: '載入示範資料…' }),
+    el('option', { value: 'reset', text: '清空所有資料…' })
   ]);
   moreSel.addEventListener('change', function () {
     var v = moreSel.value;
@@ -116,7 +129,8 @@
     parts.push(s.lastExportAt ? '上次整份備份：' + fmtTime(s.lastExportAt) : '還沒整份備份過');
     statusEl.textContent = parts.join(' · ');
     if (s.changesSinceExport > 0) {
-      statusEl.appendChild(el('span', { class: 'fsl-warn', text: ' · ' + s.changesSinceExport + ' 次修改還沒整份備份',
+      // 不顯示「N 次修改」：每存一次表格就加一，建好一個車型就是十幾次，數字很快就沒人看了；改說「從什麼時候開始沒備份」
+      statusEl.appendChild(el('span', { class: 'fsl-warn', text: ' · 有修改還沒整份備份' + (s.firstUnsavedAt ? '（從 ' + fmtTime(s.firstUnsavedAt) + ' 起）' : ''),
         title: '資料暫存在這個瀏覽器裡，清除瀏覽資料或換電腦就會消失。請定期「匯出 ▾ → 匯出全部」備份。\n「匯出車型」「匯出情境」是交給同事用的，只包含一部分資料，所以不算備份（瀏覽器裡只有這個車型時例外）。' }));
     }
     banner.innerHTML = '';
@@ -126,7 +140,11 @@
     } else if (!s.storageOk) {
       showBanner('danger', '瀏覽器無法暫存資料（可能是無痕視窗、空間不足或公司政策封鎖）。資料只在這一頁的記憶體裡，關閉前務必「匯出全部」。');
     } else if (!host.readTables().VehicleTypes.length) {
-      showBanner('info', '目前是空的資料庫。可以從「匯入資料包…」載入同事給的資料，或從「更多…」載入示範資料看看；也可以直接在「車型與情境」開始建立。');
+      showBanner('info', '目前是空的資料庫。從這裡開始：', el('span', { class: 'fsl-banner-actions' }, [
+        el('button', { class: 'fsl-btn primary', type: 'button', text: '建立第一個車型', onclick: function () { if (window.switchTab) window.switchTab('masters'); } }),
+        el('button', { class: 'fsl-btn', type: 'button', text: '匯入資料包…', onclick: function () { fileInput.click(); } }),
+        el('button', { class: 'fsl-btn', type: 'button', text: '載入示範資料看看', onclick: function () { loadDemo(); } })
+      ]));
     } else {
       banner.style.display = 'none';
     }
@@ -146,10 +164,10 @@
     reader.onload = function () {
       var pack;
       try { pack = Pack.parsePack(String(reader.result)); }
-      catch (e) { window.alert('無法讀取「' + file.name + '」：\n' + e.message); return; }
+      catch (e) { say('無法讀取「' + file.name + '」', e.message); return; }
       showImportDialog(pack, file.name);
     };
-    reader.onerror = function () { window.alert('讀取檔案失敗：' + file.name); };
+    reader.onerror = function () { say('讀取檔案失敗', file.name); };
     reader.readAsText(file, 'utf-8');
   }
 
@@ -173,8 +191,8 @@
     var preview = el('pre', { class: 'fsl-pre', text: describePack(pack) });
     var mergeBtn = el('button', { class: 'fsl-btn primary', type: 'button', text: '合併匯入', onclick: function () { confirmMerge(pack); } });
     var replaceBtn = el('button', { class: 'fsl-btn danger', type: 'button', text: '取代整個資料庫', onclick: function () {
-      if (!window.confirm('目前這個瀏覽器裡的所有資料都會被資料包取代（包含資料包裡沒有的車型）。\n建議先「匯出全部」備份。確定要取代嗎？')) return;
-      apply(function () { host.replaceWithPack(pack); });
+      ask('取代整個資料庫？', '目前這個瀏覽器裡的所有資料都會被資料包取代（包含資料包裡沒有的車型）。\n建議先「匯出全部」備份。', '取代',
+        function () { apply(function () { host.replaceWithPack(pack); }); });
     } });
     dialog.appendChild(el('h3', { text: '匯入資料包：' + fileName }));
     dialog.appendChild(preview);
@@ -195,7 +213,7 @@
   function confirmMerge(pack) {
     var result;
     try { result = host.previewMerge(pack); }
-    catch (e) { window.alert('無法合併：\n' + e.message); return; }
+    catch (e) { say('無法合併', e.message); return; }
     dialog.innerHTML = '';
     var text = Pack.describeMerge(result.report) || '資料包裡沒有任何車型，合併不會改變資料。';
     dialog.appendChild(el('h3', { text: '確認合併內容' }));
@@ -211,19 +229,19 @@
   /** 匯入完整頁重新載入：前端各分頁的快取與選單全部從新資料重建，最不容易出錯 */
   function apply(fn) {
     try { fn(); }
-    catch (e) { window.alert('匯入失敗，資料未變更：\n' + e.message); return; }
+    catch (e) { say('匯入失敗，資料未變更', e.message); return; }
     if (dialog.open) dialog.close();
     location.reload();
   }
 
   function loadDemo() {
-    if (host.readTables().VehicleTypes.length &&
-      !window.confirm('示範資料會取代目前瀏覽器裡的所有資料。建議先「匯出全部」備份。確定要載入嗎？')) return;
-    apply(function () { host.replaceWithPack(window.FSLocal.demoPack()); });
+    var go = function () { apply(function () { host.replaceWithPack(window.FSLocal.demoPack()); }); };
+    if (!host.readTables().VehicleTypes.length) { go(); return; }
+    ask('載入示範資料？', '示範資料會取代目前瀏覽器裡的所有資料。建議先「匯出全部」備份。', '載入示範資料', go);
   }
   function resetAll() {
-    if (!window.confirm('確定要清空所有資料嗎？（只留內建科目）\n建議先「匯出全部」備份，這個動作無法復原。')) return;
-    apply(function () { host.resetAll(); });
+    ask('清空所有資料？', '只留內建科目，其他資料全部刪除。這個動作無法復原，建議先「匯出全部」備份。', '清空',
+      function () { apply(function () { host.resetAll(); }); });
   }
 
   host.onChange(render);
