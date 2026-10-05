@@ -203,6 +203,11 @@ async function main() {
   });
   const pasted = await page.$$eval('input[data-line="b4"]', els => els.map(e => e.value).join(','));
   assert(pasted === '1111,2222,3333', '從 Excel 貼上的一整列應該依序填入各車系：' + pasted);
+  // 表格裡按 ↓ / Enter 是換到下一列同一欄，不能把數字框的值加減 1
+  await page.focus('input[data-line="b4"]');
+  await page.keyboard.press('ArrowDown');
+  const afterDown = await page.evaluate(() => ({ v: document.querySelector('input[data-line="b4"]').value, line: document.activeElement.dataset.line }));
+  assert(afterDown.v === '1111' && afterDown.line && afterDown.line !== 'b4', '按 ↓ 應該換到下一列、數字不變：' + JSON.stringify(afterDown));
   await page.click('#savebar-discard');
   await page.click('#panel-costs .dash-subnav-btn:has-text("營業費用")');
   await page.waitForSelector('#grid-operatingexpense table');
