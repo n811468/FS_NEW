@@ -624,6 +624,14 @@
   /* ---------------- GATE 報告(簡報) ---------------- */
   .report-controls { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
   .report-controls .field select { min-width: 200px; }
+  /* 選單跟下方卡片同色：藍 = 現況(比較基準)、綠 = 目標/本回，由左到右就是 現況 → 目標 */
+  .rpt-pick > span { display: flex; align-items: center; gap: 6px; }
+  .rpt-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .rpt-pick.base .rpt-dot { background: #3157d5; }
+  .rpt-pick.target .rpt-dot { background: #1c8a59; }
+  .rpt-pick.base select { border-color: #b9c9f5; background-color: #f6f8ff; }
+  .rpt-pick.target select { border-color: #a9dcc0; background-color: #f4fbf7; }
+  .rpt-arrow { align-self: flex-end; padding-bottom: 9px; font-size: 18px; font-weight: 700; color: var(--muted); }
   .slide { background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-1); margin: 0 auto 22px; max-width: 1280px;
     padding: 26px 32px 22px; position: relative; }
   .slide-head { display: flex; align-items: flex-end; gap: 14px; border-bottom: 3px solid var(--sidebar); padding-bottom: 10px; margin-bottom: 16px; }
@@ -639,6 +647,7 @@
   .hero .hero-label { font-size: 12px; color: var(--text-2); font-weight: 700; }
   .hero .hero-num { font-size: 26px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
   .hero .hero-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .hero .hero-name { font-size: 12px; color: var(--text-2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hero.base { background: #f1f5ff; border-color: #d3defc; }
   .hero.target { background: #eefaf3; border-color: #c4ead6; }
   .hero.gap { background: #fff8e8; border-color: #f2dda8; }

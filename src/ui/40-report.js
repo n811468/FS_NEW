@@ -66,9 +66,12 @@ function renderReportPanel() {
   panel.innerHTML = `
     <div class="card no-print">
       <div class="report-controls">
-        <label class="field"><span>目標 / 本回</span><select onchange="setReportSel('target', this.value)">${opt(reportSel.target)}</select></label>
-        <label class="field"><span>現況（差距的比較基準）</span><select onchange="setReportSel('base', this.value)">${opt(reportSel.base, true, '（不比較）')}</select></label>
-        <label class="field"><span>前回（選填）</span><select onchange="setReportSel('prev', this.value)">${opt(reportSel.prev, true, '（不比較）')}</select></label>
+        <label class="field rpt-pick base"><span><i class="rpt-dot"></i>現況（差距的比較基準）</span><select id="rpt-sel-base" onchange="setReportSel('base', this.value)">${opt(reportSel.base, true, '（不比較）')}</select></label>
+        <span class="rpt-arrow" aria-hidden="true">→</span>
+        <label class="field rpt-pick target"><span><i class="rpt-dot"></i>目標 / 本回</span><select id="rpt-sel-target" onchange="setReportSel('target', this.value)">${opt(reportSel.target)}</select></label>
+        <label class="field rpt-pick prev"><span>前回（選填，跟本回比）</span><select id="rpt-sel-prev" onchange="setReportSel('prev', this.value)">${opt(reportSel.prev, true, '（不比較）')}</select></label>
+      </div>
+      <div class="report-controls" style="margin-top:12px;">
         <label class="field"><span>金額單位</span><div class="seg">
           <button type="button" class="seg-btn${reportUnit === 1 ? ' active' : ''}" onclick="setReportUnit(1)">元/台</button>
           <button type="button" class="seg-btn${reportUnit === 1000 ? ' active' : ''}" onclick="setReportUnit(1000)">千元/台</button></div></label>
@@ -172,7 +175,7 @@ function drawReport_() {
   const slides = [];
   let n = 0;
   const no = () => String(++n).padStart(2, '0');
-  slides.push(slideHtml_(no(), '損益目標與差距摘要', `${esc(R.vehicleTypeId)}　${esc(T.meta.label)}${B ? ' vs ' + esc(B.meta.label) : ''}`, reportSummaryHtml_()));
+  slides.push(slideHtml_(no(), '損益目標與差距摘要', `${esc(R.vehicleTypeId)}　${B ? '現況 ' + esc(B.meta.label) + ' → ' : ''}目標 ${esc(T.meta.label)}`, reportSummaryHtml_()));
   if (B) slides.push(slideHtml_(no(), '現況 → 目標：營業淨利差距拆解', '每一根長條 = 該科目讓營業淨利增加(綠)或減少(紅)多少', '<div id="rpt-bridge">' + reportBridgeHtml_() + '</div>'));
   if (B) slides.push(slideHtml_(no(), '現況與目標對照（加權平均）', '差距 = 目標 − 現況；對淨利影響已依科目方向換算', reportCompareHtml_(), 'rpt-compare'));
   slides.push(slideHtml_(no(), '目標成本作法', '差距由哪些作法補起來、擔當單位與進度', reportActionsHtml_(), 'rpt-actions'));
@@ -210,13 +213,13 @@ function reportSummaryHtml_() {
   const byStatus = {};
   reportActions.forEach(a => { byStatus[a.Status] = (byStatus[a.Status] || 0) + num(a.Effect); });
   const statusColors = { '已結案': '#6a3dbd', '已確認': '#1c8a59', '進行中': '#3157d5', '規劃中': '#a3acc0' };
-  const hero = (cls, label, numV, sub) => `<div class="hero ${cls}"><div class="hero-label">${label}</div><div class="hero-num${numV < 0 ? ' negative' : ''}">${rAmt_(numV)}</div><div class="hero-sub">${sub}</div></div>`;
+  const hero = (cls, label, numV, sub, name) => `<div class="hero ${cls}"><div class="hero-label">${label}</div>${name ? `<div class="hero-name" title="${esc(name)}">${esc(name)}</div>` : ''}<div class="hero-num${numV < 0 ? ' negative' : ''}">${rAmt_(numV)}</div><div class="hero-sub">${sub}</div></div>`;
   const keyCodes = ['A', 'B', 'C', 'E', 'G', 'I'].concat([rK_()]).filter((c, i, a) => a.indexOf(c) === i && T.weighted[c] !== undefined);
   return `
     <div class="kpi-hero">
-      ${B ? hero('base', '現況 營業淨利/台', bK, `淨利率 ${rPct_(bK, bRev)}・月 ${fmt((B.volume.monthlyVolume || 0))} 台・月淨利 ${fmt(bK * (B.volume.monthlyVolume || 0) / 10000, 0)} 萬`) : ''}
+      ${B ? hero('base', '現況 營業淨利/台', bK, `淨利率 ${rPct_(bK, bRev)}・月 ${fmt((B.volume.monthlyVolume || 0))} 台・月淨利 ${fmt(bK * (B.volume.monthlyVolume || 0) / 10000, 0)} 萬`, B.meta.label) : ''}
       ${hero('target', '目標 營業淨利/台', tK, `淨利率 ${rPct_(tK, tRev)}・月 ${fmt(tVol)} 台・月淨利 ${fmt(tK * tVol / 10000, 0)} 萬` +
-        (T.breakEvenVolume !== null && T.breakEvenVolume !== undefined ? `<br>損益兩平月銷量 ≈ <b>${fmt(Math.ceil(T.breakEvenVolume))}</b> 台` : '<br>只靠台數無法損益兩平'))}
+        (T.breakEvenVolume !== null && T.breakEvenVolume !== undefined ? `<br>損益兩平月銷量 ≈ <b>${fmt(Math.ceil(T.breakEvenVolume))}</b> 台` : '<br>只靠台數無法損益兩平'), T.meta.label)}
       ${B ? `<div class="hero gap"><div class="hero-label">差距（目標 − 現況）</div><div class="hero-num${gap < 0 ? ' negative' : ''}">${rSigned_(gap)}</div>
         <div class="hero-sub">月效益 ${signed_(gap * tVol / 10000, 0)} 萬・LC ${fmt(T.lifeCycleUnits)} 台合計 ${signed_(gap * T.lifeCycleUnits / 1e8, 2)} 億</div></div>` : ''}
       <div class="hero cover"><div class="hero-label">作法覆蓋率</div>
