@@ -82,7 +82,7 @@ function drawWhatIf_() {
     <div class="card">
       <div class="card-head"><h3>敏感度分析</h3><span class="muted">兩項假設同時變動時，結果會落在哪裡（中間框起來的是目前的數字）</span>
         <span class="spacer"></span>
-        <label class="chk"><input type="checkbox" ${s.inReport ? 'checked' : ''} onchange="whatIfPrefs.sens.inReport=this.checked;saveWhatIfPrefs_()"> 放進 GATE 報告</label></div>
+        <span class="muted">${s.inReport ? 'GATE 報告會附這張表' : 'GATE 報告目前不附這張表'}（在 GATE 報告頁勾選）</span></div>
       <div class="field-row">
         <label class="field"><span>看哪個結果</span><select onchange="whatIfPrefs.sens.metric=this.value;saveWhatIfPrefs_()">${metricOptionsHtml_(s.metric)}</select></label>
         <label class="field"><span>&nbsp;</span>${basisSeg('sens', s.basis)}</label>
@@ -401,7 +401,7 @@ function saveWhatIfScenarioDialog_(levers, summary) {
   const cur = currentScenario || {};
   openModal({
     title: '另存成新情境',
-    body: `<p class="help">複製「${esc(scenarioLabel(cur))}」的全部資料（銷售構成、成本、開發總投、費用、參數、說明、作法），再把這次反推的調整寫進去：<br><b>${esc(summary || '')}</b></p>`,
+    body: `<p class="help">複製「${esc(scenarioLabel(cur))}」的全部資料（銷售構成、成本、開發總投、費用、參數、報告說明、作法），再把這次反推的調整寫進去：<br><b>${esc(summary || '')}</b></p>`,
     fields: [
       { name: 'Gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, value: cur.Gate || 'GATE F' },
       { name: 'ScenarioName', label: '情境名稱', value: (cur.ScenarioName || '') + ' 反推' },

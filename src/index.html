@@ -6,7 +6,7 @@
 </head>
 <body>
   <!--
-    v2 版面：左側導覽依工作流程分四組 ——
+    版面：左側導覽依工作流程分四組 ——
       結果呈現(看數字、做簡報) → 輸入資料(每個情境要填的數字) → 計算設定(科目與公式、參數與匯率) → 主檔(車型與情境：車型/車系/情境同一頁)
     右側上方固定顯示「目前在哪個車型、哪個情境」，所有輸入頁都以它為範圍。
   -->
@@ -32,12 +32,10 @@
           <div class="nav-group-label">輸入資料（目前情境）</div>
           <button class="nav-item" data-tab="salesmix" onclick="switchTab('salesmix')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>銷售構成與售價</button>
-          <button class="nav-item" data-tab="costofsales" onclick="switchTab('costofsales')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>銷貨成本</button>
+          <button class="nav-item" data-tab="costs" onclick="switchTab('costs')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>成本與費用</button>
           <button class="nav-item" data-tab="devinvestment" onclick="switchTab('devinvestment')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/></svg>開發總投</button>
-          <button class="nav-item" data-tab="operatingexpense" onclick="switchTab('operatingexpense')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>營業費用</button>
         </div>
         <div class="nav-group">
           <div class="nav-group-label">計算設定</div>
@@ -52,7 +50,6 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M6 17l1.5-6h9L18 17M7 17v2M17 17v2"/><circle cx="8" cy="14.5" r=".5"/><circle cx="16" cy="14.5" r=".5"/></svg>車型與情境</button>
         </div>
       </nav>
-      <div class="sidebar-foot">v2 · 每個車型各自一份科目表<br>公式式計算來源 · 拖曳排序</div>
     </aside>
 
     <div class="main-col">
@@ -86,9 +83,8 @@
         <div id="panel-whatif" class="panel"></div>
         <div id="panel-waterfall" class="panel"></div>
         <div id="panel-salesmix" class="panel"></div>
-        <div id="panel-costofsales" class="panel"></div>
+        <div id="panel-costs" class="panel"></div>
         <div id="panel-devinvestment" class="panel"></div>
-        <div id="panel-operatingexpense" class="panel"></div>
         <div id="panel-lineitems" class="panel"></div>
         <div id="panel-paramrates" class="panel"></div>
         <div id="panel-masters" class="panel active"></div>

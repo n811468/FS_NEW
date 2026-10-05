@@ -359,6 +359,8 @@ function drawWaterfallTool_() {
       <p class="help">加權平均營業淨利（元/台）：現況 → 目標情境每一項作法的效果 → 目標；作法加總跟實際差異對不起來的部分單獨一根。</p>`;
   }
   const lineOpts = p.mode === 'bridge' || p.mode === 'structure';
+  // 不常改的選項收在「進階」；改過(不是預設值)就展開，才不會忘了自己設過
+  const advOpen = p.sort !== 'pl' || num(p.topN) > 0 || num(p.minAbs) > 0 || !p.labels || !!String(wfTitle_()).trim();
   body.innerHTML = `
     <div class="card">
       <div class="field-row">${seg('mode', modes, p.mode)}</div>
@@ -368,17 +370,20 @@ function drawWaterfallTool_() {
         ${lineOpts ? `<label class="field"><span>畫到</span><select id="wf-end" onchange="wfPrefs.end=this.value;saveWfPrefs_();runWaterfall_()"></select></label>
           <label class="field"><span>明細程度</span>${seg('level', [['major', '大項'], ['detail', '明細科目']], p.level)}</label>
           <label class="field"><span>數值</span>${seg('basis', [['unit', '單台'], ['year', '年度'], ['lc', 'LC 總額']], p.basis)}</label>` : ''}
-        <label class="field"><span>金額單位</span>${seg('unit', [[1, '元'], [1000, '千元'], [10000, '萬元']], p.unit)}</label>
-        ${p.mode !== 'manual' ? `<label class="field"><span>排序</span>${seg('sort', [['pl', '損益表順序'], ['abs', '影響大到小']], p.sort)}</label>
-          <label class="field"><span>最多顯示幾項（0 = 全部）</span><input type="number" min="0" style="width:90px;" value="${esc(p.topN)}" onchange="wfPrefs.topN=this.value;saveWfPrefs_();runWaterfall_()"></label>
-          <label class="field"><span>小於多少併入「其他」</span><input type="number" min="0" style="width:110px;" value="${esc(p.minAbs)}" onchange="wfPrefs.minAbs=this.value;saveWfPrefs_();runWaterfall_()"></label>` : ''}
-      </div>
-      <div class="field-row">
+        <label class="field" data-tip="全系統共用：儀表板、GATE 報告、瀑布圖工具用同一個金額單位"><span>金額單位</span>${seg('unit', [[1, '元'], [1000, '千元'], [10000, '萬元']], p.unit)}</label>
         ${p.mode === 'bridge' && p.basis !== 'unit' ? chk('volumeEffect', '拆出「銷量影響」') : ''}
         ${p.mode === 'structure' ? chk('subtotals', '顯示中間小計（生產毛利、銷貨毛利…）') : ''}
-        ${chk('labels', '顯示數字')}
-        <label class="field grow"><span>圖表標題（留空 = 自動）</span><input type="text" id="wf-title" value="${esc(wfTitle_())}" placeholder="自動" oninput="wfSetTitle_(this.value);saveWfPrefs_();wfRedraw_()"></label>
       </div>
+      <details class="ed-adv wf-adv"${advOpen ? ' open' : ''}>
+        <summary>進階（排序、顯示幾項、數字標籤、圖表標題）</summary>
+        <div class="field-row">
+          ${p.mode !== 'manual' ? `<label class="field"><span>排序</span>${seg('sort', [['pl', '損益表順序'], ['abs', '影響大到小']], p.sort)}</label>
+            <label class="field"><span>最多顯示幾項（0 = 全部）</span><input type="number" min="0" style="width:90px;" value="${esc(p.topN)}" onchange="wfPrefs.topN=this.value;saveWfPrefs_();runWaterfall_()"></label>
+            <label class="field"><span>小於多少併入「其他」</span><input type="number" min="0" style="width:110px;" value="${esc(p.minAbs)}" onchange="wfPrefs.minAbs=this.value;saveWfPrefs_();runWaterfall_()"></label>` : ''}
+          ${chk('labels', '顯示數字')}
+          <label class="field grow"><span>圖表標題（留空 = 自動）</span><input type="text" id="wf-title" value="${esc(wfTitle_())}" placeholder="自動" oninput="wfSetTitle_(this.value);saveWfPrefs_();wfRedraw_()"></label>
+        </div>
+      </details>
     </div>
     <div class="card">
       <div class="card-head"><h3 id="wf-heading">瀑布圖</h3><span class="spacer"></span>

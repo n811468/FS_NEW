@@ -51,11 +51,10 @@ function drawEntityGrid(key) {
   const toolbar = document.getElementById('toolbar-' + key);
   if (!toolbar) return;
 
-  toolbar.innerHTML = (cfg.createUi === 'scenario' ? '' : cfg.createUi === 'vehicleType'
+  toolbar.innerHTML = (cfg.createUi === 'scenario' ? scenarioToolbarHtml() : cfg.createUi === 'vehicleType'
     ? `<button type="button" class="btn" onclick="createVehicleTypeDialog()">＋ 新增車型</button>`
     : `<button type="button" class="btn" onclick="addEntityRow('${key}')">＋ 新增一列</button>`) +
-    `<span class="spacer"></span><button type="button" class="btn secondary" onclick="saveEntityGrid('${key}')">儲存</button>` +
-    (cfg.createUi === 'scenario' ? scenarioToolbarHtml() : '');
+    `<span class="spacer"></span><button type="button" class="btn secondary" onclick="saveEntityGrid('${key}')">儲存</button>`;
 
   const sortable = cfg.sortable && rows.length > 1;
   const body = rows.length
@@ -99,7 +98,6 @@ function drawEntityGrid(key) {
       }
     });
   }
-  if (key === 'scenarios') autoFillNewScenarioName_();
   if (pendingStatus && pendingStatus.key === key) {
     setStatus(key, pendingStatus.text, pendingStatus.cls);
     pendingStatus = null;
@@ -315,109 +313,81 @@ function refreshScenarioOptions(preferredId) {
   })).getScenarios(currentVehicleTypeId);
 }
 
-/* ---- 情境設定：以既有情境為基礎建立 / 把既有情境的資料帶進目前情境 ---- */
+/* ---- 情境：以既有情境為基礎建立 / 把既有情境的資料帶進目前情境 ----
+ * 平常用不到的表單不佔畫面：兩顆按鈕，按了才跳出對話框(要帶入哪些資料的勾選也在對話框裡)。 */
 function scenarioToolbarHtml() {
-  const existing = (entityRows.scenarios || []).filter(s => s.__existing);
-  const sourceOptions = existing
-    .map(s => `<option value="${esc(s.ScenarioID)}">${esc(scenarioLabel(s))}</option>`).join('');
-  const partChecks = SCENARIO_COPY_PARTS.map(p => `
-    <label class="chk"><input type="checkbox" id="copy-part-${p.key}" checked> ${p.label}</label>`).join('');
+  const hasOthers = (entityRows.scenarios || []).some(s => s.__existing);
+  return `<button type="button" class="btn" onclick="createScenarioDialog()">＋ 新增情境…</button>
+    <button type="button" class="btn secondary" onclick="importIntoCurrentScenarioDialog()"${hasOthers && currentScenarioId ? '' : ' disabled'}
+      data-tip="把另一個情境的資料(可勾選類別)複製進右上角目前選的情境">帶入目前情境…</button>`;
+}
+function scenarioSourceOptions_(excludeId) {
+  return (entityRows.scenarios || []).filter(s => s.__existing && s.ScenarioID !== excludeId).map(s => [s.ScenarioID, scenarioLabel(s)]);
+}
+const COPY_PARTS_FIELD_ = () => ({ name: 'parts', label: '要帶入的資料', type: 'checks',
+  options: SCENARIO_COPY_PARTS.map(p => [p.key, p.label]), value: SCENARIO_COPY_PARTS.map(p => p.key) });
 
-  return `
-    <div class="toolbar-block">
-      <div class="toolbar-block-title">＋ 新增情境</div>
-      <div class="toolbar">
-        <label>GATE 別
-          <select id="new-scenario-gate">${GATE_OPTIONS.map(g => `<option value="${g}">${g}</option>`).join('')}</select>
-        </label>
-        <label>情境名稱
-          <input id="new-scenario-name" type="text" style="width:170px;" placeholder="例：現況0901">
-        </label>
-        <label>情境性質
-          <select id="new-scenario-type" onchange="autoFillNewScenarioName_()">${SCENARIO_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
-        </label>
-        <label>以既有情境為基礎
-          <select id="new-scenario-source">
-            <option value="">(不帶入，建立空白情境)</option>${sourceOptions}
-          </select>
-        </label>
-        <button type="button" class="btn" onclick="createScenario()">建立情境</button>
-      </div>
-      <div class="toolbar">
-        <span class="muted">要帶入的資料：</span>${partChecks}
-      </div>
-      <div class="toolbar">
-        <span class="muted">或把既有情境的資料帶進目前選取的情境（${esc(currentScenario ? scenarioLabel(currentScenario) : '尚未選擇情境')}）：</span>
-        <select id="import-scenario-source">
-          <option value="">-- 選擇來源情境 --</option>${sourceOptions}
-        </select>
-        <button type="button" class="btn secondary" onclick="importIntoCurrentScenario()">帶入目前情境</button>
-      </div>
-    </div>`;
+function createScenarioDialog() {
+  const autoName = type => type + dateToMMDD_(today());
+  let lastAuto = autoName(SCENARIO_TYPES[0]);
+  const done = openModal({
+    title: '新增情境',
+    fields: [
+      { name: 'gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, value: GATE_OPTIONS[0] },
+      { name: 'type', label: '情境性質', type: 'select', options: SCENARIO_TYPES, value: SCENARIO_TYPES[0] },
+      { name: 'name', label: '情境名稱', value: lastAuto, placeholder: '例：現況0901' },
+      { name: 'source', label: '以既有情境為基礎', type: 'select', options: [['', '(不帶入，建立空白情境)']].concat(scenarioSourceOptions_('')), value: '' },
+      Object.assign(COPY_PARTS_FIELD_(), { help: '有選「以既有情境為基礎」時才會帶入' })
+    ],
+    okText: '建立情境',
+    validate: v => !v.name.trim() ? '請輸入情境名稱' : (v.source && !v.parts.length ? '請至少勾選一項要帶入的資料，或把來源改成「不帶入」' : '')
+  });
+  // 情境名稱還是自動帶入的值時，改情境性質就跟著換(現況0901 → 目標0901)
+  const dlg = document.querySelector('dialog.modal:last-of-type');
+  const typeEl = dlg && dlg.querySelector('#mf-1'), nameEl = dlg && dlg.querySelector('#mf-2');
+  if (typeEl && nameEl) typeEl.addEventListener('change', () => {
+    if (!nameEl.value || nameEl.value === lastAuto) { lastAuto = autoName(typeEl.value); nameEl.value = lastAuto; }
+  });
+  done.then(v => {
+    if (!v) return;
+    setStatus('scenarios', '建立中...');
+    google.script.run
+      .withSuccessHandler(safeHandler(saved => {
+        pendingStatus = { key: 'scenarios', text: v.source ? '已建立情境，並帶入來源情境的資料' : '已建立情境', cls: 'ok' };
+        loadEntityData('scenarios');
+        refreshScenarioOptions(saved && saved.ScenarioID);
+      }))
+      .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
+      .createScenarioFrom({
+        ScenarioID: '', Gate: v.gate, ScenarioName: v.name.trim(), ScenarioType: v.type,
+        VehicleTypeID: currentVehicleTypeId, CreatedDate: today(), Notes: ''
+      }, v.source, v.source ? v.parts : []);
+  });
 }
 
-function selectedCopyParts() {
-  return SCENARIO_COPY_PARTS
-    .filter(p => { const el = document.getElementById('copy-part-' + p.key); return el && el.checked; })
-    .map(p => p.key);
-}
-
-/** 「新增情境」表單：情境性質改變時，名稱欄位還是空白或還是上次自動帶入的值，就重新帶一次(性質+今天MMDD) */
-let newScenarioNameAuto_ = '';
-function autoFillNewScenarioName_() {
-  const nameEl = document.getElementById('new-scenario-name');
-  const typeEl = document.getElementById('new-scenario-type');
-  if (!nameEl || !typeEl) return;
-  const auto = (typeEl.value || '') + dateToMMDD_(today());
-  if (!nameEl.value || nameEl.value === newScenarioNameAuto_) {
-    nameEl.value = auto;
-    newScenarioNameAuto_ = auto;
-  }
-}
-
-function createScenario() {
-  const name = val('new-scenario-name');
-  if (!name) { setStatus('scenarios', '請輸入情境名稱', 'err'); return; }
-  const source = val('new-scenario-source');
-  const parts = selectedCopyParts();
-  if (source && !parts.length) {
-    setStatus('scenarios', '請至少勾選一項要帶入的資料，或把來源情境改成「不帶入」', 'err');
-    return;
-  }
-  setStatus('scenarios', '建立中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(saved => {
-      pendingStatus = { key: 'scenarios', text: source ? '已建立情境，並帶入來源情境的資料' : '已建立情境', cls: 'ok' };
-      loadEntityData('scenarios');
-      refreshScenarioOptions(saved && saved.ScenarioID);
-    }))
-    .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
-    .createScenarioFrom({
-      ScenarioID: '',
-      Gate: val('new-scenario-gate'),
-      ScenarioName: name,
-      ScenarioType: val('new-scenario-type'),
-      VehicleTypeID: currentVehicleTypeId,
-      CreatedDate: today(),
-      Notes: ''
-    }, source, parts);
-}
-
-function importIntoCurrentScenario() {
-  const source = val('import-scenario-source');
-  if (!currentScenarioId) { setStatus('scenarios', '請先在上方選擇要帶入的目標情境', 'err'); return; }
-  if (!source) { setStatus('scenarios', '請選擇來源情境', 'err'); return; }
-  const parts = selectedCopyParts();
-  if (!parts.length) { setStatus('scenarios', '請至少勾選一項要帶入的資料', 'err'); return; }
-  confirmModal('帶入到目前情境？', '會先清掉目前情境所勾選類別的資料，再整批複製來源情境的內容。', '帶入', true).then(ok => {
-  if (!ok) return;
-  setStatus('scenarios', '帶入中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(() => {
-      setStatus('scenarios', '已帶入來源情境的資料（開發總投的挑戰低減目標已清空，請重新填寫）', 'ok');
-    }))
-    .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
-    .copyScenarioData(source, currentScenarioId, parts);
+function importIntoCurrentScenarioDialog() {
+  if (!currentScenarioId) { toast('請先在右上角選擇要帶入的目標情境', 'warn'); return; }
+  const sources = scenarioSourceOptions_(currentScenarioId);
+  if (!sources.length) { toast('這個車型沒有其他情境可以帶入', 'warn'); return; }
+  openModal({
+    title: '帶入目前情境：' + (currentScenario ? scenarioLabel(currentScenario) : ''),
+    body: '<p class="help">會先清掉目前情境所勾選類別的資料，再整批複製來源情境的內容（開發總投的挑戰低減目標會清空，請重新填寫）。</p>',
+    fields: [
+      { name: 'source', label: '來源情境', type: 'select', options: sources, value: sources[0][0] },
+      COPY_PARTS_FIELD_()
+    ],
+    okText: '帶入', danger: true,
+    validate: v => !v.parts.length ? '請至少勾選一項要帶入的資料' : ''
+  }).then(v => {
+    if (!v) return;
+    setStatus('scenarios', '帶入中...');
+    google.script.run
+      .withSuccessHandler(safeHandler(() => {
+        Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+        setStatus('scenarios', '已帶入來源情境的資料（開發總投的挑戰低減目標已清空，請重新填寫）', 'ok');
+      }))
+      .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
+      .copyScenarioData(v.source, currentScenarioId, v.parts);
   });
 }
 

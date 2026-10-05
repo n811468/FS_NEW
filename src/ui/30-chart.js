@@ -378,7 +378,7 @@ function chartEditorPaneHtml_() {
           <label class="chk" style="margin-top:12px;" data-tip="貨物稅的完稅價格要扣除這個科目（預設：廣宣、促銷、批標售、季Margin）。公式 TAXDEDUCT() 就是這些科目的合計。">
             <input type="checkbox" ${String(d.CommodityTaxDeduct).toUpperCase() === 'Y' ? 'checked' : ''}
               onchange="chartDraft.CommodityTaxDeduct=this.checked?'Y':'';chartDirty_();schedulePreview_()"> 貨物稅完稅價格可以扣除這個科目</label>
-          <label class="field" style="margin-top:12px;"><span>科目說明（算法依據、資料來源）</span>
+          <label class="field" style="margin-top:12px;"><span>算法說明（算法依據、資料來源；整個車型共用，不會印在報告上）</span>
             <textarea rows="2" oninput="chartDraft.Description=this.value;chartDirty_()" placeholder="例：依生技部工時 × 24~26 年平均費率">${esc(d.Description || '')}</textarea></label>
         </div>
       </details>

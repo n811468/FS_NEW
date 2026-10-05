@@ -61,7 +61,6 @@
   .nav-item.active { background: #fff; color: var(--sidebar); font-weight: 600; box-shadow: 0 6px 16px -10px rgba(0, 0, 0, .6); }
   .nav-item.active svg { opacity: 1; color: var(--primary); }
   .nav-item .nav-badge { margin-left: auto; font-size: 10px; background: #e9b949; color: #1b1300; border-radius: 10px; padding: 1px 6px; font-weight: 700; }
-  .sidebar-foot { margin-top: auto; padding: 14px 18px; font-size: 11px; color: #6d7ba0; line-height: 1.6; }
   .sidebar-toggle { display: none; }
 
   .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -242,6 +241,8 @@
   .sort-flash > td { animation: sortFlash .9s ease-out; }
   @keyframes sortFlash { from { background: #fff2bf; } to { background: transparent; } }
   .chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip-list label.chk { display: inline-flex; margin-right: 6px; }
+  .chip-list label.chk input { width: auto; }
   .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 999px;
     padding: 3px 10px 3px 4px; font-size: 12.5px; font-weight: 600; color: var(--text); }
   .chip .drag-handle { width: 18px; height: 20px; }
@@ -552,6 +553,9 @@
   .field.grow { flex: 1; min-width: 220px; }
   .field.grow input { width: 100%; }
   .wf-opts { margin-top: 12px; }
+  .wf-adv { border-bottom: none; margin-top: 10px; }
+  .wf-adv > summary { padding: 6px 0; font-size: 12.5px; }
+  .wf-adv > .field-row { margin-top: 6px; }
   .wf-manual { margin: 10px 0; }
   .wf-manual input[type=text] { width: 100%; }
   .wf-manual input[type=number] { width: 140px; }

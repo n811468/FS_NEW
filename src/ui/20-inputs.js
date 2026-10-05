@@ -170,26 +170,49 @@ const MATRIX_CONFIG = {
     title: '銷貨成本',
     getFn: 'getCostOfSalesMatrix', saveFn: 'saveCostOfSalesMatrix',
     parentLine: 'B', hasCurrency: true, totalLabel: '手動輸入合計',
-    intro: '列 = 成本項目、欄 = 車系，每格填單台金額。<b>計算來源是「手動輸入」的科目</b>才會出現在上半部；公式或開發總投攤提的科目列在下方唯讀，滑鼠移到金額上可以看計算過程。「說明」欄會直接帶到 GATE 報告上。'
+    intro: '列 = 成本項目、欄 = 車系，每格填單台金額。<b>計算來源是「手動輸入」的科目</b>才會出現在上半部；公式或開發總投攤提的科目列在下方唯讀，滑鼠移到金額上可以看計算過程。「報告說明」欄會直接印在 GATE 報告的「說明」欄。'
   },
   operatingexpense: {
     title: '營業費用',
     getFn: 'getOperatingExpenseMatrix', saveFn: 'saveOperatingExpenseMatrix',
     parentLine: 'E', hasCurrency: false, totalLabel: '手動輸入合計',
     parentOptions: [['E', '銷售費用(銷貨毛利前)'], ['G', '產品貢獻前費用'], ['I', '固定營業費用']],
-    intro: '銷售費用、產品貢獻前費用、固定營業費用、前瞻費用的單台金額。季Margin、開發費用攤提等由公式或開發總投算出，列在下方唯讀。'
+    intro: '銷售費用、產品貢獻前費用、固定營業費用、前瞻費用的單台金額。季Margin、開發費用攤提等由公式或開發總投算出，列在下方唯讀。「報告說明」欄會直接印在 GATE 報告的「說明」欄。'
   }
 };
 
 let matrixData = {};   // key -> {lines, vehicles, values, currencies, lineNotes, autoLines...}
 
-function renderCostOfSalesPanel() { renderMatrixPanel('costofsales'); }
-function renderOperatingExpensePanel() { renderMatrixPanel('operatingexpense'); }
+/**
+ * 成本與費用：銷貨成本、營業費用兩張表用同一個元件，放在同一頁用子頁籤切換(以前是兩個分頁)。
+ * 目前在哪個子頁籤記在瀏覽器裡。
+ */
+const COSTS_VIEW_KEY_ = 'plCosts.view.v1';
+let costsView = (() => { try { const v = localStorage.getItem(COSTS_VIEW_KEY_); return v === 'operatingexpense' ? v : 'costofsales'; } catch (e) { return 'costofsales'; } })();
+function renderCostsPanel() {
+  const panel = document.getElementById('panel-costs');
+  if (!panel || !requireScope('costs', true)) return;
+  panel.innerHTML = `<div class="dash-subnav">${Object.keys(MATRIX_CONFIG).map(k =>
+      `<button type="button" class="dash-subnav-btn${costsView === k ? ' active' : ''}" onclick="setCostsView('${k}')">${esc(MATRIX_CONFIG[k].title)}</button>`).join('')}</div>
+    <div id="costs-body"></div>`;
+  renderMatrixPanel(costsView);
+}
+function setCostsView(key) {
+  if (key === costsView) return;
+  const go = () => {
+    clearDirty();
+    costsView = key;
+    try { localStorage.setItem(COSTS_VIEW_KEY_, key); } catch (e) { /* 存不了就算了 */ }
+    renderCostsPanel();
+  };
+  if (isDirty_()) confirmLeave_().then(ok => { if (ok) go(); }); else go();
+}
 
 function renderMatrixPanel(key) {
-  if (!requireScope(key, true)) return;
   const cfg = MATRIX_CONFIG[key];
-  document.getElementById('panel-' + key).innerHTML = gridShell(key, cfg.title, cfg.intro);
+  const body = document.getElementById('costs-body');
+  if (!body) return;
+  body.innerHTML = gridShell(key, cfg.title, cfg.intro);
   const cacheKey = panelCacheKey_(key);
   if (panelDataCache_[cacheKey]) { matrixData[key] = panelDataCache_[cacheKey]; drawMatrix(key); }
   google.script.run
@@ -266,7 +289,7 @@ function drawMatrix(key) {
         <th>項目</th>
         ${cfg.hasCurrency ? '<th>幣別</th>' : ''}
         ${data.vehicles.map(v => `<th>${esc(v.VehicleCode || v.VehicleID)}<div class="th-sub">構成比 ${fmt(num(v.SalesMixPct), 1)}%</div></th>`).join('')}
-        <th>加權平均</th><th>說明（帶到報告）</th><th></th>
+        <th>加權平均</th><th data-tip="這個情境的說明，會印在 GATE 報告的「說明」欄（在報告上改也是同一份）">報告說明</th><th></th>
       </tr></thead>
       <tbody>
         ${data.lines.length ? '' : `<tr><td colspan="${data.vehicles.length + 5}" class="muted" style="text-align:center;padding:18px;">還沒有手動輸入的項目，用上方「新增項目」新增</td></tr>`}

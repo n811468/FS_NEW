@@ -104,7 +104,6 @@
   .nav-item.active { background: #fff; color: var(--sidebar); font-weight: 600; box-shadow: 0 6px 16px -10px rgba(0, 0, 0, .6); }
   .nav-item.active svg { opacity: 1; color: var(--primary); }
   .nav-item .nav-badge { margin-left: auto; font-size: 10px; background: #e9b949; color: #1b1300; border-radius: 10px; padding: 1px 6px; font-weight: 700; }
-  .sidebar-foot { margin-top: auto; padding: 14px 18px; font-size: 11px; color: #6d7ba0; line-height: 1.6; }
   .sidebar-toggle { display: none; }
 
   .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -285,6 +284,8 @@
   .sort-flash > td { animation: sortFlash .9s ease-out; }
   @keyframes sortFlash { from { background: #fff2bf; } to { background: transparent; } }
   .chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip-list label.chk { display: inline-flex; margin-right: 6px; }
+  .chip-list label.chk input { width: auto; }
   .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 999px;
     padding: 3px 10px 3px 4px; font-size: 12.5px; font-weight: 600; color: var(--text); }
   .chip .drag-handle { width: 18px; height: 20px; }
@@ -595,6 +596,9 @@
   .field.grow { flex: 1; min-width: 220px; }
   .field.grow input { width: 100%; }
   .wf-opts { margin-top: 12px; }
+  .wf-adv { border-bottom: none; margin-top: 10px; }
+  .wf-adv > summary { padding: 6px 0; font-size: 12.5px; }
+  .wf-adv > .field-row { margin-top: 6px; }
   .wf-manual { margin: 10px 0; }
   .wf-manual input[type=text] { width: 100%; }
   .wf-manual input[type=number] { width: 140px; }
@@ -6565,7 +6569,7 @@ function reportMaintenance_(message) {
 
 </script>
   <!--
-    v2 版面：左側導覽依工作流程分四組 ——
+    版面：左側導覽依工作流程分四組 ——
       結果呈現(看數字、做簡報) → 輸入資料(每個情境要填的數字) → 計算設定(科目與公式、參數與匯率) → 主檔(車型與情境：車型/車系/情境同一頁)
     右側上方固定顯示「目前在哪個車型、哪個情境」，所有輸入頁都以它為範圍。
   -->
@@ -6591,12 +6595,10 @@ function reportMaintenance_(message) {
           <div class="nav-group-label">輸入資料（目前情境）</div>
           <button class="nav-item" data-tab="salesmix" onclick="switchTab('salesmix')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>銷售構成與售價</button>
-          <button class="nav-item" data-tab="costofsales" onclick="switchTab('costofsales')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>銷貨成本</button>
+          <button class="nav-item" data-tab="costs" onclick="switchTab('costs')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg>成本與費用</button>
           <button class="nav-item" data-tab="devinvestment" onclick="switchTab('devinvestment')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/></svg>開發總投</button>
-          <button class="nav-item" data-tab="operatingexpense" onclick="switchTab('operatingexpense')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>營業費用</button>
         </div>
         <div class="nav-group">
           <div class="nav-group-label">計算設定</div>
@@ -6611,7 +6613,6 @@ function reportMaintenance_(message) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14M6 17l1.5-6h9L18 17M7 17v2M17 17v2"/><circle cx="8" cy="14.5" r=".5"/><circle cx="16" cy="14.5" r=".5"/></svg>車型與情境</button>
         </div>
       </nav>
-      <div class="sidebar-foot">v2 · 每個車型各自一份科目表<br>公式式計算來源 · 拖曳排序</div>
     </aside>
 
     <div class="main-col">
@@ -6645,9 +6646,8 @@ function reportMaintenance_(message) {
         <div id="panel-whatif" class="panel"></div>
         <div id="panel-waterfall" class="panel"></div>
         <div id="panel-salesmix" class="panel"></div>
-        <div id="panel-costofsales" class="panel"></div>
+        <div id="panel-costs" class="panel"></div>
         <div id="panel-devinvestment" class="panel"></div>
-        <div id="panel-operatingexpense" class="panel"></div>
         <div id="panel-lineitems" class="panel"></div>
         <div id="panel-paramrates" class="panel"></div>
         <div id="panel-masters" class="panel active"></div>
@@ -6693,7 +6693,7 @@ const SCENARIO_COPY_PARTS = [
   { key: 'devinvestment', label: '開發總投' },
   { key: 'operatingexpense', label: '營業費用' },
   { key: 'parameters', label: '費率/匯率' },
-  { key: 'linenotes', label: '科目說明' },
+  { key: 'linenotes', label: '報告說明' },
   { key: 'actions', label: '改善作法' }
 ];
 
@@ -6751,8 +6751,7 @@ function isDeletableAutoLineItem(row) {
 // 表格編輯頁：key -> 渲染函式名稱
 const GRID_PANELS = {
   salesmix: 'renderSalesMixPanel',
-  costofsales: 'renderCostOfSalesPanel',
-  operatingexpense: 'renderOperatingExpensePanel',
+  costs: 'renderCostsPanel',          // 銷貨成本 / 營業費用 兩個子頁籤
   devinvestment: 'renderDevInvestmentPanel',
   paramrates: 'renderRatePanel'      // 匯率(renderFxPanel)畫在同一頁下半部
 };
@@ -7153,16 +7152,17 @@ function dragHandleHtml(label) {
 
 const PAGE_META = {
   dashboard: ['結果呈現', '損益儀表板'], report: ['結果呈現', 'GATE 審議報告'], whatif: ['結果呈現', '目標反推與敏感度分析'], waterfall: ['結果呈現', '瀑布圖工具'],
-  salesmix: ['輸入資料', '銷售構成與售價'], costofsales: ['輸入資料', '銷貨成本'],
-  devinvestment: ['輸入資料', '開發總投'], operatingexpense: ['輸入資料', '營業費用'],
+  salesmix: ['輸入資料', '銷售構成與售價'], costs: ['輸入資料', '成本與費用'], devinvestment: ['輸入資料', '開發總投'],
   lineitems: ['計算設定', '科目與公式'], paramrates: ['計算設定', '參數與匯率'],
   masters: ['主檔', '車型與情境']
 };
 /** 已經併到別頁的舊分頁(記在瀏覽器裡的上次位置、其他頁的「前往」按鈕)：導到新的那一頁 */
-const MERGED_TABS_ = { vehicletypes: 'masters', vehicles: 'masters', scenarios: 'masters', paramfx: 'paramrates' };
+const MERGED_TABS_ = { vehicletypes: 'masters', vehicles: 'masters', scenarios: 'masters', paramfx: 'paramrates',
+  costofsales: 'costs', operatingexpense: 'costs' };
 
 /* ---------------- 頁籤 / 上方選單 ---------------- */
 function switchTab(key, force) {
+  if (MATRIX_CONFIG[key]) costsView = key;   // 「前往銷貨成本/營業費用」：到成本與費用頁的那個子頁籤
   key = MERGED_TABS_[key] || key;
   if (!force && key !== currentTab && isDirty_()) {
     confirmLeave_().then(ok => { if (ok) switchTab(key, true); });
@@ -7429,11 +7429,10 @@ function drawEntityGrid(key) {
   const toolbar = document.getElementById('toolbar-' + key);
   if (!toolbar) return;
 
-  toolbar.innerHTML = (cfg.createUi === 'scenario' ? '' : cfg.createUi === 'vehicleType'
+  toolbar.innerHTML = (cfg.createUi === 'scenario' ? scenarioToolbarHtml() : cfg.createUi === 'vehicleType'
     ? `<button type="button" class="btn" onclick="createVehicleTypeDialog()">＋ 新增車型</button>`
     : `<button type="button" class="btn" onclick="addEntityRow('${key}')">＋ 新增一列</button>`) +
-    `<span class="spacer"></span><button type="button" class="btn secondary" onclick="saveEntityGrid('${key}')">儲存</button>` +
-    (cfg.createUi === 'scenario' ? scenarioToolbarHtml() : '');
+    `<span class="spacer"></span><button type="button" class="btn secondary" onclick="saveEntityGrid('${key}')">儲存</button>`;
 
   const sortable = cfg.sortable && rows.length > 1;
   const body = rows.length
@@ -7477,7 +7476,6 @@ function drawEntityGrid(key) {
       }
     });
   }
-  if (key === 'scenarios') autoFillNewScenarioName_();
   if (pendingStatus && pendingStatus.key === key) {
     setStatus(key, pendingStatus.text, pendingStatus.cls);
     pendingStatus = null;
@@ -7693,109 +7691,81 @@ function refreshScenarioOptions(preferredId) {
   })).getScenarios(currentVehicleTypeId);
 }
 
-/* ---- 情境設定：以既有情境為基礎建立 / 把既有情境的資料帶進目前情境 ---- */
+/* ---- 情境：以既有情境為基礎建立 / 把既有情境的資料帶進目前情境 ----
+ * 平常用不到的表單不佔畫面：兩顆按鈕，按了才跳出對話框(要帶入哪些資料的勾選也在對話框裡)。 */
 function scenarioToolbarHtml() {
-  const existing = (entityRows.scenarios || []).filter(s => s.__existing);
-  const sourceOptions = existing
-    .map(s => `<option value="${esc(s.ScenarioID)}">${esc(scenarioLabel(s))}</option>`).join('');
-  const partChecks = SCENARIO_COPY_PARTS.map(p => `
-    <label class="chk"><input type="checkbox" id="copy-part-${p.key}" checked> ${p.label}</label>`).join('');
+  const hasOthers = (entityRows.scenarios || []).some(s => s.__existing);
+  return `<button type="button" class="btn" onclick="createScenarioDialog()">＋ 新增情境…</button>
+    <button type="button" class="btn secondary" onclick="importIntoCurrentScenarioDialog()"${hasOthers && currentScenarioId ? '' : ' disabled'}
+      data-tip="把另一個情境的資料(可勾選類別)複製進右上角目前選的情境">帶入目前情境…</button>`;
+}
+function scenarioSourceOptions_(excludeId) {
+  return (entityRows.scenarios || []).filter(s => s.__existing && s.ScenarioID !== excludeId).map(s => [s.ScenarioID, scenarioLabel(s)]);
+}
+const COPY_PARTS_FIELD_ = () => ({ name: 'parts', label: '要帶入的資料', type: 'checks',
+  options: SCENARIO_COPY_PARTS.map(p => [p.key, p.label]), value: SCENARIO_COPY_PARTS.map(p => p.key) });
 
-  return `
-    <div class="toolbar-block">
-      <div class="toolbar-block-title">＋ 新增情境</div>
-      <div class="toolbar">
-        <label>GATE 別
-          <select id="new-scenario-gate">${GATE_OPTIONS.map(g => `<option value="${g}">${g}</option>`).join('')}</select>
-        </label>
-        <label>情境名稱
-          <input id="new-scenario-name" type="text" style="width:170px;" placeholder="例：現況0901">
-        </label>
-        <label>情境性質
-          <select id="new-scenario-type" onchange="autoFillNewScenarioName_()">${SCENARIO_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
-        </label>
-        <label>以既有情境為基礎
-          <select id="new-scenario-source">
-            <option value="">(不帶入，建立空白情境)</option>${sourceOptions}
-          </select>
-        </label>
-        <button type="button" class="btn" onclick="createScenario()">建立情境</button>
-      </div>
-      <div class="toolbar">
-        <span class="muted">要帶入的資料：</span>${partChecks}
-      </div>
-      <div class="toolbar">
-        <span class="muted">或把既有情境的資料帶進目前選取的情境（${esc(currentScenario ? scenarioLabel(currentScenario) : '尚未選擇情境')}）：</span>
-        <select id="import-scenario-source">
-          <option value="">-- 選擇來源情境 --</option>${sourceOptions}
-        </select>
-        <button type="button" class="btn secondary" onclick="importIntoCurrentScenario()">帶入目前情境</button>
-      </div>
-    </div>`;
+function createScenarioDialog() {
+  const autoName = type => type + dateToMMDD_(today());
+  let lastAuto = autoName(SCENARIO_TYPES[0]);
+  const done = openModal({
+    title: '新增情境',
+    fields: [
+      { name: 'gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, value: GATE_OPTIONS[0] },
+      { name: 'type', label: '情境性質', type: 'select', options: SCENARIO_TYPES, value: SCENARIO_TYPES[0] },
+      { name: 'name', label: '情境名稱', value: lastAuto, placeholder: '例：現況0901' },
+      { name: 'source', label: '以既有情境為基礎', type: 'select', options: [['', '(不帶入，建立空白情境)']].concat(scenarioSourceOptions_('')), value: '' },
+      Object.assign(COPY_PARTS_FIELD_(), { help: '有選「以既有情境為基礎」時才會帶入' })
+    ],
+    okText: '建立情境',
+    validate: v => !v.name.trim() ? '請輸入情境名稱' : (v.source && !v.parts.length ? '請至少勾選一項要帶入的資料，或把來源改成「不帶入」' : '')
+  });
+  // 情境名稱還是自動帶入的值時，改情境性質就跟著換(現況0901 → 目標0901)
+  const dlg = document.querySelector('dialog.modal:last-of-type');
+  const typeEl = dlg && dlg.querySelector('#mf-1'), nameEl = dlg && dlg.querySelector('#mf-2');
+  if (typeEl && nameEl) typeEl.addEventListener('change', () => {
+    if (!nameEl.value || nameEl.value === lastAuto) { lastAuto = autoName(typeEl.value); nameEl.value = lastAuto; }
+  });
+  done.then(v => {
+    if (!v) return;
+    setStatus('scenarios', '建立中...');
+    google.script.run
+      .withSuccessHandler(safeHandler(saved => {
+        pendingStatus = { key: 'scenarios', text: v.source ? '已建立情境，並帶入來源情境的資料' : '已建立情境', cls: 'ok' };
+        loadEntityData('scenarios');
+        refreshScenarioOptions(saved && saved.ScenarioID);
+      }))
+      .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
+      .createScenarioFrom({
+        ScenarioID: '', Gate: v.gate, ScenarioName: v.name.trim(), ScenarioType: v.type,
+        VehicleTypeID: currentVehicleTypeId, CreatedDate: today(), Notes: ''
+      }, v.source, v.source ? v.parts : []);
+  });
 }
 
-function selectedCopyParts() {
-  return SCENARIO_COPY_PARTS
-    .filter(p => { const el = document.getElementById('copy-part-' + p.key); return el && el.checked; })
-    .map(p => p.key);
-}
-
-/** 「新增情境」表單：情境性質改變時，名稱欄位還是空白或還是上次自動帶入的值，就重新帶一次(性質+今天MMDD) */
-let newScenarioNameAuto_ = '';
-function autoFillNewScenarioName_() {
-  const nameEl = document.getElementById('new-scenario-name');
-  const typeEl = document.getElementById('new-scenario-type');
-  if (!nameEl || !typeEl) return;
-  const auto = (typeEl.value || '') + dateToMMDD_(today());
-  if (!nameEl.value || nameEl.value === newScenarioNameAuto_) {
-    nameEl.value = auto;
-    newScenarioNameAuto_ = auto;
-  }
-}
-
-function createScenario() {
-  const name = val('new-scenario-name');
-  if (!name) { setStatus('scenarios', '請輸入情境名稱', 'err'); return; }
-  const source = val('new-scenario-source');
-  const parts = selectedCopyParts();
-  if (source && !parts.length) {
-    setStatus('scenarios', '請至少勾選一項要帶入的資料，或把來源情境改成「不帶入」', 'err');
-    return;
-  }
-  setStatus('scenarios', '建立中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(saved => {
-      pendingStatus = { key: 'scenarios', text: source ? '已建立情境，並帶入來源情境的資料' : '已建立情境', cls: 'ok' };
-      loadEntityData('scenarios');
-      refreshScenarioOptions(saved && saved.ScenarioID);
-    }))
-    .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
-    .createScenarioFrom({
-      ScenarioID: '',
-      Gate: val('new-scenario-gate'),
-      ScenarioName: name,
-      ScenarioType: val('new-scenario-type'),
-      VehicleTypeID: currentVehicleTypeId,
-      CreatedDate: today(),
-      Notes: ''
-    }, source, parts);
-}
-
-function importIntoCurrentScenario() {
-  const source = val('import-scenario-source');
-  if (!currentScenarioId) { setStatus('scenarios', '請先在上方選擇要帶入的目標情境', 'err'); return; }
-  if (!source) { setStatus('scenarios', '請選擇來源情境', 'err'); return; }
-  const parts = selectedCopyParts();
-  if (!parts.length) { setStatus('scenarios', '請至少勾選一項要帶入的資料', 'err'); return; }
-  confirmModal('帶入到目前情境？', '會先清掉目前情境所勾選類別的資料，再整批複製來源情境的內容。', '帶入', true).then(ok => {
-  if (!ok) return;
-  setStatus('scenarios', '帶入中...');
-  google.script.run
-    .withSuccessHandler(safeHandler(() => {
-      setStatus('scenarios', '已帶入來源情境的資料（開發總投的挑戰低減目標已清空，請重新填寫）', 'ok');
-    }))
-    .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
-    .copyScenarioData(source, currentScenarioId, parts);
+function importIntoCurrentScenarioDialog() {
+  if (!currentScenarioId) { toast('請先在右上角選擇要帶入的目標情境', 'warn'); return; }
+  const sources = scenarioSourceOptions_(currentScenarioId);
+  if (!sources.length) { toast('這個車型沒有其他情境可以帶入', 'warn'); return; }
+  openModal({
+    title: '帶入目前情境：' + (currentScenario ? scenarioLabel(currentScenario) : ''),
+    body: '<p class="help">會先清掉目前情境所勾選類別的資料，再整批複製來源情境的內容（開發總投的挑戰低減目標會清空，請重新填寫）。</p>',
+    fields: [
+      { name: 'source', label: '來源情境', type: 'select', options: sources, value: sources[0][0] },
+      COPY_PARTS_FIELD_()
+    ],
+    okText: '帶入', danger: true,
+    validate: v => !v.parts.length ? '請至少勾選一項要帶入的資料' : ''
+  }).then(v => {
+    if (!v) return;
+    setStatus('scenarios', '帶入中...');
+    google.script.run
+      .withSuccessHandler(safeHandler(() => {
+        Object.keys(panelDataCache_).forEach(k => delete panelDataCache_[k]);
+        setStatus('scenarios', '已帶入來源情境的資料（開發總投的挑戰低減目標已清空，請重新填寫）', 'ok');
+      }))
+      .withFailureHandler(err => setStatus('scenarios', '錯誤：' + err.message, 'err'))
+      .copyScenarioData(v.source, currentScenarioId, v.parts);
   });
 }
 
@@ -8087,26 +8057,49 @@ const MATRIX_CONFIG = {
     title: '銷貨成本',
     getFn: 'getCostOfSalesMatrix', saveFn: 'saveCostOfSalesMatrix',
     parentLine: 'B', hasCurrency: true, totalLabel: '手動輸入合計',
-    intro: '列 = 成本項目、欄 = 車系，每格填單台金額。<b>計算來源是「手動輸入」的科目</b>才會出現在上半部；公式或開發總投攤提的科目列在下方唯讀，滑鼠移到金額上可以看計算過程。「說明」欄會直接帶到 GATE 報告上。'
+    intro: '列 = 成本項目、欄 = 車系，每格填單台金額。<b>計算來源是「手動輸入」的科目</b>才會出現在上半部；公式或開發總投攤提的科目列在下方唯讀，滑鼠移到金額上可以看計算過程。「報告說明」欄會直接印在 GATE 報告的「說明」欄。'
   },
   operatingexpense: {
     title: '營業費用',
     getFn: 'getOperatingExpenseMatrix', saveFn: 'saveOperatingExpenseMatrix',
     parentLine: 'E', hasCurrency: false, totalLabel: '手動輸入合計',
     parentOptions: [['E', '銷售費用(銷貨毛利前)'], ['G', '產品貢獻前費用'], ['I', '固定營業費用']],
-    intro: '銷售費用、產品貢獻前費用、固定營業費用、前瞻費用的單台金額。季Margin、開發費用攤提等由公式或開發總投算出，列在下方唯讀。'
+    intro: '銷售費用、產品貢獻前費用、固定營業費用、前瞻費用的單台金額。季Margin、開發費用攤提等由公式或開發總投算出，列在下方唯讀。「報告說明」欄會直接印在 GATE 報告的「說明」欄。'
   }
 };
 
 let matrixData = {};   // key -> {lines, vehicles, values, currencies, lineNotes, autoLines...}
 
-function renderCostOfSalesPanel() { renderMatrixPanel('costofsales'); }
-function renderOperatingExpensePanel() { renderMatrixPanel('operatingexpense'); }
+/**
+ * 成本與費用：銷貨成本、營業費用兩張表用同一個元件，放在同一頁用子頁籤切換(以前是兩個分頁)。
+ * 目前在哪個子頁籤記在瀏覽器裡。
+ */
+const COSTS_VIEW_KEY_ = 'plCosts.view.v1';
+let costsView = (() => { try { const v = localStorage.getItem(COSTS_VIEW_KEY_); return v === 'operatingexpense' ? v : 'costofsales'; } catch (e) { return 'costofsales'; } })();
+function renderCostsPanel() {
+  const panel = document.getElementById('panel-costs');
+  if (!panel || !requireScope('costs', true)) return;
+  panel.innerHTML = `<div class="dash-subnav">${Object.keys(MATRIX_CONFIG).map(k =>
+      `<button type="button" class="dash-subnav-btn${costsView === k ? ' active' : ''}" onclick="setCostsView('${k}')">${esc(MATRIX_CONFIG[k].title)}</button>`).join('')}</div>
+    <div id="costs-body"></div>`;
+  renderMatrixPanel(costsView);
+}
+function setCostsView(key) {
+  if (key === costsView) return;
+  const go = () => {
+    clearDirty();
+    costsView = key;
+    try { localStorage.setItem(COSTS_VIEW_KEY_, key); } catch (e) { /* 存不了就算了 */ }
+    renderCostsPanel();
+  };
+  if (isDirty_()) confirmLeave_().then(ok => { if (ok) go(); }); else go();
+}
 
 function renderMatrixPanel(key) {
-  if (!requireScope(key, true)) return;
   const cfg = MATRIX_CONFIG[key];
-  document.getElementById('panel-' + key).innerHTML = gridShell(key, cfg.title, cfg.intro);
+  const body = document.getElementById('costs-body');
+  if (!body) return;
+  body.innerHTML = gridShell(key, cfg.title, cfg.intro);
   const cacheKey = panelCacheKey_(key);
   if (panelDataCache_[cacheKey]) { matrixData[key] = panelDataCache_[cacheKey]; drawMatrix(key); }
   google.script.run
@@ -8183,7 +8176,7 @@ function drawMatrix(key) {
         <th>項目</th>
         ${cfg.hasCurrency ? '<th>幣別</th>' : ''}
         ${data.vehicles.map(v => `<th>${esc(v.VehicleCode || v.VehicleID)}<div class="th-sub">構成比 ${fmt(num(v.SalesMixPct), 1)}%</div></th>`).join('')}
-        <th>加權平均</th><th>說明（帶到報告）</th><th></th>
+        <th>加權平均</th><th data-tip="這個情境的說明，會印在 GATE 報告的「說明」欄（在報告上改也是同一份）">報告說明</th><th></th>
       </tr></thead>
       <tbody>
         ${data.lines.length ? '' : `<tr><td colspan="${data.vehicles.length + 5}" class="muted" style="text-align:center;padding:18px;">還沒有手動輸入的項目，用上方「新增項目」新增</td></tr>`}
@@ -9321,7 +9314,7 @@ function chartEditorPaneHtml_() {
           <label class="chk" style="margin-top:12px;" data-tip="貨物稅的完稅價格要扣除這個科目（預設：廣宣、促銷、批標售、季Margin）。公式 TAXDEDUCT() 就是這些科目的合計。">
             <input type="checkbox" ${String(d.CommodityTaxDeduct).toUpperCase() === 'Y' ? 'checked' : ''}
               onchange="chartDraft.CommodityTaxDeduct=this.checked?'Y':'';chartDirty_();schedulePreview_()"> 貨物稅完稅價格可以扣除這個科目</label>
-          <label class="field" style="margin-top:12px;"><span>科目說明（算法依據、資料來源）</span>
+          <label class="field" style="margin-top:12px;"><span>算法說明（算法依據、資料來源；整個車型共用，不會印在報告上）</span>
             <textarea rows="2" oninput="chartDraft.Description=this.value;chartDirty_()" placeholder="例：依生技部工時 × 24~26 年平均費率">${esc(d.Description || '')}</textarea></label>
         </div>
       </details>
@@ -10464,6 +10457,7 @@ function renderReportPanel() {
     return;
   }
   loadReportPrefs_();
+  loadWhatIfPrefs_();
   defaultReportSel_();
   const opt = (id, allowEmpty, emptyText) => (allowEmpty ? `<option value="">${emptyText}</option>` : '') +
     scenarioCache.map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === id ? ' selected' : ''}>${esc(scenarioLabel(s))}（${esc(s.ScenarioType || '現況')}）</option>`).join('');
@@ -10479,12 +10473,13 @@ function renderReportPanel() {
         <label class="field" data-tip="全系統共用：儀表板、GATE 報告、瀑布圖工具用同一個金額單位"><span>金額單位</span><div class="seg">
           ${AMOUNT_UNITS_.map(([u, t]) => `<button type="button" class="seg-btn${reportUnit === u ? ' active' : ''}" data-unit="${u}" onclick="setReportUnit(${u})">${t}/台</button>`).join('')}</div></label>
         <label class="chk" style="align-self:center;"><input type="checkbox" ${reportShowPrice ? 'checked' : ''} onchange="reportShowPrice=this.checked;saveReportPrefs_();drawReport_()"> 顯示售價結構</label>
+        <label class="chk" style="align-self:center;" data-tip="兩項假設、看哪個結果，在「目標反推與敏感度」頁設定"><input type="checkbox" ${whatIfPrefs.sens.inReport ? 'checked' : ''} onchange="whatIfPrefs.sens.inReport=this.checked;saveWhatIfPrefs_();drawReport_()"> 附敏感度分析</label>
         <span style="flex:1"></span>
         <button type="button" class="btn secondary" onclick="createSnapshotDialog_(reportSel.target, (scenarioCache.find(s => s.ScenarioID === reportSel.target) || {}).ScenarioName ? scenarioLabel(scenarioCache.find(s => s.ScenarioID === reportSel.target)) : '')" data-tip="把目標情境現在的數字存一份，之後可以比較改了什麼">存成快照</button>
         <button type="button" class="btn secondary" onclick="loadReport_()">重新計算</button>
         <button type="button" class="btn" onclick="printReport_()">列印 / 存成 PDF</button>
       </div>
-      <p class="help" style="margin:10px 0 0;">每一張卡片是一頁 16:9 投影片，列印時每頁一張。「說明」欄可以直接點進去改（會存回該情境的科目說明，銷貨成本頁的說明欄也是同一份）；作法清單可以拖曳 ⠿ 排序。每張右上角的「複製」可以把表格貼進 PowerPoint / Excel。</p>
+      <p class="help" style="margin:10px 0 0;">每一張卡片是一頁 16:9 投影片，列印時每頁一張。「說明」欄可以直接點進去改（就是銷貨成本、營業費用頁的「報告說明」，改哪邊都是同一份）；作法清單可以拖曳 ⠿ 排序。每張右上角的「複製」可以把表格貼進 PowerPoint / Excel。</p>
     </div>
     <div id="report-body"><p class="muted">計算中...</p></div>`;
   loadReport_();
@@ -11141,7 +11136,7 @@ function drawWhatIf_() {
     <div class="card">
       <div class="card-head"><h3>敏感度分析</h3><span class="muted">兩項假設同時變動時，結果會落在哪裡（中間框起來的是目前的數字）</span>
         <span class="spacer"></span>
-        <label class="chk"><input type="checkbox" ${s.inReport ? 'checked' : ''} onchange="whatIfPrefs.sens.inReport=this.checked;saveWhatIfPrefs_()"> 放進 GATE 報告</label></div>
+        <span class="muted">${s.inReport ? 'GATE 報告會附這張表' : 'GATE 報告目前不附這張表'}（在 GATE 報告頁勾選）</span></div>
       <div class="field-row">
         <label class="field"><span>看哪個結果</span><select onchange="whatIfPrefs.sens.metric=this.value;saveWhatIfPrefs_()">${metricOptionsHtml_(s.metric)}</select></label>
         <label class="field"><span>&nbsp;</span>${basisSeg('sens', s.basis)}</label>
@@ -11460,7 +11455,7 @@ function saveWhatIfScenarioDialog_(levers, summary) {
   const cur = currentScenario || {};
   openModal({
     title: '另存成新情境',
-    body: `<p class="help">複製「${esc(scenarioLabel(cur))}」的全部資料（銷售構成、成本、開發總投、費用、參數、說明、作法），再把這次反推的調整寫進去：<br><b>${esc(summary || '')}</b></p>`,
+    body: `<p class="help">複製「${esc(scenarioLabel(cur))}」的全部資料（銷售構成、成本、開發總投、費用、參數、報告說明、作法），再把這次反推的調整寫進去：<br><b>${esc(summary || '')}</b></p>`,
     fields: [
       { name: 'Gate', label: 'GATE 別', type: 'select', options: GATE_OPTIONS, value: cur.Gate || 'GATE F' },
       { name: 'ScenarioName', label: '情境名稱', value: (cur.ScenarioName || '') + ' 反推' },
@@ -11845,6 +11840,8 @@ function drawWaterfallTool_() {
       <p class="help">加權平均營業淨利（元/台）：現況 → 目標情境每一項作法的效果 → 目標；作法加總跟實際差異對不起來的部分單獨一根。</p>`;
   }
   const lineOpts = p.mode === 'bridge' || p.mode === 'structure';
+  // 不常改的選項收在「進階」；改過(不是預設值)就展開，才不會忘了自己設過
+  const advOpen = p.sort !== 'pl' || num(p.topN) > 0 || num(p.minAbs) > 0 || !p.labels || !!String(wfTitle_()).trim();
   body.innerHTML = `
     <div class="card">
       <div class="field-row">${seg('mode', modes, p.mode)}</div>
@@ -11854,17 +11851,20 @@ function drawWaterfallTool_() {
         ${lineOpts ? `<label class="field"><span>畫到</span><select id="wf-end" onchange="wfPrefs.end=this.value;saveWfPrefs_();runWaterfall_()"></select></label>
           <label class="field"><span>明細程度</span>${seg('level', [['major', '大項'], ['detail', '明細科目']], p.level)}</label>
           <label class="field"><span>數值</span>${seg('basis', [['unit', '單台'], ['year', '年度'], ['lc', 'LC 總額']], p.basis)}</label>` : ''}
-        <label class="field"><span>金額單位</span>${seg('unit', [[1, '元'], [1000, '千元'], [10000, '萬元']], p.unit)}</label>
-        ${p.mode !== 'manual' ? `<label class="field"><span>排序</span>${seg('sort', [['pl', '損益表順序'], ['abs', '影響大到小']], p.sort)}</label>
-          <label class="field"><span>最多顯示幾項（0 = 全部）</span><input type="number" min="0" style="width:90px;" value="${esc(p.topN)}" onchange="wfPrefs.topN=this.value;saveWfPrefs_();runWaterfall_()"></label>
-          <label class="field"><span>小於多少併入「其他」</span><input type="number" min="0" style="width:110px;" value="${esc(p.minAbs)}" onchange="wfPrefs.minAbs=this.value;saveWfPrefs_();runWaterfall_()"></label>` : ''}
-      </div>
-      <div class="field-row">
+        <label class="field" data-tip="全系統共用：儀表板、GATE 報告、瀑布圖工具用同一個金額單位"><span>金額單位</span>${seg('unit', [[1, '元'], [1000, '千元'], [10000, '萬元']], p.unit)}</label>
         ${p.mode === 'bridge' && p.basis !== 'unit' ? chk('volumeEffect', '拆出「銷量影響」') : ''}
         ${p.mode === 'structure' ? chk('subtotals', '顯示中間小計（生產毛利、銷貨毛利…）') : ''}
-        ${chk('labels', '顯示數字')}
-        <label class="field grow"><span>圖表標題（留空 = 自動）</span><input type="text" id="wf-title" value="${esc(wfTitle_())}" placeholder="自動" oninput="wfSetTitle_(this.value);saveWfPrefs_();wfRedraw_()"></label>
       </div>
+      <details class="ed-adv wf-adv"${advOpen ? ' open' : ''}>
+        <summary>進階（排序、顯示幾項、數字標籤、圖表標題）</summary>
+        <div class="field-row">
+          ${p.mode !== 'manual' ? `<label class="field"><span>排序</span>${seg('sort', [['pl', '損益表順序'], ['abs', '影響大到小']], p.sort)}</label>
+            <label class="field"><span>最多顯示幾項（0 = 全部）</span><input type="number" min="0" style="width:90px;" value="${esc(p.topN)}" onchange="wfPrefs.topN=this.value;saveWfPrefs_();runWaterfall_()"></label>
+            <label class="field"><span>小於多少併入「其他」</span><input type="number" min="0" style="width:110px;" value="${esc(p.minAbs)}" onchange="wfPrefs.minAbs=this.value;saveWfPrefs_();runWaterfall_()"></label>` : ''}
+          ${chk('labels', '顯示數字')}
+          <label class="field grow"><span>圖表標題（留空 = 自動）</span><input type="text" id="wf-title" value="${esc(wfTitle_())}" placeholder="自動" oninput="wfSetTitle_(this.value);saveWfPrefs_();wfRedraw_()"></label>
+        </div>
+      </details>
     </div>
     <div class="card">
       <div class="card-head"><h3 id="wf-heading">瀑布圖</h3><span class="spacer"></span>
