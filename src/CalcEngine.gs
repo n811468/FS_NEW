@@ -298,12 +298,25 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs, probe) {
  * 情境可以填 ScenarioID，也可以填「車型 GATE 情境名稱」(如 "S3 GATE F 現況")。
  * 沒指定車系時：那個情境有同一個車系就取同一個車系，否則取加權平均。
  */
+/**
+ * REF 的情境：ScenarioID、「車型 GATE 情境名稱」，或只寫「GATE 情境名稱」(全部車型裡只有一個這樣的情境時)。
+ * 存檔時會把名稱換成 ScenarioID(見 codifyRefScenarios_)，之後情境改名公式也不會斷。
+ * 找不到回傳 null；名稱對到好幾個情境時丟出錯誤。
+ */
+function resolveRefScenario_(scenarioRef, scenarios) {
+  scenarios = scenarios || getScenarios();
+  var ref = String(scenarioRef || '').trim();
+  var byId = scenarios.filter(function (s) { return s.ScenarioID === ref; })[0];
+  if (byId) return byId;
+  var label = function (s, withType) { return [withType ? s.VehicleTypeID : '', s.Gate, s.ScenarioName].filter(function (x) { return x; }).join(' '); };
+  var full = scenarios.filter(function (s) { return label(s, true) === ref; });
+  if (full.length) return full[0];
+  var short = scenarios.filter(function (s) { return label(s, false) === ref; });
+  if (short.length > 1) throw formulaError_('REF 的情境「' + ref + '」有好幾個車型都有，請在前面加上車型代號（例：' + label(short[0], true) + '）');
+  return short[0] || null;
+}
 function referenceValue_(scenarioRef, lineCode, vehicleRef, currentVehicleId) {
-  var scenarios = getScenarios();
-  var target = scenarios.filter(function (s) { return s.ScenarioID === scenarioRef; })[0] ||
-    scenarios.filter(function (s) {
-      return [s.VehicleTypeID, s.Gate, s.ScenarioName].filter(function (x) { return x; }).join(' ') === scenarioRef;
-    })[0];
+  var target = resolveRefScenario_(scenarioRef);
   if (!target) throw formulaError_('REF 找不到情境「' + scenarioRef + '」');
   var mix = calcSalesMix_(target.ScenarioID);
   var vid = vehicleRef || (mix.some(function (r) { return r.VehicleID === currentVehicleId; }) ? currentVehicleId : '');

@@ -191,6 +191,9 @@
   .row-move { padding: 3px 7px; font-size: 11px; line-height: 1; }
   .auto-tag { font-size: 10.5px; color: var(--primary); background: var(--primary-weak); border-radius: 4px; padding: 1px 5px; margin-left: 6px; font-weight: 600; }
   .auto-tag.warn { color: var(--warning); background: var(--warning-weak); }
+  /* 表格裡的數字框不要上下箭頭(按了會加減 1，容易誤改金額)；↑↓ 改成換列 */
+  table.grid-table input[type=number]::-webkit-inner-spin-button, table.grid-table input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  table.grid-table input[type=number] { -moz-appearance: textfield; }
   td.paste-skip { box-shadow: inset 0 0 0 2px var(--danger); background: var(--danger-weak); }
   tr.current-row > td { background: var(--primary-weak); }
   tr.current-row > td:first-child { box-shadow: inset 3px 0 0 var(--primary); }

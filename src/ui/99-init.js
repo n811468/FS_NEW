@@ -3,6 +3,7 @@ window.addEventListener('DOMContentLoaded', () => {
   installTooltipEngine_();
   installSaveBar_();
   installExcelPaste_();
+  installGridKeys_();
   // 下拉選單(details.menu)：點選單外面就收起來
   document.addEventListener('click', e => {
     document.querySelectorAll('details.menu[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });

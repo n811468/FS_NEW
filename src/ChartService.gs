@@ -77,6 +77,17 @@ function codifyFormulaNames_(formula, defs) {
   });
 }
 
+/** 公式裡 REF("情境名稱", …) 的情境換成 ScenarioID：情境之後改名，公式照樣找得到 */
+function codifyRefScenarios_(formula) {
+  if (!formula || !/REF\s*\(/i.test(formula)) return formula;
+  var scenarios = getScenarios();
+  return String(formula).replace(/(REF\s*\(\s*)"([^"]*)"/gi, function (m, head, ref) {
+    var sc = null;
+    try { sc = resolveRefScenario_(ref, scenarios); } catch (e) { sc = null; }
+    return sc ? head + '"' + sc.ScenarioID + '"' : m;
+  });
+}
+
 /** 把公式裡的 [舊名稱] 換成科目代碼(科目改名時用) */
 function replaceNameRef_(formula, oldName, code) {
   if (!formula) return formula;
@@ -295,7 +306,19 @@ function nextSortOrder_(parentLine, vehicleTypeId) {
   return maxSort + 0.5;
 }
 
+/**
+ * 科目名稱：公式用 [科目名稱] 引用，所以名稱裡不能有 [ ]；同一個車型裡也不能跟別的科目同名(公式會不知道指哪一個)。
+ * defs 有給才檢查同名(exceptCode = 自己)。
+ */
+function validateLineName_(name, defs, exceptCode) {
+  name = String(name || '').trim();
+  if (/[\[\]]/.test(name)) throw new Error('科目名稱「' + name + '」不能有 [ ]（公式用 [科目名稱] 引用科目）');
+  if (defs && defs.some(function (d) { return d.LineName === name && d.LineCode !== exceptCode; })) {
+    throw new Error('這個車型已經有科目叫「' + name + '」，請換一個名稱（公式用名稱引用，同名會分不清楚）');
+  }
+}
 function newLineItemRow_(parentLine, lineName, vehicleTypeId) {
+  validateLineName_(lineName, getPLLineItems(vehicleTypeId), null);
   var code = nextLineCode_(parentLine, vehicleTypeId);
   return {
     LineID: lineIdOf_(vehicleTypeId, code),
@@ -394,10 +417,11 @@ function saveChartLine(vehicleTypeId, line) {
     ['LineName', 'ParentLine', 'Category', 'CalcType', 'Formula', 'CommodityTaxDeduct', 'DevAmortCategory', 'Description']
       .forEach(function (f) { if (line[f] !== undefined) row[f] = line[f] === null ? '' : line[f]; });
     row.LineName = String(row.LineName).trim();
+    validateLineName_(row.LineName, defs, row.LineCode);
     if (!CALC_TYPES[row.CalcType]) throw new Error('計算來源不正確：' + row.CalcType);
     // 公式可以用 [科目名稱] 寫(畫面上就是這樣顯示的)，存檔時一律換成科目代碼：
     // 代碼不會變，之後科目改名也不會讓公式斷掉
-    var normalize = function (f) { return codifyFormulaNames_(cleanFormulaText_(f), defs); };
+    var normalize = function (f) { return codifyRefScenarios_(codifyFormulaNames_(cleanFormulaText_(f), defs)); };
     if (line.VehicleFormulas !== undefined) {
       var vf = parseVehicleFormulas_(line.VehicleFormulas);
       var cleaned = {};
@@ -467,6 +491,7 @@ function savePLLineItemGrid(rows, vehicleTypeId) {
       var defs = getPLLineItems(vehicleTypeId);
       var existing = r.LineCode ? defs.filter(function (d) { return d.LineCode === r.LineCode; })[0] : null;
       if (!r.LineName) throw new Error('科目名稱為必填');
+      validateLineName_(String(r.LineName).trim(), defs, r.LineCode);
       var row;
       if (existing) {
         row = copyLineRow_(existing, vehicleTypeId);
@@ -673,6 +698,8 @@ function chartProblems_(defs, vehicleTypeId) {
   defs.forEach(function (d) { byCode[d.LineCode] = d; });
   var catalog = formulaNameCatalog_(defs);
   var deps = {};
+  var refScenarios = getScenarios();
+  var refExample = refScenarios.length ? '"' + [refScenarios[0].VehicleTypeID, refScenarios[0].Gate, refScenarios[0].ScenarioName].filter(function (x) { return x; }).join(' ') + '"' : '"S3 GATE F 現況"';
 
   defs.forEach(function (d) {
     var formulas = [];
@@ -684,6 +711,12 @@ function chartProblems_(defs, vehicleTypeId) {
       var label = '「' + d.LineName + '」' + (item.who ? '(車系 ' + item.who + ' 個別公式)' : '');
       var info = inspectFormula_(item.f);
       if (!info.ok) { problems.push({ level: 'error', code: d.LineCode, message: label + '公式錯誤：' + info.error }); return; }
+      String(item.f || '').replace(/REF\s*\(\s*"([^"]*)"/gi, function (m, ref) {
+        var sc = null, why = '';
+        try { sc = resolveRefScenario_(ref, refScenarios); } catch (e) { why = e.message; }
+        if (!sc) problems.push({ level: 'error', code: d.LineCode, message: label + (why || 'REF 找不到情境「' + ref + '」（要寫成「車型 GATE 情境名稱」，例如 ' + refExample + '）') });
+        return m;
+      });
       info.refs.codes.forEach(function (c) {
         if (!byCode[c]) problems.push({ level: 'error', code: d.LineCode, message: label + '引用了不存在的科目代碼 ' + c });
         else deps[d.LineCode].push(c);

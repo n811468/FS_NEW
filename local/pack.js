@@ -293,11 +293,39 @@
         .forEach(function (r) { local.PLLineItems.push(r); });
     }
     var localParams = set_(local.ParamDefs.map(function (r) { return r.ParamName; }));
+    var localDefByName = {};
+    local.ParamDefs.forEach(function (r) { localDefByName[str_(r.ParamName)] = r; });
+    report.paramDefaultsPinned = [];
+    report.paramUnitConflicts = [];
+    var builtIn = (ctx && ctx.defaultParams) || {};
+    var effDefault = function (d) {
+      var v = d ? d.DefaultValue : '';
+      if (v === '' || v === null || v === undefined) v = builtIn[str_(d && d.ParamName)];
+      return v === '' || v === null || v === undefined ? 0 : Number(v);
+    };
     incoming.ParamDefs.forEach(function (r) {
-      if (localParams[str_(r.ParamName)]) return;
-      localParams[str_(r.ParamName)] = true;
+      var name = str_(r.ParamName);
+      var mine = localDefByName[name];
+      if (mine) {
+        // 同名參數保留本機的定義；但兩邊的預設值不同時，資料包裡「沒填這個參數」的情境在本機會用本機的預設值算，
+        // 跟對方電腦上的數字就不一樣了 —— 直接幫那些情境填上資料包的預設值，數字才跟對方一致
+        if (str_(mine.Unit || '%') !== str_(r.Unit || '%')) report.paramUnitConflicts.push({ ParamName: name, local: str_(mine.Unit || '%'), incoming: str_(r.Unit || '%') });
+        else if (effDefault(mine) !== effDefault(r)) {
+          var pinned = 0;
+          incoming.Scenarios.forEach(function (sc) {
+            var sid = str_(sc.ScenarioID);
+            var has = incoming.Parameters.some(function (p) { return str_(p.ScenarioID) === sid && str_(p.ParamName) === name && !str_(p.VehicleID); });
+            if (has) return;
+            incoming.Parameters.push({ ParamID: 'PA-' + sid + '-' + name, ScenarioID: sid, VehicleID: '', ParamName: name, Currency: '', Value: effDefault(r), EffectiveDate: '' });
+            pinned++;
+          });
+          if (pinned) report.paramDefaultsPinned.push({ ParamName: name, local: effDefault(mine), incoming: effDefault(r), scenarios: pinned });
+        }
+        return;
+      }
+      localParams[name] = true;
       local.ParamDefs.push(r);
-      report.paramDefsAdded.push(str_(r.ParamName));
+      report.paramDefsAdded.push(name);
     });
 
     // ---- 情境：拿掉本機要被取代的，放進資料包的 ----
@@ -396,6 +424,13 @@
     if (report.paramDefsAdded.length) {
       lines.push('・新增自訂參數：' + report.paramDefsAdded.join('、'));
     }
+    (report.paramDefaultsPinned || []).forEach(function (p) {
+      lines.push('・參數「' + p.ParamName + '」兩邊的預設值不同（本機 ' + p.local + '、資料包 ' + p.incoming + '）：保留本機的定義；資料包裡沒填這個參數的 ' +
+        p.scenarios + ' 個情境直接填上 ' + p.incoming + '，數字跟對方電腦上一致');
+    });
+    (report.paramUnitConflicts || []).forEach(function (p) {
+      lines.push('・⚠ 參數「' + p.ParamName + '」兩邊的單位不同（本機「' + p.local + '」、資料包「' + p.incoming + '」），資料包情境填的數值會照本機的單位解讀，算出來可能不同，請跟對方確認');
+    });
     report.globalParamsKept.forEach(function (p) {
       lines.push('・全域參數「' + p.ParamName + '」兩邊不同，保留本機的值 ' + p.local + '（資料包是 ' + p.incoming + '）');
     });

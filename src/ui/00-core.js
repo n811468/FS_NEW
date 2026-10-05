@@ -657,7 +657,11 @@ function onScenarioChange(value) {
  */
 /** Excel 複製出來的數字：去掉千分位逗號、空白、貨幣符號；(1,234) 視為負數；「-」視為 0；百分比去掉 % */
 function parsePastedNumber_(s) {
-  let t = String(s === undefined || s === null ? '' : s).trim();
+  // 全形數字/符號(中文輸入法、部分 Excel 範本)先轉成半形：９９９、１,０００、（１２３）、－５、３．５
+  let t = String(s === undefined || s === null ? '' : s)
+    .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/，/g, ',').replace(/．/g, '.').replace(/[－−]/g, '-').replace(/（/g, '(').replace(/）/g, ')').replace(/％/g, '%').replace(/\u3000/g, ' ')
+    .trim();
   if (!t) return '';
   if (/^[-–—]$/.test(t)) return 0;
   let neg = false;
@@ -671,6 +675,36 @@ function parseClipboardGrid_(text) {
   const rows = String(text || '').replace(/\r/g, '').split('\n');
   while (rows.length && rows[rows.length - 1] === '') rows.pop();
   return rows.map(r => r.split('\t'));
+}
+/**
+ * 表格裡的鍵盤操作跟 Excel 一樣：Enter / ↓ 到下一列同一欄、Shift+Enter / ↑ 到上一列。
+ * 數字輸入框原本按 ↑↓ 會把數值加減 1(5,100,000 → 5,099,999)，想換列的人會不知不覺改到數字，所以一律攔下來換列。
+ */
+function installGridKeys_() {
+  document.addEventListener('keydown', e => {
+    const el = e.target;
+    if (!el || el.tagName !== 'INPUT' || el.type === 'checkbox' || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return;
+    const td = el.closest('td'), table = el.closest('table.grid-table');
+    if (!td || !table || el.closest('.modal')) return;
+    let dir = 0;
+    if (e.key === 'ArrowDown' || (e.key === 'Enter' && !e.shiftKey)) dir = 1;
+    else if (e.key === 'ArrowUp' || (e.key === 'Enter' && e.shiftKey)) dir = -1;
+    if (!dir) return;
+    e.preventDefault();   // 不要讓數字框加減 1，也不要送出表單
+    const tr = td.parentElement, body = tr.parentElement;
+    const rows = Array.from(body.children).filter(r => r.tagName === 'TR' && r.style.display !== 'none' && !r.hidden && !r.classList.contains('group-row'));
+    const col = Array.from(tr.children).indexOf(td);
+    for (let i = rows.indexOf(tr) + dir; i >= 0 && i < rows.length; i += dir) {
+      const cell = rows[i].children[col];
+      const next = cell && cell.querySelector('input:not([type=checkbox]):not([disabled])');
+      if (next) { next.focus(); if (next.select) next.select(); return; }
+    }
+  });
+  // 滑鼠滾輪停在數字框上也會改數字：有焦點的數字框收到滾輪就先失焦，讓頁面照常捲動
+  document.addEventListener('wheel', e => {
+    const el = document.activeElement;
+    if (el && el.type === 'number' && el === e.target) el.blur();
+  }, { passive: true });
 }
 function installExcelPaste_() {
   document.addEventListener('paste', e => {

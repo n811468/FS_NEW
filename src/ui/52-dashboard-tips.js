@@ -170,11 +170,24 @@ function showComparisonCsv() {
   const box = document.getElementById('csv-output');
   box.style.display = 'block';
   box.innerHTML = `<div class="toolbar"><span class="muted">全選複製後可直接貼進 Excel：</span>
+    <button type="button" class="btn" onclick="downloadCsvFile_()">下載 CSV 檔</button>
     <button type="button" class="btn secondary" onclick="copyCsvToClipboard()">複製到剪貼簿</button>
     <button type="button" class="btn secondary" onclick="document.getElementById('csv-output').style.display='none'">關閉</button>
     <span id="csv-copy-status" class="status-msg"></span></div>
     <textarea class="csv-box">${esc(csv)}</textarea>`;
   box.querySelector('textarea').select();
+}
+/** 存成 .csv 檔：前面加 BOM，Excel 直接打開中文才不會變亂碼 */
+function downloadCsvFile_() {
+  const ta = document.querySelector('#csv-output textarea');
+  if (!ta) return;
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  const name = `損益比較_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.csv`;
+  const url = URL.createObjectURL(new Blob(['\ufeff' + ta.value], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 function copyCsvToClipboard() {
   const box = document.getElementById('csv-output');

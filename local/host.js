@@ -69,16 +69,28 @@
     function persist() {
       if (!storage) return true;
       var tables = readTables();
-      tables[Pack.AUDIT_TABLE] = tables[Pack.AUDIT_TABLE].slice(-AUDIT_KEEP_ROWS);
+      var audit = tables[Pack.AUDIT_TABLE];
       state.savedAt = new Date().toISOString();
-      try {
-        storage.setItem(STORAGE_KEY, JSON.stringify({
-          savedAt: state.savedAt, changesSinceExport: state.changesSinceExport, firstUnsavedAt: state.firstUnsavedAt,
-          lastExportAt: state.lastExportAt, tables: tables
-        }));
-        state.storageOk = true;
-      } catch (e) {
-        state.storageOk = false;   // 無痕模式、空間不足等：資料還在這個分頁的記憶體裡，但關掉就沒了
+      // 稽核紀錄佔暫存的大半：空間不夠時先把它縮短(最後整個不存)再試，真正的資料能存進去比較重要
+      var keeps = [AUDIT_KEEP_ROWS, 300, 0];
+      state.storageOk = false;
+      state.auditTrimmed = false;
+      for (var i = 0; i < keeps.length && !state.storageOk; i++) {
+        tables[Pack.AUDIT_TABLE] = keeps[i] ? audit.slice(-keeps[i]) : [];
+        try {
+          storage.setItem(STORAGE_KEY, JSON.stringify({
+            savedAt: state.savedAt, changesSinceExport: state.changesSinceExport, firstUnsavedAt: state.firstUnsavedAt,
+            lastExportAt: state.lastExportAt, tables: tables
+          }));
+          state.storageOk = true;
+          state.auditTrimmed = i > 0;
+        } catch (e) {
+          // 無痕模式、空間不足等：資料還在這個分頁的記憶體裡，但關掉就沒了
+        }
+      }
+      if (state.auditTrimmed) {
+        // 存進去的是縮短後的稽核紀錄；記憶體裡也跟著縮，下次存檔不用再試一次
+        spreadsheet.replaceTable(Pack.AUDIT_TABLE, Pack.AUDIT_HEADERS, tables[Pack.AUDIT_TABLE], []);
       }
       return state.storageOk;
     }
@@ -176,7 +188,7 @@
     }
 
     function mergeContext() {
-      return { lineCodePrefix: C.LINE_CODE_PREFIX, builtInLineCodes: C.PL_LINE_ITEMS.map(function (d) { return d.LineCode; }) };
+      return { lineCodePrefix: C.LINE_CODE_PREFIX, builtInLineCodes: C.PL_LINE_ITEMS.map(function (d) { return d.LineCode; }), defaultParams: C.DEFAULT_PARAMS || {} };
     }
     /** 合併匯入的預覽：不改資料，回傳要給使用者確認的報告 */
     function previewMerge(pack) { return Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope); }

@@ -274,6 +274,24 @@ check('公式試算(邊打邊算)就要抓到循環引用，不是存檔才發�
   assert(pv.problems.length && /循環引用/.test(pv.problems[0].message), '新科目引用生產毛利(又被算進銷貨成本)應該當場報循環引用：' + JSON.stringify(pv.problems));
 });
 
+check('REF 用情境名稱寫：可以省略車型代號、存檔換成情境代號，情境改名後公式不會斷；找不到的情境當場報錯', () => {
+  reset();
+  const other = gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE C', ScenarioName: 'REF來源', ScenarioType: '現況', VehicleTypeID: 'DA' }, sid, ['salesmix', 'costofsales']);
+  const bad = gs.previewLineFormula('DA', sid, { LineCode: '', LineName: 'REF測試', ParentLine: 'B', CalcType: 'FORMULA', Formula: 'REF("GATE C 沒有這個", "b1")' });
+  assert(bad.problems.length && /REF 找不到情境/.test(bad.problems[0].message), '找不到的情境應該當場報錯：' + JSON.stringify(bad.problems));
+  gs.saveChartLine('DA', { LineCode: '', LineName: 'REF測試', ParentLine: 'B', CalcType: 'FORMULA', Formula: 'REF("GATE C REF來源", "b1") * 0' });
+  const saved = gs.getPLLineItems('DA').filter(d => d.LineName === 'REF測試')[0];
+  assert(saved.Formula.indexOf(other.ScenarioID) !== -1, '存檔後 REF 應該存成情境代號：' + saved.Formula);
+  const rows = gs.getScenarios('DA').map(r => r.ScenarioID === other.ScenarioID ? Object.assign({}, r, { ScenarioName: 'REF來源改名' }) : r);
+  gs.saveScenarioGrid('DA', rows);
+  reset();
+  const errs = gs.calculatePLAllVehicles(sid).vehicles.map(v => v.errors[saved.LineCode]).filter(Boolean);
+  assert(!errs.length, '情境改名後 REF 不該出錯：' + errs.join());
+  gs.deletePLLineItem(saved.LineCode, 'DA');
+  gs.deleteScenario(other.ScenarioID);
+  reset();
+});
+
 check('從 Excel 匯入整張表：名稱對應、新增缺少的科目、略過公式科目', () => {
   const rep = gs.importMatrixRows(sid, 'DA', 'cost', [
     { name: '材料成本 - LP', values: { V1: 433466, V2: 506850 } },

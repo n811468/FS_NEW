@@ -194,8 +194,11 @@ function sensitivityTable(scenarioId, metric, rowDriver, rowValues, colDriver, c
   metric = metric || { code: '', basis: 'unit' };   // 空白 = 營業淨利(profitLineCode_)
   if ((rowValues || []).length * (colValues || []).length > 121) throw new Error('敏感度表最多 11 × 11 格');
   var rb = driverBase_(scenarioId, rowDriver), cb = colDriver ? driverBase_(scenarioId, colDriver) : null;
+  // 單台的結果在銷量 0 台時沒有意義(攤提台數也是 0，攤提「÷ 0 = 0」，單台淨利反而變好)：這一格留空
+  var noVolume = function (driver, v) { return driver && driver.type === 'volume' && !(toNumber_(v) > 0) && (metric.basis || 'unit') === 'unit'; };
   var cells = (rowValues || []).map(function (rv) {
     return (colDriver ? colValues : [null]).map(function (cv) {
+      if (noVolume(rowDriver, rv) || (colDriver && noVolume(colDriver, cv))) return null;
       var o = driverOverrides_(scenarioId, rowDriver, rv, rb.value);
       if (colDriver) o = mergeOverrides_(o, driverOverrides_(scenarioId, colDriver, cv, cb.value));
       return withOverrides_(o, function () { return whatIfMetric_(scenarioId, metric); });
