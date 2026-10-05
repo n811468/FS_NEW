@@ -7,7 +7,8 @@ const WHATIF_PREFS_KEY_ = 'plWhatIf.prefs.v1';
 let whatIfPrefs = {
   goal: { metric: 'K', basis: 'unit', target: 0, driver: 'volume' },
   multi: { metric: 'K', basis: 'unit', target: 0, mode: 'share', levers: null },
-  sens: { metric: 'K', basis: 'unit', row: 'volume', rowSteps: '-20,-10,0,10,20', col: 'price', colSteps: '-10,-5,0,5,10', inReport: true }
+  sens: { metric: 'K', basis: 'unit', row: 'volume', rowSteps: '-20,-10,0,10,20', col: 'price', colSteps: '-10,-5,0,5,10', inReport: true,
+    rowMode: 'pct', rowValues: '', colMode: 'pct', colValues: '' }
 };
 function loadWhatIfPrefs_() {
   try {
@@ -101,10 +102,9 @@ function drawWhatIf_() {
       <div class="field-row">
         <label class="field"><span>看哪個結果</span><select onchange="whatIfPrefs.sens.metric=this.value;saveWhatIfPrefs_()">${metricOptionsHtml_(s.metric)}</select></label>
         <label class="field"><span>&nbsp;</span>${basisSeg('sens', s.basis)}</label>
-        <label class="field"><span>直列：調整項目</span><select onchange="whatIfPrefs.sens.row=this.value;saveWhatIfPrefs_()">${driverOptionsHtml_(s.row)}</select></label>
-        <label class="field"><span>變動幅度（%，逗號分隔）</span><input type="text" value="${esc(s.rowSteps)}" style="width:160px;" oninput="whatIfPrefs.sens.rowSteps=this.value;saveWhatIfPrefs_()"></label>
-        <label class="field"><span>橫列：調整項目</span><select onchange="whatIfPrefs.sens.col=this.value;saveWhatIfPrefs_()">${driverOptionsHtml_(s.col)}</select></label>
-        <label class="field"><span>變動幅度（%）</span><input type="text" value="${esc(s.colSteps)}" style="width:160px;" oninput="whatIfPrefs.sens.colSteps=this.value;saveWhatIfPrefs_()"></label>
+      </div>
+      <div class="field-row" style="margin-top:12px;">${sensAxisFieldsHtml_('row', '直列')}</div>
+      <div class="field-row" style="margin-top:12px;">${sensAxisFieldsHtml_('col', '橫列')}
         <button type="button" class="btn" style="align-self:flex-end;" onclick="runSensitivity_()">產生表格</button>
       </div>
       <div id="wi-sens-result" style="margin-top:14px;"></div>
@@ -165,20 +165,93 @@ function stepValues_(key, steps) {
   const base = info ? info.base : 0;
   return steps.map(p => base * (1 + p / 100));
 }
+/* ---------------- 敏感度分析 ----------------
+ * 每一軸可以用「變動幅度 %」(基準 × (1 + %))或直接輸入「自訂值」(例：匯率 4.5, 4.6, 4.8)。
+ * 兩種方式都會自動帶入目前的值，表格中間框起來的就是目前的數字。
+ */
+function sensMode_(axis) { return whatIfPrefs.sens[axis + 'Mode'] === 'value' ? 'value' : 'pct'; }
+/** 自訂值：逗號、分號、空白、換行分隔(不要加千分位) */
+function parseSensValues_(text) {
+  return String(text || '').split(/[,，;；\s]+/).map(x => x.trim()).filter(x => x !== '').map(Number).filter(x => isFinite(x));
+}
+/** 依基準值的量級取整(4.77 → 0.01、445,556 → 1,000)，切換成自訂值時預填用 */
+function roundLike_(v, base) {
+  const mag = Math.abs(base) > 0 ? Math.pow(10, Math.floor(Math.log10(Math.abs(base))) - 2) : 1;
+  return Number((Math.round(v / mag) * mag).toPrecision(12));
+}
+function sensPrefill_(axis, base) {
+  return parseSteps_(whatIfPrefs.sens[axis + 'Steps']).map(p => roundLike_(base * (1 + p / 100), base)).join(', ');
+}
+/**
+ * 一軸實際要算的值：[{ value, label, sub, isBase }]
+ *   %      → 值 = 基準 × (1 + %)，標題「-10%」、副標是實際值
+ *   自訂值 → 值照輸入，標題是值、副標是跟目前差幾 %；目前的值一定會加進去(跟輸入的值幾乎一樣時視為同一個)
+ */
+function sensAxis_(axis, base) {
+  const s = whatIfPrefs.sens;
+  const dg = v => Math.abs(v) < 100 ? 2 : 0;
+  if (sensMode_(axis) === 'pct') {
+    return parseSteps_(s[axis + 'Steps']).map(p => {
+      const value = base * (1 + p / 100);
+      return { value, label: p === 0 ? '目前' : signed_(p) + '%', sub: fmt(value, dg(value)), isBase: p === 0 };
+    });
+  }
+  const same = (a, b) => Math.abs(a - b) <= Math.max(Math.abs(b), 1e-9) * 5e-4;
+  const vals = parseSensValues_(s[axis + 'Values']).filter(v => !same(v, base)).slice(0, 10);
+  vals.push(base);
+  return vals.filter((v, i) => vals.findIndex(x => same(x, v)) === i).sort((a, b) => a - b).map(value => {
+    const isBase = value === base;
+    const pct = base ? (value / base - 1) * 100 : null;
+    return { value, label: isBase ? '目前' : fmt(value, dg(value)),
+      sub: isBase ? fmt(value, dg(value)) : pct === null ? '' : signed_(pct, Math.abs(pct) < 10 ? 1 : 0) + '%', isBase };
+  });
+}
+function sensAxisFieldsHtml_(axis, name) {
+  const s = whatIfPrefs.sens, mode = sensMode_(axis);
+  const seg = `<div class="seg">
+      <button type="button" class="seg-btn${mode === 'pct' ? ' active' : ''}" onclick="setSensMode_('${axis}','pct')" data-tip="目前的值 × (1 + %)">變動 %</button>
+      <button type="button" class="seg-btn${mode === 'value' ? ' active' : ''}" onclick="setSensMode_('${axis}','value')" data-tip="直接輸入要試算的值，例如匯率 4.5, 4.6, 4.8">自訂值</button></div>`;
+  const input = mode === 'pct'
+    ? `<label class="field"><span>變動幅度（%，逗號分隔）</span><input type="text" id="wi-sens-${axis}-steps" value="${esc(s[axis + 'Steps'])}" style="width:180px;" oninput="whatIfPrefs.sens.${axis}Steps=this.value;saveWhatIfPrefs_()"></label>`
+    : `<label class="field"><span>自訂值（逗號分隔，不要加千分位；目前的值會自動加入）</span><input type="text" id="wi-sens-${axis}-values" value="${esc(s[axis + 'Values'])}" style="width:300px;" oninput="whatIfPrefs.sens.${axis}Values=this.value;saveWhatIfPrefs_()"></label>`;
+  return `<label class="field"><span>${name}：調整項目</span><select id="wi-sens-${axis}" onchange="setSensDriver_('${axis}',this.value)">${driverOptionsHtml_(s[axis])}</select></label>
+    <div class="field"><span>&nbsp;</span>${seg}</div>${input}`;
+}
+function setSensMode_(axis, mode) {
+  const s = whatIfPrefs.sens;
+  s[axis + 'Mode'] = mode;
+  if (mode === 'value' && !parseSensValues_(s[axis + 'Values']).length) {
+    const info = whatIfDriverInfo_(s[axis]);
+    s[axis + 'Values'] = info ? sensPrefill_(axis, info.base) : '';
+  }
+  saveWhatIfPrefs_();
+  drawWhatIf_();
+}
+/** 換了調整項目：自訂值是上一個項目的數字，用不上了，依新項目的目前值重新預填 */
+function setSensDriver_(axis, key) {
+  const s = whatIfPrefs.sens;
+  s[axis] = key;
+  if (sensMode_(axis) === 'value') {
+    const info = whatIfDriverInfo_(key);
+    s[axis + 'Values'] = info ? sensPrefill_(axis, info.base) : '';
+    const el = document.getElementById('wi-sens-' + axis + '-values');
+    if (el) el.value = s[axis + 'Values'];
+  }
+  saveWhatIfPrefs_();
+}
 function runSensitivity_(targetBox, scenarioId, done) {
   const s = whatIfPrefs.sens;
   const box = targetBox || document.getElementById('wi-sens-result');
   if (!box) return;
-  const rowSteps = parseSteps_(s.rowSteps), colSteps = parseSteps_(s.colSteps);
   box.innerHTML = '<p class="muted">計算中...</p>';
   const go = opts => {
     const info = k => opts.drivers.find(d => driverKey_(d.driver) === k);
     const ri = info(s.row) || opts.drivers[0], ci = info(s.col) || opts.drivers[1];
-    const rv = rowSteps.map(p => ri.base * (1 + p / 100)), cv = colSteps.map(p => ci.base * (1 + p / 100));
+    const rows = sensAxis_('row', ri.base), cols = sensAxis_('col', ci.base);
     google.script.run
-      .withSuccessHandler(safeHandler(t => { box.innerHTML = sensitivityTableHtml_(t, rowSteps, colSteps, s, opts); if (done) done(); }))
+      .withSuccessHandler(safeHandler(t => { box.innerHTML = sensitivityTableHtml_(t, rows, cols, s, opts); if (done) done(); }))
       .withFailureHandler(err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; })
-      .sensitivityTable(scenarioId || currentScenarioId, { code: s.metric, basis: s.basis }, ri.driver, rv, ci.driver, cv);
+      .sensitivityTable(scenarioId || currentScenarioId, { code: s.metric, basis: s.basis }, ri.driver, rows.map(r => r.value), ci.driver, cols.map(c => c.value));
   };
   // 目標反推頁上按「產生表格」：沿用那一頁已經載入的選項。
   // 其他地方(GATE 報告)：那一頁不一定開過(whatIfOptions 還是 null)，開過也可能是別的情境或改資料前載的，一律重新抓
@@ -188,23 +261,22 @@ function runSensitivity_(targetBox, scenarioId, done) {
       .getWhatIfOptions(scenarioId || currentScenarioId);
   }
 }
-function sensitivityTableHtml_(t, rowSteps, colSteps, s, opts) {
+function sensitivityTableHtml_(t, rows, cols, s, opts) {
   const all = [].concat.apply([], t.cells);
   const maxAbs = Math.max.apply(null, all.map(Math.abs).concat([1]));
   const metric = (opts.metrics.find(m => m.code === s.metric) || {}).label || s.metric;
-  const dg = v => Math.abs(v) < 100 ? 2 : 0;
   const color = v => {
     const a = Math.min(1, Math.abs(v) / maxAbs);
     return v >= 0 ? `rgba(28,138,89,${0.08 + a * 0.32})` : `rgba(210,60,60,${0.08 + a * 0.32})`;
   };
   return `<div class="grid-scroll"><table class="grid-table sens-table">
     <thead>
-      <tr><th rowspan="2">${esc(t.rowLabel)} ↓ ／ ${esc(t.colLabel)} →</th>${colSteps.map((p, j) => `<th>${p === 0 ? '目前' : signed_(p) + '%'}</th>`).join('')}</tr>
-      <tr>${t.colValues.map(v => `<th class="th-sub">${fmt(v, dg(v))}</th>`).join('')}</tr>
+      <tr><th rowspan="2">${esc(t.rowLabel)} ↓ ／ ${esc(t.colLabel)} →</th>${cols.map(c => `<th>${esc(c.label)}</th>`).join('')}</tr>
+      <tr>${cols.map(c => `<th class="th-sub">${esc(c.sub)}</th>`).join('')}</tr>
     </thead>
     <tbody>${t.cells.map((row, i) => `<tr>
-      <td class="row-head">${rowSteps[i] === 0 ? '目前' : signed_(rowSteps[i]) + '%'} <span class="muted">${fmt(t.rowValues[i], dg(t.rowValues[i]))}${esc(t.rowUnit ? ' ' + t.rowUnit : '')}</span></td>
-      ${row.map((v, j) => `<td class="${rowSteps[i] === 0 && colSteps[j] === 0 ? 'sens-base' : ''}${v < 0 ? ' negative' : ''}" style="background:${color(v)};">${fmt(v)}</td>`).join('')}
+      <td class="row-head">${esc(rows[i].label)} <span class="muted">${esc(rows[i].sub)}${rows[i].isBase || sensMode_('row') === 'pct' ? esc(t.rowUnit ? ' ' + t.rowUnit : '') : ''}</span></td>
+      ${row.map((v, j) => `<td class="${rows[i].isBase && cols[j].isBase ? 'sens-base' : ''}${v < 0 ? ' negative' : ''}" style="background:${color(v)};">${fmt(v)}</td>`).join('')}
     </tr>`).join('')}</tbody>
   </table></div>
   <p class="help">表內數字：${esc(metric)}${s.basis === 'month' ? '（月總額，元）' : '（加權平均，元/台）'}。綠色 = 正、紅色 = 負，顏色越深絕對值越大。</p>`;

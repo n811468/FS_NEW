@@ -641,6 +641,48 @@ assert(api('weightedTotalCaveat_')({
   isWeighted: true, volume: { mix: [{ pct: 80, monthlyVolume: 20 }, { pct: 20, monthlyVolume: 80 }] }
 }).indexOf('⚠') === 0, '構成比與台數比例差很多時應該提醒總額兜不攏');
 
+// 差距拆解：合併科目、最多幾根、小於門檻併入「其他」；不管怎麼合併，長條加總都要等於原本的差距
+{
+  const contribs = [
+    { code: 'b1', label: '材料LP', value: -22000 }, { code: 'b2', label: '材料KD', value: -11000 },
+    { code: 'b13', label: '貨物稅', value: -3784 }, { code: 'x1', label: '關稅', value: -1240 },
+    { code: 'x2', label: '技酬金', value: -780 }, { code: 'x3', label: '索賠', value: -152 }, { code: 'd1', label: '廣宣', value: 500 }
+  ];
+  const total = contribs.reduce((a, c) => a + c.value, 0);
+  const sum = bars => bars.reduce((a, b) => a + b.value, 0);
+  const bridgeBars = api('bridgeBars_');
+  const plain = bridgeBars(contribs, { topN: 10, minAbs: 0, groups: {} });
+  assert(plain.length === 7 && Math.abs(sum(plain) - total) < 1e-6, '沒有設定時每個科目一根：' + plain.length);
+  const grouped = bridgeBars(contribs, { topN: 10, minAbs: 0, groups: { x1: '其他成本', x2: '其他成本', x3: ' 其他成本 ', b1: '材料', b2: '材料' } });
+  const names = grouped.map(b => b.label);
+  assert(names.length === 4 && names[0] === '材料' && names.indexOf('其他成本') !== -1, '同名的科目要合成一根，依影響大小排序：' + names.join(','));
+  assert(Math.abs(grouped[0].value - -33000) < 1e-6 && /材料LP/.test(grouped[0].tip) && /材料KD/.test(grouped[0].tip), '合併的長條數字是加總，hover 要列出組成科目');
+  assert(Math.abs(sum(grouped) - total) < 1e-6, '合併後長條加總要等於原本的差距');
+  const capped = bridgeBars(contribs, { topN: 2, minAbs: 0, groups: {} });
+  assert(capped.length === 3 && capped[2].label === '其他 5 個科目' && Math.abs(sum(capped) - total) < 1e-6, '超過根數的併成「其他 N 個科目」：' + capped.map(b => b.label).join(','));
+  const small = bridgeBars(contribs, { topN: 0, minAbs: 1000, groups: {} });
+  assert(small.length === 5 && small[4].label === '其他 3 個科目' && Math.abs(sum(small) - total) < 1e-6, '影響小於門檻的併入「其他」、0 根 = 不限：' + small.map(b => b.label).join(','));
+}
+
+// 敏感度：變動 % 與自訂值兩種方式
+{
+  api('whatIfPrefs').sens = Object.assign(api('whatIfPrefs').sens, { rowMode: 'pct', rowSteps: '-10, 10', colMode: 'value', colValues: '4.5, 4.6 4.6;5,abc' });
+  const rows = api('sensAxis_')('row', 200);
+  assert(JSON.stringify(rows.map(r => Math.round(r.value * 1e6) / 1e6)) === JSON.stringify([180, 200, 220]) && rows[1].isBase && rows[1].label === '目前', '變動 % 要自動帶入 0% 並依基準換算：' + JSON.stringify(rows));
+  const cols = api('sensAxis_')('col', 4.77);
+  assert(JSON.stringify(cols.map(c => c.value)) === JSON.stringify([4.5, 4.6, 4.77, 5]), '自訂值要去重、排序、自動加入目前值：' + JSON.stringify(cols.map(c => c.value)));
+  assert(cols[2].isBase && cols[2].label === '目前' && cols[0].label === '4.5' && /^-5\.7%$/.test(cols[0].sub), '自訂值的標題是值、副標是跟目前差幾 %：' + JSON.stringify(cols[0]));
+  api('whatIfPrefs').sens.colValues = '4.7701, 4.9';
+  assert(api('sensAxis_')('col', 4.77).length === 2, '跟目前值幾乎一樣的自訂值視為目前值，不要重複出現');
+  api('whatIfPrefs').sens.rowSteps = '-20,-10,0,10,20';
+  assert(api('sensPrefill_')('row', 445556) === '356000, 401000, 446000, 490000, 535000' && api('sensPrefill_')('row', 4.77) === '3.82, 4.29, 4.77, 5.25, 5.72',
+    '切換成自訂值時依目前值的量級預填：' + api('sensPrefill_')('row', 445556) + ' / ' + api('sensPrefill_')('row', 4.77));
+  const html = api('sensitivityTableHtml_')({ cells: [[1, -2], [3, 4]], rowLabel: 'R', colLabel: 'C', rowUnit: '台', rowValues: [], colValues: [] },
+    [{ label: '目前', sub: '1', isBase: true }, { label: '+10%', sub: '2', isBase: false }],
+    [{ label: '4.50', sub: '-5.7%', isBase: false }, { label: '目前', sub: '4.77', isBase: true }], { metric: 'K', basis: 'unit' }, { metrics: [] });
+  assert((html.match(/sens-base/g) || []).length === 1 && /<td class="sens-base negative"[^>]*>-2</.test(html), '框起來的是兩軸都是目前值的那一格');
+}
+
 if (failures.length) {
   console.log(`前端驗證失敗：${failures.length} 項`);
   failures.forEach(f => console.log('  ✗ ' + f));
