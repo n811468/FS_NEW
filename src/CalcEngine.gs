@@ -294,7 +294,7 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs, probe) {
 
 /**
  * REF("情境","科目"[,"車系"])：引用另一個情境(可以是別的車型)的科目金額。
- * 情境可以填 ScenarioID，也可以填「車型 GATE 情境名稱」(如 "DE GATE F 現況")。
+ * 情境可以填 ScenarioID，也可以填「車型 GATE 情境名稱」(如 "S3 GATE F 現況")。
  * 沒指定車系時：那個情境有同一個車系就取同一個車系，否則取加權平均。
  */
 function referenceValue_(scenarioRef, lineCode, vehicleRef, currentVehicleId) {

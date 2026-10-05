@@ -6,7 +6,7 @@
  * 需要 Playwright(本專案不安裝任何套件，找不到時會說明並略過)。驗證：
  *   - 完全不連外部網路(所有非 file:// 的請求都會被擋下並記錄)，頁面沒有任何 JS 錯誤
  *   - 空資料庫有提示 → 載入示範資料 → 儀表板算得出來
- *   - 修改會自動暫存：重新整理後還在，工具列顯示「尚未匯出」
+ *   - 修改會自動暫存：重新整理後還在，工具列顯示「還沒整份備份」
  *   - 匯出全部 → 清空 → 用檔案選擇器匯入(取代) → 資料回來
  *   - 合併匯入：只更新資料包裡的車型
  *   - 同時開兩個分頁：一邊存檔後，另一邊停止寫入並提示重新整理
@@ -14,6 +14,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { demoNames } = require('./demo-data');
+// 示範資料的車型代號是亂數產生的(固定種子)：主車型 MAIN(有現況/目標與作法)、另一個車型 OTHER
+const { main: MAIN, other: OTHER } = demoNames();
 
 function loadPlaywright() {
   const candidates = ['playwright', '/opt/node22/lib/node_modules/playwright'];
@@ -68,7 +71,8 @@ async function main() {
   await Promise.all([page.waitForNavigation(), page.selectOption('#fs-local-bar .fsl-more', 'demo')]);
   await page.waitForFunction(() => document.querySelectorAll('#vehicletype-selector option').length >= 2);
   const types = await page.$$eval('#vehicletype-selector option', os => os.map(o => o.value));
-  assert(types.includes('DA') && types.includes('DE'), '示範資料載入後車型選單應該有 DA、DE：' + types.join(','));
+  assert(types.includes(MAIN) && types.includes(OTHER), `示範資料載入後車型選單應該有 ${MAIN}、${OTHER}：` + types.join(','));
+  assert(!types.includes('DA') && !types.includes('DE'), '示範資料不該有 DA/DE：' + types.join(','));
 
   // 儀表板算得出來
   await page.click('nav button[data-tab="dashboard"]');
@@ -140,10 +144,10 @@ async function main() {
   await page.waitForFunction(() => /✔/.test((document.getElementById('ce-status') || {}).textContent || ''));
   await page.keyboard.press('Control+s');
   await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'));
-  const d4 = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DA')));
+  const d4 = await page.evaluate(t => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems(t)), MAIN);
   assert(d4.find(l => l.LineCode === 'd4').Formula === 'P8 * 1%', '科目與公式存檔後，後端的公式應該換成新的');
-  const de4 = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DE')));
-  assert(de4.find(l => l.LineCode === 'd4').Formula === 'P8 * [季Margin率]', '改 DA 的公式不該影響 DE 的科目表');
+  const de4 = await page.evaluate(t => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems(t)), OTHER);
+  assert(de4.find(l => l.LineCode === 'd4').Formula === 'P8 * [季Margin率]', '改主車型的公式不該影響另一個車型的科目表');
 
   // v2.1：公式用科目名稱顯示；輸入 [ 會跳出清單，選了之後存成代碼
   await page.click('.tree-row:has-text("季Margin")');
@@ -158,7 +162,7 @@ async function main() {
   await page.waitForFunction(() => /✔/.test((document.getElementById('ce-status') || {}).textContent || ''));
   await page.keyboard.press('Control+s');
   await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'));
-  const d4b = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DA')));
+  const d4b = await page.evaluate(t => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems(t)), MAIN);
   assert(d4b.find(l => l.LineCode === 'd4').Formula === 'P8 * [季Margin率]', '自動完成選的科目應存成代碼：' + d4b.find(l => l.LineCode === 'd4').Formula);
 
   // v2.2：一行一項從頭組公式 —— 加一項 → 搜尋選科目 → 乘參數 → 減一項選子科目合計，存成代碼
@@ -181,7 +185,7 @@ async function main() {
   await page.waitForFunction(() => /✔/.test((document.getElementById('ce-status') || {}).textContent || ''));
   await page.keyboard.press('Control+s');
   await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'));
-  const d4c = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems('DA')));
+  const d4c = await page.evaluate(t => new Promise(ok => google.script.run.withSuccessHandler(ok).getPLLineItems(t)), MAIN);
   assert(d4c.find(l => l.LineCode === 'd4').Formula === 'P8 * [季Margin率] - 100', '一行一項組的公式應存成代碼：' + d4c.find(l => l.LineCode === 'd4').Formula);
   // 拆不成一行一項的公式(貨物稅)自動用自由公式(膠囊)，每顆膠囊底下有目前的值
   await page.click('.tree-row:has-text("貨物稅")');
@@ -275,10 +279,33 @@ async function main() {
   assert(Math.abs(numOf(last[1]) - numOf(wfRows[wfRows.length - 2][2])) <= 1, '差異拆解的累計要剛好接到終點：' + JSON.stringify(wfRows.slice(-2)));
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }), page.click('#wf-body button:has-text("下載 PNG")')]);
   assert(/\.png$/.test(dl.suggestedFilename()), '下載 PNG 的檔名：' + dl.suggestedFilename());
-  for (const mode of ['單一欄位損益', '作法拆解']) {
+  for (const mode of ['單一欄位損益', '原因拆解']) {
     await page.click(`#wf-body .seg-btn:has-text("${mode}")`);
     await page.waitForFunction(() => document.querySelectorAll('#wf-chart .wf-bar').length >= 3, null, { timeout: 15000 });
   }
+  // 原因拆解看單一科目：材料成本-KD 現況 → 原因 → 目標；原因直接在這裡填，存到終點情境(跟 GATE 報告的作法同一份)
+  await page.waitForSelector('#wf-act-line option[value="b2"]', { state: 'attached' });
+  await page.selectOption('#wf-act-line', 'b2');
+  await page.waitForFunction(() => /材料成本-KD/.test(document.getElementById('wf-heading').textContent) && document.querySelector('.wf-act-table'), null, { timeout: 15000 });
+  const barsBefore = (await page.$$('#wf-chart .wf-bar')).length;
+  await page.click('#wf-act-editor button:has-text("新增原因")');
+  await page.fill('#wf-act-editor tbody tr:last-child input[type=text]', 'E2E規格追加');
+  await page.selectOption('#wf-act-editor tbody tr:last-child td:nth-child(3) select', 'bad');
+  await page.fill('#wf-act-editor tbody tr:last-child input[type=number]', '5000');
+  await page.waitForFunction(n => document.querySelectorAll('#wf-chart .wf-bar').length > n, barsBefore, { timeout: 5000 });
+  assert(/E2E規格追加/.test(await page.textContent('#wf-table')), '新填的原因要馬上出現在瀑布圖');
+  await page.click('#wf-act-editor button:has-text("儲存原因")');
+  await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'), null, { timeout: 10000 });
+  const savedActs = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getActions(wfPrefs.to.scenarioId)));
+  const added = savedActs.find(x => x.Title === 'E2E規格追加');
+  assert(added && Number(added.Effect) === -5000 && added.LineCode === 'b2', '惡化 5,000 要存成效果 −5000、科目 b2：' + JSON.stringify(added));
+  assert(savedActs.length > 1, '存原因時不能把其他科目的作法洗掉：' + savedActs.length);
+  // 成本科目的瀑布：成本變多(惡化)是紅色
+  const badColor = await page.$$eval('#wf-chart .wf-bar', rs => { const r = rs.find(x => /E2E規格追加/.test(x.getAttribute('data-tip') || '')); return r && r.getAttribute('fill'); });
+  assert(badColor === '#e53e3e', '成本科目惡化的長條應該是紅色：' + badColor);
+  await page.click('#wf-act-editor tbody tr:last-child button[aria-label="刪除"]');
+  await page.click('#wf-act-editor button:has-text("儲存原因")');
+  await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'), null, { timeout: 10000 });
 
   // GATE 報告：現況 → 作法 → 目標 瀑布投影片
   await page.click('nav button[data-tab="report"]');
@@ -309,11 +336,11 @@ async function main() {
   // v2：拖曳把手可以用鍵盤 Alt+↓ 調整車系順序，放開(按下)就存檔
   await page.click('nav button[data-tab="masters"]');
   await page.waitForSelector('#entity-body-vehicles .drag-handle');
-  const before = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getVehicles('DA')));
+  const before = await page.evaluate(t => new Promise(ok => google.script.run.withSuccessHandler(ok).getVehicles(t)), MAIN);
   await page.focus('#entity-body-vehicles tr:first-child .drag-handle');
   await page.keyboard.press('Alt+ArrowDown');
   await page.waitForTimeout(500);
-  const after = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getVehicles('DA')));
+  const after = await page.evaluate(t => new Promise(ok => google.script.run.withSuccessHandler(ok).getVehicles(t)), MAIN);
   assert(after[1].VehicleID === before[0].VehicleID, '用鍵盤把第一個車系往下移，應該立即存成新的順序');
 
   // 新增情境改成對話框：名稱跟著情境性質自動帶入，建立後出現在情境表格
@@ -344,7 +371,7 @@ async function main() {
   // 透過前端同一條路徑(google.script.run)改資料：新增車型 DQ
   await page.evaluate(() => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail)
     .saveVehicleTypeGrid([{ VehicleTypeID: 'DQ', Notes: '端對端測試' }])));
-  await page.waitForFunction(() => /尚未匯出/.test(document.getElementById('fs-local-bar').textContent));
+  await page.waitForFunction(() => /還沒整份備份/.test(document.getElementById('fs-local-bar').textContent));
   await page.reload();
   await page.waitForFunction(() => document.querySelectorAll('#vehicletype-selector option').length >= 3);
   assert((await page.$$eval('#vehicletype-selector option', os => os.map(o => o.value))).includes('DQ'), '重新整理後新增的車型不見了（沒有暫存）');
@@ -357,20 +384,20 @@ async function main() {
   const pack = JSON.parse(fs.readFileSync(packFile, 'utf8'));
   assert(/^FS資料包_全部_\d{8}-\d{4}\.json$/.test(download.suggestedFilename()), '匯出檔名格式不對：' + download.suggestedFilename());
   assert(pack.tables.VehicleTypes.length === 3, '匯出的資料包應該有 3 個車型');
-  assert(!/尚未匯出/.test(await page.textContent('#fs-local-bar')), '整份匯出後「尚未匯出」提示應該消失');
+  assert(!/還沒整份備份/.test(await page.textContent('#fs-local-bar')), '整份匯出後「還沒整份備份」提示應該消失');
 
-  // 只匯出車型(DE)，之後拿來測合併
-  await page.selectOption('#vehicletype-selector', 'DE');
+  // 只匯出車型(OTHER)，之後拿來測合併
+  await page.selectOption('#vehicletype-selector', OTHER);
   await page.waitForTimeout(300);
   const [dlDe] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar .fsl-menu summary').then(() => page.click('#fs-local-bar button:has-text("匯出車型")'))]);
   const deFile = path.join(tmp, dlDe.suggestedFilename());
   await dlDe.saveAs(deFile);
-  assert(JSON.parse(fs.readFileSync(deFile, 'utf8')).tables.VehicleTypes.map(r => r.VehicleTypeID).join() === 'DE', '「匯出車型」應該只有 DE');
+  assert(JSON.parse(fs.readFileSync(deFile, 'utf8')).tables.VehicleTypes.map(r => r.VehicleTypeID).join() === OTHER, '「匯出車型」應該只有 ' + OTHER);
 
   // 匯出情境：只有上方選的那一個情境
-  await page.selectOption('#vehicletype-selector', 'DA');
-  const daIds = await page.evaluate(() => new Promise(ok => google.script.run.withSuccessHandler(ok).getScenarios('DA'))).then(l => l.map(x => x.ScenarioID).sort());
-  // 換車型後情境選單會重建：等到選單裡剛好是 DA 的情境、而且已經選定一個
+  await page.selectOption('#vehicletype-selector', MAIN);
+  const daIds = await page.evaluate(t => new Promise(ok => google.script.run.withSuccessHandler(ok).getScenarios(t)), MAIN).then(l => l.map(x => x.ScenarioID).sort());
+  // 換車型後情境選單會重建：等到選單裡剛好是主車型的情境、而且已經選定一個
   await page.waitForFunction(ids => {
     const sel = document.getElementById('scenario-selector');
     const vals = Array.from(sel.options).map(o => o.value).filter(v => v).sort();
@@ -382,7 +409,7 @@ async function main() {
   const scPack = JSON.parse(fs.readFileSync(await dlSc.path(), 'utf8'));
   assert(daScenarioCount >= 2 && scPack.scope.kind === 'scenarios' && scPack.tables.Scenarios.length === 1 && scPack.tables.Scenarios[0].ScenarioID === curScenario,
     '「匯出情境」應該只有目前選的情境：' + JSON.stringify(scPack.scope));
-  assert(/^FS資料包_DA_/.test(dlSc.suggestedFilename()), '情境資料包的檔名應該帶車型與情境：' + dlSc.suggestedFilename());
+  assert(new RegExp('^FS資料包_' + MAIN + '_').test(dlSc.suggestedFilename()), '情境資料包的檔名應該帶車型與情境：' + dlSc.suggestedFilename());
 
   // 清空 → 用匯入取代 → 資料回來
   await Promise.all([page.waitForNavigation(), page.selectOption('#fs-local-bar .fsl-more', 'reset')]);
@@ -392,21 +419,21 @@ async function main() {
   await page.waitForSelector('#fs-local-dialog[open]');
   await Promise.all([page.waitForNavigation(), page.click('#fs-local-dialog button:has-text("取代整個資料庫")')]);
   await page.waitForFunction(() => document.querySelectorAll('#vehicletype-selector option').length >= 3);
-  assert((await page.$$eval('#vehicletype-selector option', os => os.map(o => o.value).filter(v => v))).sort().join() === 'DA,DE,DQ', '匯入取代後車型不對');
+  assert((await page.$$eval('#vehicletype-selector option', os => os.map(o => o.value).filter(v => v))).sort().join() === [MAIN, OTHER, 'DQ'].sort().join(), '匯入取代後車型不對');
 
-  // 合併：刪掉 DE 再合併 DE 的資料包 → DE 回來、DA/DQ 不受影響
-  await page.evaluate(() => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail).deleteVehicleType('DE')));
+  // 合併：刪掉 OTHER 再合併 OTHER 的資料包 → OTHER 回來、主車型/DQ 不受影響
+  await page.evaluate(t => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail).deleteVehicleType(t)), OTHER);
   await page.reload();
   await page.waitForSelector('#fs-local-bar');
   await page.setInputFiles('#fs-local-bar input[type=file]', deFile);
   await page.waitForSelector('#fs-local-dialog[open]');
   await page.click('#fs-local-dialog button:has-text("合併匯入")');
   await page.waitForSelector('#fs-local-dialog >> text=確認合併內容');
-  // deleteVehicleType 只刪車型主檔那一列，DE 的車系/情境還在，所以合併會是「取代」DE
-  assert(/車型 DE：本機的資料.*會被資料包.*取代/.test(await page.textContent('#fs-local-dialog')), '合併確認畫面沒有列出要取代的車型 DE');
+  // deleteVehicleType 只刪車型主檔那一列，OTHER 的車系/情境還在，所以合併會是「取代」OTHER
+  assert(new RegExp('車型 ' + OTHER + '：本機的資料.*會被資料包.*取代').test(await page.textContent('#fs-local-dialog')), '合併確認畫面沒有列出要取代的車型 ' + OTHER);
   await Promise.all([page.waitForNavigation(), page.click('#fs-local-dialog button:has-text("確定合併")')]);
   await page.waitForFunction(() => document.querySelectorAll('#vehicletype-selector option').length >= 3);
-  assert((await page.$$eval('#vehicletype-selector option', os => os.map(o => o.value).filter(v => v))).sort().join() === 'DA,DE,DQ', '合併後車型不對');
+  assert((await page.$$eval('#vehicletype-selector option', os => os.map(o => o.value).filter(v => v))).sort().join() === [MAIN, OTHER, 'DQ'].sort().join(), '合併後車型不對');
 
   // 兩個分頁：第二個分頁存檔後，第一個分頁停止寫入
   const page2 = await context.newPage();

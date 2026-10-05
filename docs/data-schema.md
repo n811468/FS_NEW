@@ -22,21 +22,21 @@
 
 ### 2.0 `VehicleTypes` 車型主檔（上層）
 
-前端最上層的選單單位。使用者必須先在這裡選擇/建立車型（如 `DA`），
+前端最上層的選單單位。使用者必須先在這裡選擇/建立車型（如 `K5`），
 才能在下層 `Vehicles`（車系）新增資料 —— 車系不能脫離車型獨立存在。
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
-| VehicleTypeID (PK) | text | 車型代號，如 `DA`、`DE`、`DH`、`DX` |
+| VehicleTypeID (PK) | text | 車型代號，如 `K5`、`S3`、`M7` |
 | Notes | text | 備註 |
 
 ### 2.1 `Vehicles` 車系設定（下層，隸屬某個車型）
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
-| VehicleID (PK) | text | 如 `DA-3T`、`DA-9C`、`DA-9P` |
-| VehicleTypeID (FK) | text | 對應 `VehicleTypes.VehicleTypeID`，如 `DA` |
-| VehicleCode | text | 車系名稱：3人貨車 / 9人客貨車(商用) / 9人客貨車(接駁) / 幼童車 / 福祉車 |
+| VehicleID (PK) | text | 如 `V1`、`V2`、`V3` |
+| VehicleTypeID (FK) | text | 對應 `VehicleTypes.VehicleTypeID`，如 `K5` |
+| VehicleCode | text | 車系名稱：標準型 / 豪華型 / 長軸版 |
 | Notes | text | 備註 |
 
 > 不再有 `Status`（現況/開發中/量產）欄位；車型只有「存在/不存在」兩種狀態，
@@ -44,7 +44,7 @@
 
 ### 2.2 `Scenarios` 情境主檔
 
-損益試算常需要多情境比較（現況 vs 目標 vs 已知低減方向 vs DE基準 vs DH目標），
+損益試算常需要多情境比較（現況 vs 目標 vs 已知低減方向 vs 其他車型的基準），
 所有交易表都用 `ScenarioID` 做區隔，同一車型可以有多筆情境版本。
 前端導覽以「車型」為第一層選單，「情境」是車型底下的第二層選單，
 切換車型後情境選單會重新載入該車型專屬的情境清單。
@@ -263,7 +263,7 @@
 |---|---|---|
 | ResultID (PK) | text | |
 | ScenarioID (FK) | text | |
-| VehicleID (FK) | text | 空白代表「DA車加權平均」列 |
+| VehicleID (FK) | text | 空白代表「車型加權平均」列 |
 | LineCode (FK) | text | 對應 PLLineItems |
 | Amount | currency | |
 | PctOfRevenue | % | 佔 A 收入(未稅,含強配)的比例，即 Gate F 表上的 % 欄 |
@@ -316,7 +316,7 @@ Parameters ───(依 ScenarioID/VehicleID 查詢)─────────
 PLLineItems ──(靜態科目表)──> CalcEngine ──> PLResult >──┘
 ```
 
-- 前端導覽順序：先選「車型」(`VehicleTypes`，如 DA)，車型底下管理「車系」(`Vehicles`，如 3人貨車/9人客貨車) 與「情境」(`Scenarios`)；情境是車型的次要選單，同一車型下可以有多個 `ScenarioID`（現況/目標/已知低減方向），前端可並排比較。
+- 前端導覽順序：先選「車型」(`VehicleTypes`，如 K5)，車型底下管理「車系」(`Vehicles`，如 標準型/豪華型) 與「情境」(`Scenarios`)；情境是車型的次要選單，同一車型下可以有多個 `ScenarioID`（現況/目標/已知低減方向），前端可並排比較。
 - `DevInvestment` 是「部門別」層級，不直接綁車系；分攤到車系時透過 `SalesMix` 的 `LifeCycleYears × MonthlyVolume` 算出的「總台數」比例分攤（對應 Excel 的 CMC單台 / BASE廠單台邏輯）。
 
 ---

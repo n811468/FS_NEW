@@ -140,6 +140,13 @@ const hostB = newHost(memoryStorage());
 hostB.replaceWithPack(fullPack);
 assert(same(numbers(apiOf(hostB).calculateComparison(selA)), reference), '資料包匯入另一台主機後數字變了');
 
+// 資料庫裡只有這一個車型時，「匯出車型」匯出的就是全部，也算整份備份過了
+apiA.saveVehicleType({ VehicleTypeID: 'DA', Notes: '只有一個車型時的匯出' });
+assert(hostA.state.changesSinceExport > 0, '改了資料，計數應該增加');
+const onlyTypes = hostA.readTables().VehicleTypes.map(r => r.VehicleTypeID);
+hostA.exportPack(onlyTypes);
+assert(onlyTypes.length === 1 && hostA.state.changesSinceExport === 0, '只有一個車型時，匯出車型應該算整份備份：' + onlyTypes.join());
+
 // 加一個車型 DE(另一個人負責)，用來測只匯出單一車型
 apiA.saveVehicleType({ VehicleTypeID: 'DE', Notes: '' });
 apiA.saveVehicle({ VehicleID: 'DE1', VehicleTypeID: 'DE', VehicleCode: '5人休旅' });

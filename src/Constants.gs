@@ -27,7 +27,7 @@ var SHEETS = {
 };
 
 // 每張表的欄位順序，同時作為 Sheet 標題列與 Apps Script 讀寫時的欄位對應。
-// 車型階層：VehicleTypes(車型，如 DA) 為上層主檔，Vehicles(車系，如 3人貨車) 為下層，
+// 車型階層：VehicleTypes(車型，如 K5) 為上層主檔，Vehicles(車系，如 標準型) 為下層，
 // 需先在「車型主檔」選擇/建立車型，才能在「車系設定」底下新增車系。
 var SCHEMA = {
   VehicleTypes: ['VehicleTypeID', 'Notes'],

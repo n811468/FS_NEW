@@ -370,7 +370,7 @@ function chartEditorPaneHtml_() {
         <summary>進階設定${overrideCount ? `（${overrideCount} 個車系另外指定算法）` : ''}</summary>
         <div class="ed-adv-body">
           <div class="field"><span>個別車系的算法不一樣？</span>
-            <span class="help">同一個車型裡，某個車系要用不同算法才填（例：3人貨車的一般材料 = DE 實績 × 1.2）。留白 = 照上面的設定。</span></div>
+            <span class="help">同一個車型裡，某個車系要用不同算法才填（例：標準型的一般材料 = 前代車型實績 × 1.2）。留白 = 照上面的設定。</span></div>
           ${vehicles.length ? `<table class="grid-table override-table"><tbody>${vehicles.map(v => `<tr>
               <td class="row-head" style="width:170px;">${esc(v.VehicleCode || v.VehicleID)}</td>
               <td><input type="text" value="${esc(overrides[v.VehicleID] || '')}" placeholder="（照上面的設定）"

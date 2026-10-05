@@ -44,7 +44,7 @@ function getBootstrap(preferredVehicleTypeId) {
   };
 }
 
-// ---- VehicleTypes（車型主檔，如 DA/DE/DH/DX，需先建立才能在底下新增車系） ----
+// ---- VehicleTypes（車型主檔，如 K5/S3/M7，需先建立才能在底下新增車系） ----
 function getVehicleTypes() {
   return sheetToObjects_(SHEETS.VEHICLE_TYPES) || [];
 }
@@ -115,7 +115,7 @@ function renameVehicleType(oldId, newId) {
   });
 }
 
-// ---- Vehicles（車系，如 3人貨車/9人客貨車，隸屬某個 VehicleType） ----
+// ---- Vehicles（車系，如 標準型/豪華型，隸屬某個 VehicleType） ----
 /**
  * 車系清單依 SortOrder 排序：這個順序會帶到所有用車系排欄位的地方
  * （銷貨成本/營業費用矩陣的欄位、儀表板的車系選單...），車系設定頁可以直接改「排序」欄位調整。
