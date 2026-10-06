@@ -317,8 +317,7 @@ function solveGoalPlan(scenarioId, metric, target, levers) {
     };
     if (mode === 'known') {
       if (blank(l.known)) throw new Error('「' + b.label + '」是已知調整，請填要調多少');
-      var k = Number(l.known);
-      it.value = l.by === 'to' ? k : l.by === 'abs' ? b.value + k : b.value * (1 + k / 100);
+      it.value = adjustedValue_(b.value, l.by, Number(l.known));
       if (it.lower !== null && it.value < it.lower) it.value = it.lower;
     } else it.value = b.value;
     return it;
@@ -444,6 +443,74 @@ function solveGoalPlan(scenarioId, metric, target, levers) {
     reachedByKnown: reachedByKnown && fills.length > 0 && Math.abs(remaining) >= 0.5,
     alreadyMet: (target - metricBase) * dir <= 0.5,
     levers: out, warnings: warnings, message: message
+  };
+}
+
+/** 已知調整套用後的值：by 'pct' 調 k %、'abs' 加減 k、'to' 調到 k */
+function adjustedValue_(base, by, k) {
+  return by === 'to' ? k : by === 'abs' ? base + k : base * (1 + k / 100);
+}
+
+/** 目前覆寫底下整張損益表：加權單台(unit)與月總額(month，各車系單台 × 月銷量 加總) */
+function plSnapshot_(scenarioId) {
+  var all = calculatePLAllVehicles(scenarioId);
+  var mix = calcSalesMix_(scenarioId);
+  var unit = {}, month = {};
+  all.weightedAverage.forEach(function (l) { unit[l.LineCode] = l.Amount; month[l.LineCode] = 0; });
+  all.vehicles.forEach(function (res) {
+    var row = mix.filter(function (r) { return r.VehicleID === res.vehicleId; })[0];
+    var vol = toNumber_(row && row.MonthlyVolume);
+    Object.keys(month).forEach(function (code) { month[code] += (res.lineValues[code] || 0) * vol; });
+  });
+  return { unit: unit, month: month };
+}
+
+/**
+ * 調整影響試算(正推)：「材料成本降 3%、售價加 1 萬，營業淨利(或任何一個科目)會變多少？」
+ * adjustments = [{ driver, by: 'pct' | 'abs' | 'to', value }]，同目標反推的「已知調整」。
+ * 回傳整張損益表每一行的 目前 → 調整後(單台與月總額都有，前端切換不必重算)，
+ * 以及每一項調整依列表順序逐項加入的貢獻(加總 = 總變動，各項之間有交互作用時也接得起來)。
+ */
+function simulateAdjustments(scenarioId, adjustments) {
+  if (!scenarioId) throw new Error('請先選擇情境');
+  var blank = function (v) { return v === '' || v === null || v === undefined || isNaN(Number(v)); };
+  var adjs = (adjustments || []).filter(function (a) { return a && a.driver && a.driver.type && !blank(a.value); });
+  if (!adjs.length) throw new Error('請至少填一項調整');
+  var seen = {};
+  var items = adjs.map(function (a) {
+    var k = JSON.stringify(a.driver);
+    if (seen[k]) throw new Error('「' + driverLabel_(a.driver) + '」重複選了兩次');
+    seen[k] = true;
+    var b = driverBase_(scenarioId, a.driver);
+    var v = adjustedValue_(b.value, a.by, Number(a.value));
+    // 銷量、售價、匯率、科目金額不能調成負數；銷量 0 台時單台的數字沒有意義
+    if (['volume', 'price', 'fx', 'line', 'dev'].indexOf(a.driver.type) !== -1 && v < 0) v = 0;
+    if (a.driver.type === 'volume' && !(v > 0)) throw new Error('月總銷量要大於 0 台');
+    return { driver: a.driver, label: b.label, unit: b.unit, base: b.value, value: v, pct: b.value ? (v / b.value - 1) * 100 : null };
+  });
+  var defs = displayOrderDefs_(lineDefsForScenario_(scenarioId));
+  var base = plSnapshot_(scenarioId);
+  var o = { scenarioId: scenarioId };
+  var steps = items.map(function (it) {
+    if (it.value !== it.base) o = mergeOverrides_(o, driverOverrides_(scenarioId, it.driver, it.value, it.base));
+    return withOverrides_(o, function () { return plSnapshot_(scenarioId); });
+  });
+  var after = steps[steps.length - 1];
+  var profit = profitLineCode_(defs);
+  var lines = defs.filter(function (d) { return base.unit[d.LineCode] !== undefined; }).map(function (d) {
+    var c = d.LineCode;
+    var contrib = function (basis) {
+      var prev = base[basis][c];
+      return steps.map(function (s) { var x = (s[basis][c] || 0) - prev; prev = s[basis][c] || 0; return x; });
+    };
+    return {
+      code: c, name: d.LineName, category: d.Category || '', parent: d.ParentLine || '', isProfit: c === profit,
+      unit: { base: base.unit[c], after: after.unit[c] || 0, contributions: contrib('unit') },
+      month: { base: base.month[c], after: after.month[c] || 0, contributions: contrib('month') }
+    };
+  });
+  return {
+    adjustments: items, lines: lines, profitCode: profit
   };
 }
 

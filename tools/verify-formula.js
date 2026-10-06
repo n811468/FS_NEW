@@ -388,6 +388,34 @@ check('目標反推(組合拳)：已知調整、負責金額、補足缺口依�
   near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '試算完存檔的數字不能變', 0.01);
 });
 
+check('調整影響試算(正推)：材料降多少營業淨利就多多少，多項的逐項影響加總 = 總變動，不改到存檔資料', () => {
+  reset();
+  const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
+  const b1 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'b1')[0].Amount;
+  const line = (r, c) => r.lines.filter(l => l.code === c)[0];
+  // 材料成本-LP 少 1 萬(LP 不影響貨物稅)：營業淨利多 1 萬
+  const a = gs.simulateAdjustments(sid, [{ driver: { type: 'line', code: 'b1' }, by: 'abs', value: -10000 }]);
+  near(line(a, 'b1').unit.after, b1 - 10000, '材料成本-LP 調整後', 1e-6);
+  near(line(a, 'K').unit.after - k0, 10000, '營業淨利多 1 萬', 1);
+  assert(line(a, 'K').isProfit && a.profitCode === 'K', '營業淨利標成重點');
+  // 跟目標反推的已知調整同一套算法
+  const plan = gs.solveGoalPlan(sid, { code: 'K', basis: 'unit' }, k0, [
+    { driver: { type: 'price' }, mode: 'known', by: 'pct', known: 2 }, { driver: { type: 'volume' }, mode: 'known', by: 'to', known: 500 }]);
+  const b = gs.simulateAdjustments(sid, [{ driver: { type: 'price' }, by: 'pct', value: 2 }, { driver: { type: 'volume' }, by: 'to', value: 500 }]);
+  near(line(b, 'K').unit.after, plan.achieved, '跟目標反推已知調整的結果相同', 1e-6);
+  ['unit', 'month'].forEach(basis => b.lines.forEach(l => {
+    near(l[basis].contributions.reduce((x, y) => x + y, 0), l[basis].after - l[basis].base, l.code + ' 逐項影響加總 = 總變動(' + basis + ')', 1e-6);
+  }));
+  near(line(b, 'K').unit.contributions[0], plan.levers[0].contribution, '第一項的影響 = 目標反推的貢獻', 1e-6);
+  const m0 = gs.sensitivityTable(sid, { code: 'K', basis: 'month' }, { type: 'volume' }, [500]).cells[0][0];
+  near(gs.simulateAdjustments(sid, [{ driver: { type: 'volume' }, by: 'to', value: 500 }]).lines.filter(l => l.code === 'K')[0].month.after, m0, '月總額跟敏感度表同一套算法', 1e-6);
+  let threw = '';
+  try { gs.simulateAdjustments(sid, [{ driver: { type: 'price' }, by: 'pct', value: 1 }, { driver: { type: 'price' }, by: 'abs', value: 1 }]); } catch (e) { threw = e.message; }
+  assert(/重複/.test(threw), '同一項選兩次要擋下來：' + threw);
+  reset();
+  near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '試算完存檔的數字不能變', 0.01);
+});
+
 check('目標反推另存成新情境：資料寫實後重算的營業淨利 = 試算值，來源情境不變', () => {
   reset();
   const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
