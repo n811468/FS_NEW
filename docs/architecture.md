@@ -249,6 +249,9 @@ v2 新頁面：「科目與公式」(`renderChartPanel`：科目樹 + 編輯器 
     舊版靠 `Department === 'BASE廠開發費'` 這個字串來分 f3/f4，部門是自由輸入欄位，
     打成別的字就整筆落到 f3、而且畫面上看不出來（f4 永遠是 0）；舊資料仍照原規則判讀後自動轉換。
     目標情境才顯示挑戰低減目標欄位。從其他情境整批帶入資料只在「車型與情境 → 情境」做（`copyScenarioData()`，可勾選類別）。
+    畫面是「部門彙總」（`src/ui/22-devinvest.js`）：資料仍是一筆一列，前端依 Department 合成一個部門一列、依攤提落點的
+    `DevAmortCategory` 分到模具／設備／費用欄；一格只有一筆台幣才直接改，其餘在右側面板改。外幣換算用
+    `getDevInvestmentSummary` 回傳的 `fxRates`（跟攤提計算同一個匯率），部門說明是 `deptNotes`（存在 LineNotes，見 data-schema）。
     使用者自訂的攤提落點（`AutoSource=DEV_AMORT`，跟內建的 b5/b8/f3/f4 不同）沒有任何情境的
     開發總投列指到它時，不會再強制以 0 出現在損益表/矩陣頁面上，也可以直接在「科目設定」刪除
     （`deletePLLineItem` 只擋「還有資料指到這裡」的情況，不像其他自動計算科目一律鎖死）。

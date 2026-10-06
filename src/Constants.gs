@@ -268,6 +268,10 @@ var DEFAULT_PARAMS = {
 // 舊資料轉換用：資產類型還是舊的「費用」時，Department 等於這個值就視為 f4(BASE廠)，其餘為 f3(CMC)。
 var DEV_INVESTMENT_BASE_FACTORY_DEPT = 'BASE廠開發費';
 
+// 開發總投「部門說明」(GATE 報告開發總投 by 部門的說明欄)存在 LineNotes，LineCode = 這個前綴 + 部門名稱。
+// 每一筆投資自己的 Notes 是「項目」(例：上汽開發費底下的 RMB 3000萬、技術授權金)，部門說明是整個部門一段。
+var DEV_DEPT_NOTE_PREFIX = 'DEPT:';
+
 // ChallengeReductionPct 同樣以百分比數值(0~100)輸入及儲存(如 15 代表 15%)。
 // 挑戰低減目標屬於情境層級的假設：同一個 GATE 下的「現況」與「目標」情境各自填自己的低減目標，
 // 因此不需要額外欄位標記，直接由該情境的 DevInvestment 列決定。

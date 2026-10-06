@@ -245,6 +245,11 @@
 `RowID` / `ScenarioID` / `LineCode` / `VehicleID`(留白 = 整個科目) / `Notes`。
 銷貨成本/營業費用頁的「說明」欄與報告上的說明是同一份；沒有另外寫說明的科目沿用該頁的舊備註。
 
+開發總投的**部門說明**也存在這張表：`LineCode` = `DEPT:` + 部門名稱（`DEV_DEPT_NOTE_PREFIX`），`VehicleID` 留白。
+它不是科目說明（`getLineNotes` 會略過），由 `getDevDeptNotes` / `saveDevInvestmentGrid(scenarioId, rows, deptNotes)` 讀寫，
+情境帶入時跟著「開發總投」這一類一起帶。GATE 報告「開發總投 by 部門」的說明欄用它；沒寫的部門沿用各筆的 `Notes`。
+`DevInvestment.Notes` 是每一筆的「項目」名稱（例：上汽開發費底下的 RMB 3000 萬、技術授權金）。
+
 ### 2.7d `Actions` 改善作法
 
 `ActionID` / `VehicleTypeID` / `ScenarioID`(目標情境) / `LineCode`(對應科目，選填) / `Title` / `Detail` /

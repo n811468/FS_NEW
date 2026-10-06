@@ -46,6 +46,14 @@ async function main() {
     try { await pw.chromium.launch(launchOpts).then(b => b.close()); } catch (e) { launchOpts.executablePath = '/opt/pw-browsers/chromium'; }
   }
   const browser = await pw.chromium.launch(launchOpts);
+  // E2E_ONLY=dev：只跑開發總投從零開始(改這一頁時快速檢查)
+  if (process.env.E2E_ONLY === 'dev') {
+    await devFromScratch(browser, () => { });
+    await browser.close();
+    if (failures.length) { failures.forEach(f => console.log('  ✗ ' + f)); process.exit(1); }
+    console.log(`開發總投從零開始：${checks} 項全部符合`);
+    return;
+  }
   const context = await browser.newContext({ acceptDownloads: true });
   const external = [];
   await context.route('**/*', route => {
@@ -483,6 +491,9 @@ async function main() {
   assert(unexpected.length === 0, '頁面有 JS 錯誤：' + unexpected.join(' | '));
   assert(external.length === 0, '地端版不該連外部網路，卻請求了：' + external.join(', '));
 
+  // 開發總投：另開一個全新的資料庫(空白)，從一張空表開始全部用畫面操作
+  await devFromScratch(browser, launchErrors => errors.push(...launchErrors));
+
   await browser.close();
   fs.rmSync(tmp, { recursive: true, force: true });
 
@@ -491,7 +502,172 @@ async function main() {
     failures.forEach(f => console.log('  ✗ ' + f));
     process.exit(1);
   }
-  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、多項反推、調整影響試算、瀑布圖工具、情境快照、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
+  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、多項反推、調整影響試算、開發總投從零開始、瀑布圖工具、情境快照、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
 }
 
-main().catch(e => { console.error(e); if (ERRS.length) console.error('頁面錯誤：', ERRS.join(' | ')); process.exit(1); });
+/**
+ * 開發總投從零開始：全新的瀏覽器資料(空資料庫) → 只建一個車型、一個目標情境(攤提基準 100 台/月 × 5 年 = 6,000 台)，
+ * 開發總投頁從空表開始，全部用畫面操作：新增部門、右側面板加筆數、格子直接打數字、低減 %、資產/費用分開、
+ * 統一低減目標、從 Excel 貼上、部門說明、刪除部門、儲存後重新整理還在，最後跟後端的攤提彙總與 GATE 報告對數字。
+ */
+let devPage_ = null;   // 失敗時截圖用
+async function devFromScratch(browser, reportErrors) {
+  const ctx = await browser.newContext();
+  await ctx.route('**/*', route => (/^(file|blob|data):/.test(route.request().url()) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  devPage_ = page;
+  const errs = [];
+  page.on('pageerror', e => errs.push(e.message));
+  page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
+  page.on('dialog', d => d.accept());
+  const run = (fn, ...args) => page.evaluate(([fn, args]) => new Promise((ok, fail) =>
+    google.script.run.withSuccessHandler(ok).withFailureHandler(e => fail(new Error(e.message)))[fn](...args)), [fn, args]);
+  const cellText = async (dept, nth) => (await page.locator(`#dev-body tr[data-dept="${dept}"] td`).nth(nth).innerText()).trim();
+  const inputVal = (dept, c) => page.inputValue(`#dev-body tr[data-dept="${dept}"] input[data-c="${c}"]`);
+  const typeCell = async (dept, c, v) => {
+    const sel = `#dev-body tr[data-dept="${dept}"] input[data-c="${c}"]`;
+    await page.click(sel);
+    await page.fill(sel, String(v));
+    await page.keyboard.press('Enter');
+  };
+  // 欄位：0 部門 | 1 模具 2 設備 3 費用 4 總計 | 5 低減目標 | 6 模具 7 設備 8 費用 9 總計(低減後) | 10 說明
+  const openDrawer = async dept => { await page.click(`#dev-body tr[data-dept="${dept}"] .dept-btn`); await page.waitForSelector('#dev-drawer'); };
+  const closeDrawer = async () => { await page.click('#dev-drawer footer button:has-text("完成")'); await page.waitForSelector('#dev-drawer', { state: 'detached' }); };
+
+  await page.goto(URL_);
+  await page.waitForSelector('#fs-local-bar');
+  assert(await page.isVisible('#fs-local-banner.fsl-banner-info'), '開發總投從零開始：應該是空資料庫');
+  await run('saveVehicleTypeGrid', [{ VehicleTypeID: 'EZ', Notes: '' }]);
+  await run('saveScenario', { ScenarioID: '', Gate: 'GATE F', ScenarioName: '目標', ScenarioType: '目標', VehicleTypeID: 'EZ',
+    AmortMonthlyVolume: 100, AmortLifeCycleYears: 5 });
+  await page.reload();
+  await page.waitForFunction(() => document.getElementById('vehicletype-selector').value === 'EZ' && document.getElementById('scenario-selector').value);
+  await page.click('nav button[data-tab="devinvestment"]');
+  await page.waitForSelector('#grid-devinvestment .empty-state');
+  assert(/還沒有開發總投/.test(await page.textContent('#grid-devinvestment')), '空表要有說明怎麼開始');
+
+  // 1. 新增部門 → 右側面板：改名、加一筆模具、一筆費用、低減 10%
+  await page.click('#toolbar-devinvestment button:has-text("新增部門")');
+  await page.waitForSelector('#dev-drawer');
+  await page.fill('#dev-dr-name', '開發部');
+  await page.press('#dev-dr-name', 'Tab');
+  await page.click('#dev-drawer button:has-text("加一筆模具")');
+  await page.fill('#dev-drawer .dev-cat[data-cat="模具"] .dev-item input.amt', '1000000');
+  await page.press('#dev-drawer .dev-cat[data-cat="模具"] .dev-item input.amt', 'Tab');
+  await page.fill('#dev-drawer .dev-cat[data-cat="模具"] .dev-item input[aria-label="項目"]', '四門一蓋模具');
+  await page.press('#dev-drawer .dev-cat[data-cat="模具"] .dev-item input[aria-label="項目"]', 'Tab');
+  await page.click('#dev-drawer button:has-text("加一筆費用")');
+  await page.fill('#dev-drawer .dev-cat[data-cat="費用"] .dev-item input.amt', '200000');
+  await page.press('#dev-drawer .dev-cat[data-cat="費用"] .dev-item input.amt', 'Tab');
+  await page.fill('#dev-drawer input[aria-label="全部低減%"]', '10');
+  await page.press('#dev-drawer input[aria-label="全部低減%"]', 'Tab');
+  await closeDrawer();
+  assert(await cellText('開發部', 1) === '1,000,000' || await inputVal('開發部', '模具') === '1,000,000', '開發部模具 1,000,000');
+  assert(await cellText('開發部', 4) === '1,200,000', '開發部總計 1,200,000：' + await cellText('開發部', 4));
+  assert(await cellText('開發部', 9) === '1,080,000', '開發部低減後 10% = 1,080,000：' + await cellText('開發部', 9));
+  assert(await page.isVisible('#savebar.show'), '改過之後底部要出現儲存提示');
+
+  // 2. 第二個部門：在主表格子直接打數字(Enter 往下)
+  await page.click('#toolbar-devinvestment button:has-text("新增部門")');
+  await page.fill('#dev-dr-name', '生技部');
+  await page.press('#dev-dr-name', 'Tab');
+  await closeDrawer();
+  await typeCell('生技部', '設備', '3,000,000');
+  await typeCell('生技部', 'pct', '15');
+  assert(await cellText('生技部', 9) === '2,550,000', '生技部設備 300 萬低減 15% = 2,550,000：' + await cellText('生技部', 9));
+  assert(await page.$('#dev-body tr[data-dept="生技部"] td.dirty'), '改過的格子要標出來');
+
+  // 3. 統一低減目標 10% → 全部部門
+  await page.fill('#dev-all-pct', '10');
+  await page.click('#toolbar-devinvestment button:has-text("套用到全部部門")');
+  assert(await inputVal('生技部', 'pct') === '10', '套用到全部部門後生技部是 10%');
+
+  // 4. 開發部資產、費用分開：費用 20%
+  await openDrawer('開發部');
+  await page.click('#dev-drawer .seg-btn:has-text("資產、費用分開")');
+  await page.fill('#dev-drawer input[aria-label="費用低減%"]', '20');
+  await page.press('#dev-drawer input[aria-label="費用低減%"]', 'Tab');
+  await closeDrawer();
+  assert(await cellText('開發部', 5) === '資 10%｜費 20%', '分開後低減目標顯示「資 10%｜費 20%」：' + await cellText('開發部', 5));
+  assert(await cellText('開發部', 9) === '1,060,000', '模具 90 萬 + 費用 16 萬 = 1,060,000：' + await cellText('開發部', 9));
+
+  // 5. 開發部費用再加一筆：這一格變成「好幾筆」，不能直接改
+  await openDrawer('開發部');
+  await page.click('#dev-drawer button:has-text("加一筆費用")');
+  await page.locator('#dev-drawer .dev-cat[data-cat="費用"] .dev-item input.amt').nth(1).fill('50000');
+  await page.locator('#dev-drawer .dev-cat[data-cat="費用"] .dev-item input.amt').nth(1).press('Tab');
+  await closeDrawer();
+  assert(await page.$('#dev-body tr[data-dept="開發部"] td:nth-child(4) button.lock'), '費用有兩筆時要變成點了開面板的格子');
+  assert(await cellText('開發部', 3) === '250,000', '費用兩筆合計 250,000：' + await cellText('開發部', 3));
+
+  // 6. 從 Excel 貼上：開發部費用(兩筆)金額不同 → 先不改；生技部設備改 320 萬、低減後 288 萬；新部門品管部；說明
+  const tsv = ['\t\t\t\t\t10.00%', '部門\t模具\t設備\t費用\t總計\t模具\t設備\t費用\t總計\t說明',
+    '開發部\t1,000,000\t\t260,000\t1,260,000\t900,000\t\t208,000\t1,108,000\t開發四門一蓋',
+    '生技部\t\t3,200,000\t-\t3,200,000\t\t2,880,000\t-\t2,880,000\t"新設ROOF激光站\n研磨站"',
+    '品管部\t\t\t500,000\t500,000\t-\t-\t450,000\t450,000\t檢具'].join('\n');
+  await page.click('#toolbar-devinvestment button:has-text("從 Excel 貼上")');
+  await page.waitForSelector('dialog.dev-paste[open]');
+  await page.fill('#dev-paste-text', tsv);
+  await page.waitForSelector('#dev-paste-preview details');
+  const todo = await page.textContent('#dev-paste-preview details[data-kind="todo"]');
+  assert(/開發部/.test(todo) && /2 筆/.test(todo), '開發部費用有兩筆、金額不同，要列在「要你看一下」：' + todo);
+  assert(/生技部/.test(await page.textContent('#dev-paste-preview details[data-kind="chg"]')), '生技部設備要列在「會更新」');
+  assert(/品管部/.test(await page.textContent('#dev-paste-preview details[data-kind="new"]')), '品管部要列在「會新增」');
+  await page.click('#dev-paste-ok');
+  await page.waitForSelector('dialog.dev-paste', { state: 'detached' });
+  assert(await cellText('開發部', 3) === '250,000', '開發部費用(兩筆)貼上時不該被改');
+  assert(await inputVal('生技部', '設備') === '3,200,000' && await cellText('生技部', 9) === '2,880,000', '生技部設備 320 萬、低減後 288 萬');
+  assert(await inputVal('品管部', '費用') === '500,000' && await inputVal('品管部', 'pct') === '10', '品管部費用 50 萬、低減 10%');
+  assert(/新設ROOF激光站/.test(await cellText('生技部', 10)), '貼上的說明要出現在說明欄');
+
+  // 7. 說明：點說明欄 → 面板 → 改
+  await page.click('#dev-body tr[data-dept="品管部"] td.c-note button');
+  await page.waitForSelector('#dev-dr-note');
+  await page.fill('#dev-dr-note', '四門一蓋檢具x6套');
+  await page.press('#dev-dr-note', 'Tab');
+  await closeDrawer();
+
+  // 8. 儲存 → 重新整理 → 還在
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'), null, { timeout: 10000 });
+  await page.reload();
+  await page.waitForFunction(() => document.getElementById('scenario-selector').value);
+  await page.click('nav button[data-tab="devinvestment"]');
+  await page.waitForSelector('#dev-body tr');
+  const depts = await page.$$eval('#dev-body .dept-btn', bs => bs.map(b => b.closest('tr').getAttribute('data-dept')));
+  assert(depts.join() === '開發部,生技部,品管部', '重新整理後部門順序：' + depts.join());
+  assert(await cellText('開發部', 5) === '資 10%｜費 20%' && await cellText('開發部', 9) === '1,100,000', '開發部 模具 90 萬 + 費用 25 萬×0.8 = 1,100,000：' + await cellText('開發部', 9));
+  assert(/四門一蓋檢具x6套/.test(await cellText('品管部', 10)), '部門說明存得起來');
+  const totalRed = 1100000 + 2880000 + 450000;
+  assert((await page.locator('#grid-devinvestment tfoot td').nth(9).innerText()).trim() === totalRed.toLocaleString('en-US'), '合計低減後');
+  // 後端：攤提彙總(6,000 台)、GATE 報告開發總投 by 部門
+  const sid = await page.inputValue('#scenario-selector');
+  const sum = await run('getDevInvestmentSummary', sid);
+  const tot = sum.targets.reduce((s, t) => s + t.Total, 0);
+  assert(Math.abs(tot - totalRed) < 1 && sum.lifeCycleUnits === 6000, '攤提彙總要等於低減後合計：' + tot);
+  const item = sum.rows.find(r => r.Notes === '四門一蓋模具');
+  assert(item && item.Amount === 1000000, '面板裡的項目名稱存在那一筆上');
+  const rep = await run('getGateReport', sid, sid, '');
+  const qa = (rep.dev || rep.target && rep.target.dev || { rows: [] }).rows.find(r => r.Department === '品管部');
+  assert(qa && qa.notes === '四門一蓋檢具x6套' && Math.abs(qa.reduced - 450000) < 1, 'GATE 報告開發總投 by 部門要用部門說明：' + JSON.stringify(qa));
+
+  // 9. 刪除部門 → 儲存 → 不見了；部門說明跟著刪
+  await openDrawer('品管部');
+  await page.click('#dev-drawer button:has-text("刪除這個部門")');
+  await page.click('dialog.modal[open] button[value=ok]');
+  await page.waitForSelector('#dev-drawer', { state: 'detached' });
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => !document.getElementById('savebar').classList.contains('show'), null, { timeout: 10000 });
+  const after = await run('getDevInvestmentSummary', sid);
+  assert(!after.rows.some(r => r.Department === '品管部') && !after.deptNotes['品管部'], '刪除部門後明細與說明都要刪掉');
+  // 每一筆明細檢視也看得到
+  await page.click('#toolbar-devinvestment .seg-btn:has-text("每一筆明細")');
+  assert((await page.$$('#grid-devinvestment table.dev-list tbody tr')).length === 4, '明細：開發部 3 筆 + 生技部 1 筆');
+
+  assert(errs.length === 0, '開發總投從零開始：頁面有 JS 錯誤：' + errs.join(' | '));
+  reportErrors([]);
+  await ctx.close();
+}
+
+main().catch(async e => {
+  if (devPage_) { const shot = path.join(os.tmpdir(), 'e2e-dev-fail.png'); try { await devPage_.screenshot({ path: shot, fullPage: true }); console.error('失敗畫面：' + shot); } catch (x) { /* 已關閉 */ } } console.error(e); if (ERRS.length) console.error('頁面錯誤：', ERRS.join(' | ')); process.exit(1); });

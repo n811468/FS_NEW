@@ -784,6 +784,10 @@ function getDevInvestmentSummary(scenarioId, overrideRows) {
     };
   });
   var scenario = getScenarios().filter(function (s) { return s.ScenarioID === scenarioId; })[0] || {};
+  var currencies = getConfiguredCurrencies(scenarioId);
+  var params = getParameters(scenarioId);
+  var fxRates = {};
+  currencies.forEach(function (c) { fxRates[c] = c === BASE_CURRENCY ? 1 : fxRateFor_(params, c, ''); });
   return {
     lifeCycleUnits: perUnit.totalUnits,
     salesMixLifeCycleUnits: getSalesMixLifeCycleUnits(scenarioId),
@@ -805,7 +809,10 @@ function getDevInvestmentSummary(scenarioId, overrideRows) {
     }),
     amortMonthlyVolume: scenario.AmortMonthlyVolume === undefined ? '' : scenario.AmortMonthlyVolume,
     amortLifeCycleYears: scenario.AmortLifeCycleYears === undefined ? '' : scenario.AmortLifeCycleYears,
-    currencies: getConfiguredCurrencies(scenarioId),
+    currencies: currencies,
+    // 外幣換算成台幣(畫面上部門彙總用，跟攤提計算同一個匯率)
+    fxRates: fxRates,
+    deptNotes: getDevDeptNotes(scenarioId),
     perUnit: perUnit, isBaseline: isBaseline, rows: rows
   };
 }

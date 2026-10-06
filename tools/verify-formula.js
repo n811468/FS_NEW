@@ -471,6 +471,34 @@ check('開發總投低減目標 15% 改成 20%：攤提 × 80/85、另存後寫�
   reset();
 });
 
+check('開發總投部門說明：存在 LineNotes 但不混進科目說明；情境帶入跟著開發總投走，只帶科目說明時不動', () => {
+  reset();
+  const src = gs.getScenarios().filter(s => s.ScenarioID === sid)[0];
+  const t = gs.saveScenario({ ScenarioID: '', Gate: src.Gate, ScenarioName: '部門說明測試', ScenarioType: '目標', VehicleTypeID: src.VehicleTypeID }).ScenarioID;
+  const rows = gs.getDevInvestmentSummary(sid).rows;
+  gs.saveDevInvestmentGrid(sid, rows, { [rows[0].Department || '']: '來源的部門說明' });
+  reset();
+  const dept = rows[0].Department || '';
+  assert(gs.getDevInvestmentSummary(sid).deptNotes[dept] === '來源的部門說明', '部門說明要存得起來');
+  assert(!Object.keys(gs.getLineNotes(sid)).some(k => k.indexOf('DEPT:') === 0), '科目說明不能出現部門說明');
+  gs.saveLineNotes(t, { b1: '目標自己的科目說明' });
+  gs.copyScenarioData(sid, t, ['linenotes']);
+  reset();
+  assert(!gs.getDevDeptNotes(t)[dept], '只帶科目說明時不帶部門說明');
+  gs.copyScenarioData(sid, t, ['devinvestment']);
+  reset();
+  assert(gs.getDevDeptNotes(t)[dept] === '來源的部門說明', '帶入開發總投時部門說明一起帶');
+  gs.saveDevInvestmentGrid(sid, rows, {});
+  reset();
+  assert(!gs.getDevDeptNotes(sid)[dept], '送空的說明表 = 刪除');
+  gs.saveDevInvestmentGrid(t, gs.getDevInvestmentSummary(t).rows);
+  reset();
+  assert(gs.getDevDeptNotes(t)[dept] === '來源的部門說明', '舊的呼叫方式(不送說明)不能把說明清掉');
+  gs.deleteScenario(t);
+  reset();
+  assert(!gs.getDevDeptNotes(t)[dept], '刪除情境時部門說明一起刪');
+});
+
 check('情境快照：存下當時的數字，之後改資料不影響；可以當成比較欄位', () => {
   reset();
   const kOf = () => gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;

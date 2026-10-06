@@ -285,33 +285,59 @@ const previewHtml = api('chartPreviewHtml_')();
 api("currentScenarioId = ''");
 assert(previewHtml.indexOf('3人貨車') !== -1 && previewHtml.indexOf('目前') !== -1, '試算表應列出各車系目前的值');
 
-/* ---- 6b. 開發總投：攤提落點直接選損益科目，畫面上不出現科目代碼 ---- */
+/* ---- 6b. 開發總投：部門彙總(Excel 樣式)、攤提落點直接選損益科目、從 Excel 貼上的比對 ---- */
 gs.saveDevInvestmentGrid(sc.ScenarioID, [
   { RowID: '', Department: '大陸廠', TargetLineCode: 'f4', Amount: 8000, Currency: 'TWD' }
-]);
+], { '大陸廠': '大陸廠的說明' });
 const devSummary = gs.getDevInvestmentSummary(sc.ScenarioID);
 assert(devSummary.rows[0].TargetLineCode === 'f4', '存檔後攤提落點應為 f4');
+assert(devSummary.deptNotes['大陸廠'] === '大陸廠的說明', '部門說明要存得起來');
+assert(!Object.keys(gs.getLineNotes(sc.ScenarioID)).some(k => /^DEPT:/.test(k)), '部門說明不能混進科目說明');
 assert((devSummary.targetOptions || []).some(o => o.value === 'f4'), '落點選項應包含 f4');
 assert((devSummary.targetOptions || []).every(o => !/^[a-z]\d/.test(o.label)),
   '落點選項的顯示名稱不該以科目代碼開頭');
 ctx.__in.devSummary = devSummary;
+ctx.setTimeout = () => 0; ctx.clearTimeout = () => { };
+api('toast = function () {}');
 api('devSummary = __in.devSummary');
 api('devRows = __in.devSummary.rows.map(r => Object.assign({}, r))');
+api('devNotes = Object.assign({}, __in.devSummary.deptNotes)');
 api('drawDevGrid')();
-assert(elFor_('grid-devinvestment').innerHTML.indexOf('value="f4" selected') !== -1,
-  '目前選取的攤提落點應該在下拉選單中被選中');
-assert(elFor_('toolbar-devinvestment').innerHTML.indexOf('新增攤提落點科目') !== -1,
-  '應該有新增攤提科目的入口');
-// f4 屬於「費用」大類，大類下拉應該自動選中「費用」，且落點選單只列出費用大類底下的選項(f3/f4)
 const devGridHtml = elFor_('grid-devinvestment').innerHTML;
-assert(devGridHtml.indexOf('value="費用" selected') !== -1, '大類下拉應該依目前落點自動選中「費用」');
-assert(devGridHtml.indexOf('value="b5"') === -1, '費用大類篩選後不該出現模具(b5)這個選項');
-
-// 大類下拉本身：切換大類要能清空不屬於新大類的落點、並只顯示 DEV_AMORT_CATEGORIES 三個大類
-const categoryOptions = api('DEV_AMORT_CATEGORIES');
-assert(categoryOptions.join(',') === '設備,模具,費用', '大類應該固定是設備/模具/費用三個');
-api("onDevCategoryChange(0, '模具')");
-assert(api('devRows')[0].TargetLineCode === '', '切到不含原落點的大類後，原本選的落點應該被清空');
+assert(api('devGroups_()')[0].cat['費用'].length === 1, 'f4 屬於「費用」大類，應該歸在費用那一格');
+assert(/data-c="費用"[^>]*value="8,000"|value="8,000"[^>]*data-c="費用"/.test(devGridHtml), '費用那一格應該可以直接改，顯示 8,000');
+assert(devGridHtml.indexOf('大陸廠的說明') !== -1, '說明欄應該顯示部門說明');
+assert(devGridHtml.indexOf('新增攤提落點科目') !== -1, '應該有新增攤提科目的入口');
+assert(elFor_('toolbar-devinvestment').innerHTML.indexOf('從 Excel 貼上') !== -1, '工具列要有從 Excel 貼上');
+assert(api("devDefaultTarget_('費用')") && api("devTargetCategoryOf(devDefaultTarget_('費用'))") === '費用', '費用的預設攤提落點要是費用大類的科目');
+assert(api("devDefaultTarget_('模具')") !== api("devDefaultTarget_('費用')"), '各大類的預設落點不同');
+// 直接在格子打數字：模具沒有任何一筆 → 新增一筆，攤提落點用模具的預設
+api("devSetAmt_('大陸廠', '模具', '12,000')");
+const mold = api('devRows').find(r => r.Department === '大陸廠' && api('devCatOf_')(r) === '模具');
+assert(mold && mold.Amount === 12000 && mold.TargetLineCode === api("devDefaultTarget_('模具')"), '模具格子打 12,000 應該新增一筆模具：' + JSON.stringify(mold));
+// 從 Excel 貼上：表頭同名欄位出現兩次(投資/低減後)、千分位、-、引號包起來的換行說明
+const tsv = ['\t\t\t\t\t10.00%', '部門\t模具\t設備\t費用\t總計\t模具\t設備\t費用\t總計\t說明',
+  '大陸廠\t12,000\t\t9,000\t21,000\t\t\t9,000\t9,000\t"第一行\n第二行"',
+  '新部門A\t\t5,000\t-\t5,000\t\t4,500\t-\t4,500\t新的'].join('\n');
+elFor_('dev-paste-text').value = tsv; elFor_('dev-o-unit').value = '1'; elFor_('dev-o-missing').value = 'keep'; elFor_('dev-o-multi').value = 'skip';
+// 這個情境是現況：低減後那一組不匯入
+const plan = api('devPlanPaste_()');
+assert(!plan.error, '應該解析得出來：' + plan.error);
+const kinds = k => plan.items.filter(i => i.kind === k).map(i => i.dept + '/' + i.what);
+assert(kinds('chg').indexOf('大陸廠/費用') !== -1, '大陸廠費用 8,000 → 9,000 要列在「會更新」：' + JSON.stringify(plan.items));
+assert(kinds('new').indexOf('新部門A/設備') !== -1, '新部門A 的設備要列在「會新增」');
+assert(kinds('note').indexOf('大陸廠/說明') !== -1 && plan.items.find(i => i.what === '說明').why.indexOf('第二行') !== -1, '引號包起來的多行說明要整段讀進來');
+assert(kinds('same').indexOf('大陸廠/模具') !== -1, '模具 12,000 沒變');
+api('devApplyPaste_()');
+const g2 = api('devGroups_()');
+assert(g2.find(g => g.name === '新部門A').sum(['設備']) === 5000 && g2.find(g => g.name === '大陸廠').sum(['費用']) === 9000, '套用後金額要對');
+assert(api('devNotes')['大陸廠'] === '第一行\n第二行', '套用後說明要更新');
+// 總計對不上要提醒、單位千元要乘上去
+elFor_('dev-paste-text').value = '部門\t模具\t設備\t費用\t總計\n大陸廠\t12\t\t9\t22'; elFor_('dev-o-unit').value = '1000';
+const plan2 = api('devPlanPaste_()');
+assert(plan2.items.some(i => i.kind === 'todo' && i.what === '總計'), '總計對不上要列在「要你看一下」');
+assert(plan2.items.filter(i => i.dept === '大陸廠' && (i.what === '模具' || i.what === '費用')).every(i => i.kind === 'same'), '單位千元：12 → 12,000 跟目前一樣');
+elFor_('dev-paste-text').value = '';
 
 /* ---- 7. CSV 匯出欄數 ---- */
 ctx.__in.comparison = comparison;

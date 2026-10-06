@@ -114,10 +114,12 @@ function devByDepartment_(scenarioId) {
     d.reduced += amount * (1 - pct / 100);
     if (r.Notes) d.notes.push(String(r.Notes));
   });
+  var deptNotes = getDevDeptNotes(scenarioId);
   var rows = order.map(function (n) {
     var d = depts[n];
     d.pct = d.total ? (1 - d.reduced / d.total) * 100 : 0;
-    d.notes = d.notes.join('；');
+    // 部門說明優先；沒寫的部門沿用各筆的項目說明
+    d.notes = deptNotes[n] !== undefined ? deptNotes[n] : d.notes.join('；');
     return d;
   });
   var sum = function (f) { return rows.reduce(function (s, r) { return s + r[f]; }, 0); };

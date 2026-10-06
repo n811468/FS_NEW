@@ -632,7 +632,7 @@ function deleteDevInvestmentRow(rowId) {
  * 部門列的順序使用者可以在畫面上用上下移動鈕調整，這裡依送出時的陣列順序重新編號 SortOrder，
  * 讓 getDevInvestmentSummary 下次讀出來的順序跟畫面上調整過的一致（不是 Sheet 裡原本的列順序）。
  */
-function saveDevInvestmentGrid(scenarioId, rows) {
+function saveDevInvestmentGrid(scenarioId, rows, deptNotes) {
   return withLock_(function () {
     var order = 0;
     var upserts = [], deletePks = [];
@@ -651,6 +651,8 @@ function saveDevInvestmentGrid(scenarioId, rows) {
       upserts.push(r);
     });
     batchWriteRows_(SHEETS.DEV_INVESTMENT, 'RowID', upserts, deletePks);
+    // 部門說明：有送才整份取代(舊的呼叫端只送 rows，不動說明)
+    if (deptNotes && typeof deptNotes === 'object') saveDevDeptNotes_(scenarioId, deptNotes);
     return getDevInvestmentSummary(scenarioId);
   });
 }
@@ -700,10 +702,12 @@ function copyScenarioData(sourceScenarioId, targetScenarioId, parts, opts) {
       var pk = pkOf(sheetName);
       var all = sheetToObjects_(sheetName) || [];
 
-      var deletePks = all.filter(function (r) { return r.ScenarioID === targetScenarioId; })
+      // 開發總投的部門說明也存在 LineNotes，但屬於「開發總投」這一類：跟著 devinvestment 帶，不跟科目說明一起帶
+      var keep = function (r) { return sheetName !== SHEETS.LINE_NOTES || !isDevDeptNote_(r); };
+      var deletePks = all.filter(function (r) { return r.ScenarioID === targetScenarioId && keep(r); })
         .map(function (r) { return r[pk]; });
 
-      var sourceRows = all.filter(function (r) { return r.ScenarioID === sourceScenarioId; });
+      var sourceRows = all.filter(function (r) { return r.ScenarioID === sourceScenarioId && keep(r); });
       var upserts = sourceRows.map(function (r) {
         var copy = {};
         SCHEMA[sheetName].forEach(function (h) { copy[h] = r[h]; });
@@ -727,6 +731,7 @@ function copyScenarioData(sourceScenarioId, targetScenarioId, parts, opts) {
       // 逐列處理會是最容易卡住的一步。
       batchWriteRows_(sheetName, pk, upserts, deletePks);
       copied[part] = sourceRows.length;
+      if (part === 'devinvestment') saveDevDeptNotes_(targetScenarioId, getDevDeptNotes(sourceScenarioId));
     });
 
     return copied;
