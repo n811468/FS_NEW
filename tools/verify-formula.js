@@ -388,6 +388,34 @@ check('目標反推(組合拳)：已知調整、負責金額、補足缺口依�
   near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '試算完存檔的數字不能變', 0.01);
 });
 
+check('調整影響試算(正推)：材料降多少營業淨利就多多少，多項的逐項影響加總 = 總變動，不改到存檔資料', () => {
+  reset();
+  const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
+  const b1 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'b1')[0].Amount;
+  const line = (r, c) => r.lines.filter(l => l.code === c)[0];
+  // 材料成本-LP 少 1 萬(LP 不影響貨物稅)：營業淨利多 1 萬
+  const a = gs.simulateAdjustments(sid, [{ driver: { type: 'line', code: 'b1' }, by: 'abs', value: -10000 }]);
+  near(line(a, 'b1').unit.after, b1 - 10000, '材料成本-LP 調整後', 1e-6);
+  near(line(a, 'K').unit.after - k0, 10000, '營業淨利多 1 萬', 1);
+  assert(line(a, 'K').isProfit && a.profitCode === 'K', '營業淨利標成重點');
+  // 跟目標反推的已知調整同一套算法
+  const plan = gs.solveGoalPlan(sid, { code: 'K', basis: 'unit' }, k0, [
+    { driver: { type: 'price' }, mode: 'known', by: 'pct', known: 2 }, { driver: { type: 'volume' }, mode: 'known', by: 'to', known: 500 }]);
+  const b = gs.simulateAdjustments(sid, [{ driver: { type: 'price' }, by: 'pct', value: 2 }, { driver: { type: 'volume' }, by: 'to', value: 500 }]);
+  near(line(b, 'K').unit.after, plan.achieved, '跟目標反推已知調整的結果相同', 1e-6);
+  ['unit', 'month'].forEach(basis => b.lines.forEach(l => {
+    near(l[basis].contributions.reduce((x, y) => x + y, 0), l[basis].after - l[basis].base, l.code + ' 逐項影響加總 = 總變動(' + basis + ')', 1e-6);
+  }));
+  near(line(b, 'K').unit.contributions[0], plan.levers[0].contribution, '第一項的影響 = 目標反推的貢獻', 1e-6);
+  const m0 = gs.sensitivityTable(sid, { code: 'K', basis: 'month' }, { type: 'volume' }, [500]).cells[0][0];
+  near(gs.simulateAdjustments(sid, [{ driver: { type: 'volume' }, by: 'to', value: 500 }]).lines.filter(l => l.code === 'K')[0].month.after, m0, '月總額跟敏感度表同一套算法', 1e-6);
+  let threw = '';
+  try { gs.simulateAdjustments(sid, [{ driver: { type: 'price' }, by: 'pct', value: 1 }, { driver: { type: 'price' }, by: 'abs', value: 1 }]); } catch (e) { threw = e.message; }
+  assert(/重複/.test(threw), '同一項選兩次要擋下來：' + threw);
+  reset();
+  near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '試算完存檔的數字不能變', 0.01);
+});
+
 check('目標反推另存成新情境：資料寫實後重算的營業淨利 = 試算值，來源情境不變', () => {
   reset();
   const k0 = gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
@@ -404,6 +432,43 @@ check('目標反推另存成新情境：資料寫實後重算的營業淨利 = �
   near(p.actual, p.expected, '參數/匯率另存後重算 = 試算', 1);
   near(gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount, k0, '來源情境不變', 0.01);
   gs.deleteScenario(saved.scenario.ScenarioID); gs.deleteScenario(p.scenario.ScenarioID);
+});
+
+check('開發總投低減目標 15% 改成 20%：攤提 × 80/85、另存後寫進低減%(原始金額不動)、現況/目標互轉數字接得起來', () => {
+  reset();
+  const src = gs.getScenarios().filter(s => s.ScenarioID === sid)[0];
+  const t = gs.saveScenario({ ScenarioID: '', Gate: src.Gate, ScenarioName: '低減目標測試', ScenarioType: '目標', VehicleTypeID: src.VehicleTypeID,
+    AmortMonthlyVolume: src.AmortMonthlyVolume, AmortLifeCycleYears: src.AmortLifeCycleYears }).ScenarioID;
+  gs.copyScenarioData(sid, t, ['salesmix', 'costofsales', 'devinvestment', 'operatingexpense', 'parameters']);
+  const devOf = id => gs.getDevInvestment(id);
+  gs.batchWriteRows_(gs.SHEETS.DEV_INVESTMENT, 'RowID', devOf(t).map(r => Object.assign({}, r, { ChallengeReductionPct: 15 })), []);
+  reset();
+  assert(!gs.getWhatIfOptions(sid).drivers.some(d => d.driver.type === 'devcut'), '現況情境沒有低減目標可以調');
+  const opt = gs.getWhatIfOptions(t).drivers.filter(d => d.driver.type === 'devcut')[0];
+  assert(opt, '目標情境要有「開發總投低減目標」');
+  near(opt.base, 15, '目前整體低減 15%', 1e-9);
+  // 試算：15% → 20%，每個攤提科目 × 80/85，營業淨利的變動 = 攤提少掉的部分
+  const r = gs.simulateAdjustments(t, [{ driver: { type: 'devcut' }, by: 'to', value: 20 }]);
+  const dev = gs.driverBase_(t, { type: 'dev' }).value;
+  const k = r.lines.filter(l => l.code === 'K')[0];
+  near(k.unit.after - k.unit.base, dev * (1 - 80 / 85), '營業淨利多出 攤提 × (1 − 80/85)', 1);
+  // 另存成目標情境：低減% 改成 20，原始金額不動
+  const before = devOf(t).map(x => x.Amount);
+  const a = gs.saveWhatIfAsScenario(t, [{ driver: { type: 'devcut' }, value: 20 }], { ScenarioName: '低減20', ScenarioType: '目標' });
+  near(a.actual, a.expected, '另存(目標)重算 = 試算', 1);
+  const aRows = devOf(a.scenario.ScenarioID);
+  assert(aRows.every(x => Math.abs(Number(x.ChallengeReductionPct) - 20) < 1e-6), '低減% 應該改成 20：' + aRows.map(x => x.ChallengeReductionPct));
+  assert(aRows.map(x => x.Amount).join() === before.join(), '原始投資金額不能動');
+  // 另存成現況(不套低減)：低減寫實到金額，數字照樣接得起來
+  const b = gs.saveWhatIfAsScenario(t, [{ driver: { type: 'devcut' }, value: 20 }], { ScenarioName: '低減20現況', ScenarioType: '現況' });
+  near(b.actual, b.expected, '另存(現況)重算 = 試算', 1);
+  // 現況情境另存成目標：開發總投 −10% 變成低減目標 10%
+  const c = gs.saveWhatIfAsScenario(sid, [{ driver: { type: 'dev' }, value: gs.driverBase_(sid, { type: 'dev' }).value * 0.9 }], { ScenarioName: '現況轉目標', ScenarioType: '目標' });
+  near(c.actual, c.expected, '現況 → 目標重算 = 試算', 1);
+  assert(devOf(c.scenario.ScenarioID).every(x => Math.abs(Number(x.ChallengeReductionPct) - 10) < 1e-6), '開發總投 −10% 寫成低減目標 10%');
+  [a, b, c].forEach(x => gs.deleteScenario(x.scenario.ScenarioID));
+  gs.deleteScenario(t);
+  reset();
 });
 
 check('情境快照：存下當時的數字，之後改資料不影響；可以當成比較欄位', () => {

@@ -7,6 +7,8 @@ const WHATIF_PREFS_KEY_ = 'plWhatIf.prefs.v1';
 // 目標反推只有一張卡片(multi)：每一列選一種方式(已知調整 / 負責金額 / 補足缺口)；只有一列補足缺口 = 單項反推。
 let whatIfPrefs = {
   multi: { metric: 'K', basis: 'unit', target: 0, levers: null },
+  // 調整影響試算(正推)：每一列 { driver, by: 'pct' | 'abs' | 'to', value }
+  impact: { basis: 'unit', changedOnly: true, adjs: null },
   sens: { metric: 'K', basis: 'unit', row: 'volume', rowSteps: '-20,-10,0,10,20', col: 'price', colSteps: '-10,-5,0,5,10', inReport: true,
     rowMode: 'pct', rowValues: '', colMode: 'pct', colValues: '' }
 };
@@ -15,6 +17,7 @@ function loadWhatIfPrefs_() {
     const p = JSON.parse(localStorage.getItem(WHATIF_PREFS_KEY_) || 'null');
     if (p && p.sens) Object.assign(whatIfPrefs.sens, p.sens);
     if (p && p.multi) Object.assign(whatIfPrefs.multi, p.multi);
+    if (p && p.impact) Object.assign(whatIfPrefs.impact, p.impact);
     // 舊版的單項反推設定：組合拳還沒設定過時，沿用它當成唯一的一項
     if (p && p.goal && !(p.multi && Array.isArray(p.multi.levers) && p.multi.levers.length)) {
       Object.assign(whatIfPrefs.multi, { metric: p.goal.metric || 'K', basis: p.goal.basis || 'unit', target: p.goal.target || 0,
@@ -94,6 +97,8 @@ function drawWhatIf_() {
   body.innerHTML = `
     ${multiGoalCardHtml_()}
 
+    ${impactCardHtml_()}
+
     <div class="card">
       <div class="card-head"><h3>敏感度分析</h3><span class="muted">兩項假設同時變動時，結果會落在哪裡（中間框起來的是目前的數字）</span>
         <span class="spacer"></span>
@@ -152,6 +157,7 @@ function runGoalSeek_() {
       box.innerHTML = `<div class="goal-answer">
         <div class="goal-big">${esc(r.label)}：${fmt(r.base, digits)} → <b>${fmt(r.value, digits)}</b> ${esc(r.unit || '')}
           ${pct !== null ? `<span class="muted">（${signed_(pct, 1)}%）</span>` : ''}</div>
+        ${lever.driver === 'devcut' && r.value > 100 ? `<div class="callout warn" style="margin:6px 0;"><div>開發總投要低減超過 100% 才達得到目標，實務上做不到；請加其他項目一起試（＋ 加一個項目）。</div></div>` : ''}
         ${r.value < 0 && r.base >= 0 ? `<div class="callout warn" style="margin:6px 0;"><div>要調到負數才達得到目標，實務上做不到；只靠「${esc(r.label)}」不夠，請加其他項目一起試（＋ 加一個項目）。</div></div>` : ''}
         <div class="muted">${esc(whatIfMetricLabel_(m.metric, m.basis))}：目前 ${fmt(r.metricBase)} → ${fmt(r.achieved)}（目標 ${fmt(num(m.target))}）。
           ${info.driver && info.driver.type === 'volume' ? '台數變動時，開發總投的攤提台數也一起變。' : ''}其他假設都維持目前的數字。</div>
@@ -449,6 +455,113 @@ function multiGoalResultHtml_(r) {
     <div class="field-row" style="margin-top:8px;">
       <button type="button" class="btn secondary sm" onclick="saveWhatIfScenarioDialog_(lastMultiResult_.levers.map(l => ({ driver: l.driver, value: l.value })), lastMultiResult_.levers.filter(l => l.value !== l.base).map(l => l.label).join('、'))">另存成新情境…</button>
       <button type="button" class="btn secondary sm" onclick="openInWaterfallTool_(multiGoalSteps_(lastMultiResult_), '目標反推：' + whatIfMetricLabel_(whatIfPrefs.multi.metric, whatIfPrefs.multi.basis))">在瀑布圖工具開啟（可編輯、下載 PNG）</button></div>`;
+}
+
+/* ---------------- 調整影響試算(正推) ----------------
+ * 目標反推是「結果要多少 → 各項要調多少」；這裡反過來：「材料降 3%、售價加 1 萬 → 營業淨利(或任何一個科目)變多少？」
+ * 每一列一項調整(同目標反推的已知調整)，結果列出整張損益表 目前 → 調整後，多項時另外拆出每一項的影響。
+ */
+function defaultImpactAdjs_() {
+  const lines = whatIfOptions.drivers.filter(d => d.driver.type === 'line').sort((a, b) => Math.abs(b.base) - Math.abs(a.base));
+  return [{ driver: lines.length ? driverKey_(lines[0].driver) : 'price', by: 'pct', value: -3 }];
+}
+function impactCardHtml_() {
+  const p = whatIfPrefs.impact;
+  p.adjs = (Array.isArray(p.adjs) ? p.adjs : []).filter(a => whatIfDriverInfo_(a.driver))
+    .map(a => Object.assign({ by: 'pct', value: '' }, a, { by: ['pct', 'abs', 'to'].indexOf(a.by) === -1 ? 'pct' : a.by }));
+  if (!p.adjs.length) p.adjs = defaultImpactAdjs_();
+  const set = (i, field, redraw) => `whatIfPrefs.impact.adjs[${i}].${field}=this.value;saveWhatIfPrefs_()${redraw ? ';drawWhatIf_()' : ''}`;
+  return `<div class="card" id="wi-impact">
+    <div class="card-head"><h3>調整影響試算</h3><span class="muted">某一項調整多少，損益表每一行（營業淨利、毛利、各科目）會變多少？</span></div>
+    <div class="grid-scroll"><table class="grid-table lever-table">
+      <thead><tr><th>調整項目（目前值）</th><th>調整</th><th style="width:40px;"></th></tr></thead>
+      <tbody id="wi-impact-body">${p.adjs.map((a, i) => {
+        const info = whatIfDriverInfo_(a.driver);
+        const kv = knownValue_({ by: a.by, known: a.value }, info);
+        const dg = info && Math.abs(info.base) < 100 ? 2 : 0;
+        return `<tr>
+        <td><select onchange="${set(i, 'driver', true)}">${driverOptionsHtml_(a.driver)}</select></td>
+        <td><span class="lever-inline"><select onchange="${set(i, 'by', true)}">
+            <option value="pct"${a.by === 'pct' ? ' selected' : ''}>調 %</option>
+            <option value="abs"${a.by === 'abs' ? ' selected' : ''}>加減</option>
+            <option value="to"${a.by === 'to' ? ' selected' : ''}>調到</option></select>
+          <input type="number" step="any" value="${esc(a.value)}" placeholder="${a.by === 'pct' ? '例 -3' : a.by === 'abs' ? '例 -5000' : '例 120'}" onchange="${set(i, 'value', true)}">
+          ${a.by === 'pct' ? '%' : esc(leverUnit_(info))}
+          ${kv !== null ? `<span class="muted">→ ${fmt(kv, dg)} ${esc(leverUnit_(info))}</span>` : ''}</span></td>
+        <td><button type="button" class="btn ghost icon sm" onclick="whatIfPrefs.impact.adjs.splice(${i},1);saveWhatIfPrefs_();drawWhatIf_()" aria-label="刪除">✕</button></td>
+      </tr>`;
+      }).join('')}</tbody></table></div>
+    <div class="field-row" style="margin-top:8px;">
+      <button type="button" class="btn secondary sm" onclick="addImpactAdj_()">＋ 加一項調整</button>
+      <span class="help">多項調整同時成立；結果依列表順序拆出每一項的影響。</span>
+      <span class="spacer"></span>
+      <button type="button" class="btn" onclick="runImpact_()">試算</button>
+    </div>
+    <div id="wi-impact-result"></div>
+  </div>`;
+}
+function addImpactAdj_() {
+  const used = whatIfPrefs.impact.adjs.map(a => a.driver);
+  const next = whatIfOptions.drivers.find(d => used.indexOf(driverKey_(d.driver)) === -1);
+  if (!next) return;
+  whatIfPrefs.impact.adjs.push({ driver: driverKey_(next.driver), by: 'pct', value: '' });
+  saveWhatIfPrefs_();
+  drawWhatIf_();
+}
+let lastImpactResult_ = null;
+function runImpact_() {
+  const box = document.getElementById('wi-impact-result');
+  const adjs = whatIfPrefs.impact.adjs.filter(a => String(a.value).trim() !== '' && !isNaN(Number(a.value)));
+  if (!adjs.length) { box.innerHTML = '<div class="callout warn">請填要調多少（例：調 % 填 -3 = 降 3%）。</div>'; return; }
+  box.innerHTML = '<p class="muted">計算中...</p>';
+  google.script.run
+    .withSuccessHandler(safeHandler(r => { lastImpactResult_ = r; drawImpactResult_(); }))
+    .withFailureHandler(err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; })
+    .simulateAdjustments(currentScenarioId, adjs.map(a => ({ driver: driverFromKey_(a.driver), by: a.by, value: Number(a.value) })));
+}
+function drawImpactResult_() {
+  const box = document.getElementById('wi-impact-result');
+  const r = lastImpactResult_;
+  if (!box || !r) return;
+  const p = whatIfPrefs.impact, basis = p.basis === 'month' ? 'month' : 'unit';
+  const unitText = basis === 'month' ? '元/月' : '元/台';
+  const dg = v => Math.abs(v) < 100 ? 2 : 0;
+  const changed = l => Math.abs(l[basis].after - l[basis].base) >= 0.5;
+  const rows = r.lines.filter(l => !p.changedOnly || changed(l) || l.isProfit);
+  const multi = r.adjustments.length > 1;
+  const profit = r.lines.find(l => l.isProfit);
+  const adjText = r.adjustments.map(a => `${a.label} ${fmt(a.base, dg(a.base))} → ${fmt(a.value, dg(a.base))} ${a.unit || ''}${a.unit === '%' ? `（${signed_(a.value - a.base, 2)} 個百分點）` : a.pct === null ? '' : `（${signed_(a.pct, 1)}%）`}`);
+  const head = profit ? (() => {
+    const d = profit[basis].after - profit[basis].base;
+    return `<div class="goal-answer"><div class="goal-big">${esc(profit.name)}${basis === 'month' ? '（月總額）' : '（單台）'}：${fmt(profit[basis].base)} → <b>${fmt(profit[basis].after)}</b>
+      <span class="${d < 0 ? 'negative' : ''}">（${d >= 0 ? '+' : ''}${fmt(d)} ${unitText}）</span></div>
+      <div class="muted">${esc(adjText.join('；'))}。其他假設都維持目前的數字。</div></div>`;
+  })() : '';
+  const seg = `<div class="seg">
+      <button type="button" class="seg-btn${basis === 'unit' ? ' active' : ''}" onclick="whatIfPrefs.impact.basis='unit';saveWhatIfPrefs_();drawImpactResult_()">單台</button>
+      <button type="button" class="seg-btn${basis === 'month' ? ' active' : ''}" onclick="whatIfPrefs.impact.basis='month';saveWhatIfPrefs_();drawImpactResult_()">月總額</button></div>`;
+  box.innerHTML = `${head}
+    <div class="field-row" style="margin:8px 0;">${seg}
+      <label class="chk" style="align-self:center;"><input type="checkbox"${p.changedOnly ? ' checked' : ''} onchange="whatIfPrefs.impact.changedOnly=this.checked;saveWhatIfPrefs_();drawImpactResult_()"> 只列有變動的科目</label></div>
+    <div class="grid-scroll"><table class="grid-table lever-table impact-table">
+      <thead><tr><th>科目</th><th>目前</th><th>調整後</th><th>變動</th><th>變動 %</th>
+        ${multi ? r.adjustments.map(a => `<th data-tip="依列表順序逐項加入，這一項造成的變動">${esc(a.label)}</th>`).join('') : ''}</tr></thead>
+      <tbody>${rows.map(l => {
+        const v = l[basis], d = v.after - v.base;
+        return `<tr class="${l.isProfit ? 'impact-profit' : ''}">
+        <td${l.parent ? ' style="padding-left:22px;"' : ''}>${esc(l.name)}</td>
+        <td class="amt">${fmt(v.base)}</td>
+        <td class="amt"><b>${fmt(v.after)}</b></td>
+        <td class="amt${d < 0 ? ' negative' : ''}">${Math.abs(d) < 0.5 ? '—' : (d >= 0 ? '+' : '') + fmt(d)}</td>
+        <td class="amt">${Math.abs(d) < 0.5 || !v.base ? '' : signed_((v.after / v.base - 1) * 100, 2) + '%'}</td>
+        ${multi ? v.contributions.map(c => `<td class="amt${c < 0 ? ' negative' : ''}">${Math.abs(c) < 0.5 ? '' : (c >= 0 ? '+' : '') + fmt(c)}</td>`).join('') : ''}
+      </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    <p class="help">金額單位：${unitText}${basis === 'unit' ? '（各車系加權平均）' : '（各車系單台 × 月銷量 加總）'}。
+      ${multi ? '各項的影響依列表順序逐項加入計算（售價變動也會影響佣金、貨物稅等），加總 = 總變動。' : ''}只在畫面上試算，不會改到存檔的數字。</p>
+    <div class="field-row" style="margin-top:8px;">
+      <button type="button" class="btn secondary sm" onclick="saveWhatIfScenarioDialog_(lastImpactResult_.adjustments.map(a => ({ driver: a.driver, value: a.value })), lastImpactResult_.adjustments.map(a => a.label).join('、'))">另存成新情境…</button></div>`;
 }
 
 /**

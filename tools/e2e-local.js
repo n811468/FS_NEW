@@ -254,6 +254,23 @@ async function main() {
   assert(await page.$('#wi-sens-result .sens-table .sens-base'), '自訂值的表格也要框出目前的數字');
   await page.click(`.seg-btn[onclick*="setSensMode_('row','pct')"]`);
 
+  // 調整影響試算(正推)：材料降 3% → 損益表每一行的變動；兩項時拆出每一項的影響
+  await page.click('nav button[data-tab="whatif"]');
+  await page.waitForSelector('#wi-impact-body tr');
+  await page.click('#wi-impact button:has-text("試算")');
+  await page.waitForSelector('#wi-impact-result .impact-table', { timeout: 15000 });
+  const impactProfit = await page.textContent('#wi-impact-result .impact-table tr.impact-profit');
+  assert(/\+/.test(impactProfit), '成本降 3%，營業淨利那一行應該變好：' + impactProfit);
+  await page.click('#wi-impact button:has-text("加一項調整")');
+  await page.waitForFunction(() => document.querySelectorAll('#wi-impact-body tr').length === 2);
+  await page.fill('#wi-impact-body tr:nth-child(2) input[type=number]', '2');
+  await page.dispatchEvent('#wi-impact-body tr:nth-child(2) input[type=number]', 'change');
+  await page.click('#wi-impact button:has-text("試算")');
+  await page.waitForFunction(() => document.querySelectorAll('#wi-impact-result .impact-table thead th').length === 7, null, { timeout: 15000 });
+  await page.click('#wi-impact-result .seg-btn:has-text("月總額")');
+  assert(/元\/月/.test(await page.textContent('#wi-impact-result')), '切到月總額要換單位');
+  await page.click('#wi-impact-body tr:nth-child(2) button[aria-label="刪除"]');
+
   // 目標反推(組合拳)：三種方式各一(已知調整、負責金額、補足缺口)，結果表 + 瀑布圖，可以帶到瀑布圖工具
   await page.click('nav button[data-tab="whatif"]');
   await page.waitForSelector('#wi-multi');
@@ -474,7 +491,7 @@ async function main() {
     failures.forEach(f => console.log('  ✗ ' + f));
     process.exit(1);
   }
-  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、多項反推、瀑布圖工具、情境快照、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
+  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、多項反推、調整影響試算、瀑布圖工具、情境快照、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
 }
 
 main().catch(e => { console.error(e); if (ERRS.length) console.error('頁面錯誤：', ERRS.join(' | ')); process.exit(1); });
