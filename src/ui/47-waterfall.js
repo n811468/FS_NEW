@@ -580,6 +580,7 @@ function runWaterfall_() {
   box.innerHTML = '<p class="muted">計算中...</p>';
   const fail = err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; };
   google.script.run.withFailureHandler(fail).withSuccessHandler(safeHandler(cmp => {
+    if ((cmp.unavailable || []).length) { fail({ message: cmp.unavailable.map(u => u.label + '：' + u.reason).join('；') }); return; }
     if (p.mode !== 'manual') wfFillEndOptions_(cmp.lines);
     if (p.mode === 'actions') wfFillActionLineOptions_(cmp.lines);
     const colName = c => wfColName_(c, cmp.columns.find(x => x !== c));

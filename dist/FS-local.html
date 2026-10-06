@@ -111,7 +111,18 @@
   .nav-item.active { background: #fff; color: var(--sidebar); font-weight: 600; box-shadow: 0 6px 16px -10px rgba(0, 0, 0, .6); }
   .nav-item.active svg { opacity: 1; color: var(--primary); }
   .nav-item .nav-badge { margin-left: auto; font-size: 10px; background: #e9b949; color: #1b1300; border-radius: 10px; padding: 1px 6px; font-weight: 700; }
-  .sidebar-toggle { display: none; }
+  .sidebar-toggle { display: inline-flex; flex: none; }
+  /* 寬螢幕按 ☰：側邊欄收成只剩圖示(滑鼠移上去顯示頁名) */
+  @media (min-width: 861px) {
+    body.nav-collapsed .app { background: linear-gradient(to right, var(--sidebar) 64px, transparent 64px); }
+    body.nav-collapsed .sidebar { width: 64px; }
+    body.nav-collapsed .brand { justify-content: center; padding: 18px 0 14px; }
+    body.nav-collapsed .brand-text, body.nav-collapsed .nav-group-label, body.nav-collapsed .nav-item .nav-badge { display: none; }
+    body.nav-collapsed .nav-group { padding: 4px 8px; }
+    body.nav-collapsed .nav-group + .nav-group { border-top: 1px solid rgba(255, 255, 255, .08); margin-top: 4px; padding-top: 8px; }
+    body.nav-collapsed .nav-item { font-size: 0; justify-content: center; padding: 10px 0; gap: 0; }
+    body.nav-collapsed .nav-item svg { width: 19px; height: 19px; }
+  }
 
   .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .topbar { position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 16px; padding: 12px 28px;
@@ -759,6 +770,9 @@
   .bridge-legend .spacer { flex: 1; }
   .rpt-table td.recon-ok { color: var(--success); font-weight: 600; }
   .rpt-table td.recon-warn { color: var(--warning); font-weight: 600; }
+  .dash-unavailable { align-items: center; margin: 0 0 12px; }
+  .dash-unavailable > div { flex: 1; min-width: 0; }
+  .dash-unavailable ul { margin: 4px 0 0; padding-left: 18px; }
   .rpt-table td.recon-err { color: var(--danger); font-weight: 700; }
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
@@ -5250,12 +5264,24 @@ function calculateComparison(selections) {
     return defsByType[typeId];
   };
 
+  // 算不出來的欄位(例：這個車系在這個情境沒有銷售構成)不拖垮整張比較表：另外列在 unavailable，其他欄位照常算
+  var unavailable = [];
   var columns = selections.map(function (sel) {
     if (isSnapshotId_(sel.ScenarioID)) return snapshotColumn_(sel);
     var scenario = scenarios.filter(function (s) { return s.ScenarioID === sel.ScenarioID; })[0] || {};
     var vehicle = vehicles.filter(function (v) { return v.VehicleID === sel.VehicleID; })[0];
     var vehicleType = vehicleTypes.filter(function (t) { return t.VehicleTypeID === scenario.VehicleTypeID; })[0] || {};
     var lineDefs = defsOf(scenario.VehicleTypeID || '');
+    var scenarioText = [scenario.Gate || '', scenario.ScenarioName || ''].filter(function (p) { return p; }).join(' ') || sel.ScenarioID;
+    var vehicleText = sel.VehicleID ? ((vehicle && vehicle.VehicleCode) || sel.VehicleID) : '加權平均';
+    var skip = function (reason) {
+      unavailable.push({ scenarioId: sel.ScenarioID, vehicleId: sel.VehicleID || '',
+        label: [scenario.VehicleTypeID || '', scenarioText, vehicleText].filter(function (p) { return p; }).join(' / '), reason: reason });
+      return null;
+    };
+    if (sel.VehicleID && !calcSalesMix_(sel.ScenarioID).some(function (r) { return r.VehicleID === sel.VehicleID; })) {
+      return skip('「' + scenarioText + '」還沒有「' + vehicleText + '」的銷售構成，到「銷售構成與售價」填，或從比較欄位移除這一欄');
+    }
 
     var vehicleCalc = sel.VehicleID ? calculatePLCore_(sel.ScenarioID, sel.VehicleID) : null;
     var lines = vehicleCalc ? vehicleCalc.lines : calculateScenarioWeighted(sel.ScenarioID);
@@ -5297,7 +5323,7 @@ function calculateComparison(selections) {
       checks: subtotalChecks_(amounts, lineDefs),
       profitCode: profitLineCode_(lineDefs)
     };
-  });
+  }).filter(function (c) { return c; });
 
   var allDefs = unionLineDefs_(columns.map(function (c) { return c.snapshotLines || defsOf(c.vehicleTypeId); }));
   columns.forEach(function (c) {
@@ -5327,7 +5353,7 @@ function calculateComparison(selections) {
     };
   });
 
-  return { columns: columns, lines: usedLines, subtotalCodes: PROTECTED_LINE_CODES };
+  return { columns: columns, lines: usedLines, subtotalCodes: PROTECTED_LINE_CODES, unavailable: unavailable };
 }
 
 /**
@@ -7266,7 +7292,7 @@ function reportMaintenance_(message) {
 
     <div class="main-col">
       <header class="topbar">
-        <button type="button" class="btn ghost icon sidebar-toggle" onclick="document.body.classList.toggle('nav-open')" aria-label="選單">☰</button>
+        <button type="button" class="btn ghost icon sidebar-toggle" onclick="toggleSidebar_()" aria-label="收合／展開側邊欄" aria-expanded="true">☰</button>
         <div class="page-title">
           <span class="crumb" id="page-crumb"></span>
           <h1 id="page-title">車型損益試算</h1>
@@ -7799,6 +7825,37 @@ function moveTrailing_(item, opts) {
   let ref = item;
   trail.forEach(el => { ref.parentNode.insertBefore(el, ref.nextSibling); ref = el; });
 }
+/**
+ * 頁首的 ☰：寬螢幕把側邊欄收成只剩圖示(記在瀏覽器裡，下次打開一樣)；窄螢幕(手機)側邊欄平常是藏起來的，☰ 是把它叫出來。
+ */
+const SIDEBAR_PREF_KEY_ = 'fs.sidebarCollapsed';
+function isNarrowScreen_() { return !!(window.matchMedia && window.matchMedia('(max-width: 860px)').matches); }
+function toggleSidebar_() {
+  if (isNarrowScreen_()) { document.body.classList.toggle('nav-open'); syncSidebarToggle_(); return; }
+  const collapsed = !document.body.classList.contains('nav-collapsed');
+  try { localStorage.setItem(SIDEBAR_PREF_KEY_, collapsed ? '1' : ''); } catch (e) { /* 存不了就只有這次有效 */ }
+  setSidebarCollapsed_(collapsed);
+}
+function setSidebarCollapsed_(collapsed) {
+  document.body.classList.toggle('nav-collapsed', collapsed);
+  // 收起來只剩圖示：滑鼠移上去要看得到是哪一頁
+  document.querySelectorAll('.sidebar .nav-item').forEach(b => {
+    if (collapsed) b.setAttribute('data-tip', b.textContent.trim()); else b.removeAttribute('data-tip');
+  });
+  syncSidebarToggle_();
+}
+function syncSidebarToggle_() {
+  const btn = document.querySelector('.sidebar-toggle');
+  if (!btn) return;
+  const open = isNarrowScreen_() ? document.body.classList.contains('nav-open') : !document.body.classList.contains('nav-collapsed');
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function applySidebarPref_() {
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(SIDEBAR_PREF_KEY_) === '1'; } catch (e) { /* 預設展開 */ }
+  setSidebarCollapsed_(collapsed);
+}
+
 /** ⠿ 拖曳把手的 HTML(可以用鍵盤 Alt+↑↓ 操作) */
 function dragHandleHtml(label) {
   return `<span class="drag-handle" tabindex="0" role="button" aria-label="${esc(label || '拖曳調整順序')}" data-tip="拖曳調整順序（或 Alt+↑↓）">⠿</span>`;
@@ -13548,6 +13605,7 @@ function runWaterfall_() {
   box.innerHTML = '<p class="muted">計算中...</p>';
   const fail = err => { box.innerHTML = `<div class="callout err">${esc(err.message)}</div>`; };
   google.script.run.withFailureHandler(fail).withSuccessHandler(safeHandler(cmp => {
+    if ((cmp.unavailable || []).length) { fail({ message: cmp.unavailable.map(u => u.label + '：' + u.reason).join('；') }); return; }
     if (p.mode !== 'manual') wfFillEndOptions_(cmp.lines);
     if (p.mode === 'actions') wfFillActionLineOptions_(cmp.lines);
     const colName = c => wfColName_(c, cmp.columns.find(x => x !== c));
@@ -14070,6 +14128,8 @@ function selKey_(sel) {
  * 加一欄就把全部欄位重算一次，欄位一多會越加越慢。
  */
 let dashRequestSeq_ = 0;
+// 算不出來、先略過的欄位 { 欄位鍵: { label, reason } }：不拖垮其他欄位，也不每次重畫都再問一次後端
+let dashUnavailable_ = {};
 function refreshDashboard(force) {
   if (!comparisonOptions.length) { loadComparisonPicker(); return; }
   saveDashPrefs_();
@@ -14079,8 +14139,9 @@ function refreshDashboard(force) {
     renderDashboard(lastComparison);
     return;
   }
+  if (force) dashUnavailable_ = {};
   const known = (!force && lastComparison) ? (lastComparison.columns || []) : [];
-  const missing = comparisonSelections.filter(sel => !known.some(c => colKey_(c) === selKey_(sel)));
+  const missing = comparisonSelections.filter(sel => !known.some(c => colKey_(c) === selKey_(sel)) && !dashUnavailable_[selKey_(sel)]);
   if (!missing.length) {
     lastComparison = reorderComparison_(lastComparison, comparisonSelections);
     renderDashboard(lastComparison);
@@ -14096,6 +14157,7 @@ function refreshDashboard(force) {
       // 丟掉不會少算，反而是讓晚回來的舊結果蓋回去才會把新資料改回舊數字。
       if (seq !== dashRequestSeq_) return;
       setDashStatus_('');
+      (result.unavailable || []).forEach(u => { dashUnavailable_[selKey_({ ScenarioID: u.scenarioId, VehicleID: u.vehicleId })] = u; });
       lastComparison = force ? result : mergeComparison_(lastComparison, result);
       lastComparison = reorderComparison_(lastComparison, comparisonSelections);
       renderDashboard(lastComparison);
@@ -14163,11 +14225,25 @@ function renderDashboard(result) {
   const oldScroller = content.querySelector('.grid-scroll');
   const scrollLeft = oldScroller && oldScroller.scrollLeft ? oldScroller.scrollLeft : 0;
 
-  content.innerHTML = `${dashSubNavHtml(cols)}<div id="dash-view">${dashViewHtml_(cols, lines)}</div>`;
+  content.innerHTML = `${dashSubNavHtml(cols)}${dashUnavailableHtml_()}<div id="dash-view">${dashViewHtml_(cols, lines)}</div>`;
   const scroller = content.querySelector('.grid-scroll');
   if (scroller && scrollLeft) scroller.scrollLeft = scrollLeft;
   installTableCrosshair_(content);
   installBuilderSortable_();
+}
+
+/** 選了但算不出來的欄位：說明原因，一鍵從比較欄位移除 */
+function dashUnavailableHtml_() {
+  const list = comparisonSelections.map(sel => dashUnavailable_[selKey_(sel)]).filter(u => u);
+  if (!list.length) return '';
+  return `<div class="callout warn dash-unavailable"><div><b>${list.length} 個欄位算不出來，先略過：</b>
+    <ul>${list.map(u => `<li>${esc(u.label)}：${esc(u.reason)}</li>`).join('')}</ul></div>
+    <button type="button" class="btn secondary sm" onclick="dashDropUnavailable_()">從比較欄位移除</button></div>`;
+}
+function dashDropUnavailable_() {
+  comparisonSelections = comparisonSelections.filter(sel => !dashUnavailable_[selKey_(sel)]);
+  dashUnavailable_ = {};
+  refreshDashboard();
 }
 
 /** 比較欄位表：拖曳放開就照新順序重排(不打後端，已算好的欄位直接重排) */
@@ -15330,6 +15406,7 @@ window.addEventListener('DOMContentLoaded', () => {
   installSaveBar_();
   installExcelPaste_();
   installGridKeys_();
+  applySidebarPref_();
   // 下拉選單(details.menu)：點選單外面就收起來
   document.addEventListener('click', e => {
     document.querySelectorAll('details.menu[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
