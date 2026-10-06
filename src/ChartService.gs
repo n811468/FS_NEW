@@ -1067,9 +1067,39 @@ function getLineNotes(scenarioId) {
     });
   });
   (sheetToObjects_(SHEETS.LINE_NOTES) || []).forEach(function (r) {
-    if (r.ScenarioID === scenarioId && !r.VehicleID) notes[r.LineCode] = r.Notes === undefined ? '' : String(r.Notes);
+    if (r.ScenarioID === scenarioId && !r.VehicleID && !isDevDeptNote_(r)) notes[r.LineCode] = r.Notes === undefined ? '' : String(r.Notes);
   });
   return notes;
+}
+
+/** LineNotes 裡的開發總投部門說明(LineCode = DEPT:部門)，不是科目說明 */
+function isDevDeptNote_(r) { return String(r.LineCode || '').indexOf(DEV_DEPT_NOTE_PREFIX) === 0; }
+
+/** 開發總投各部門的說明 { 部門: 說明 } */
+function getDevDeptNotes(scenarioId) {
+  var out = {};
+  (sheetToObjects_(SHEETS.LINE_NOTES) || []).forEach(function (r) {
+    if (r.ScenarioID === scenarioId && isDevDeptNote_(r) && String(r.Notes || '') !== '') {
+      out[String(r.LineCode).slice(DEV_DEPT_NOTE_PREFIX.length)] = String(r.Notes);
+    }
+  });
+  return out;
+}
+/** 整份取代：notes 裡沒有(或空白)的部門說明會刪掉(部門改名、刪除時跟著走) */
+function saveDevDeptNotes_(scenarioId, notes) {
+  var existing = {}, dels = [], ups = [];
+  (sheetToObjects_(SHEETS.LINE_NOTES) || []).forEach(function (r) {
+    if (r.ScenarioID === scenarioId && isDevDeptNote_(r)) existing[r.LineCode] = r;
+  });
+  Object.keys(notes || {}).forEach(function (dept) {
+    var text = notes[dept] === undefined || notes[dept] === null ? '' : String(notes[dept]);
+    if (!String(dept).trim() || !text.trim()) return;
+    var code = DEV_DEPT_NOTE_PREFIX + dept, row = existing[code];
+    delete existing[code];
+    if (!row || String(row.Notes) !== text) ups.push({ RowID: row ? row.RowID : '', ScenarioID: scenarioId, LineCode: code, VehicleID: '', Notes: text });
+  });
+  Object.keys(existing).forEach(function (code) { dels.push(existing[code].RowID); });
+  if (ups.length || dels.length) batchWriteRows_(SHEETS.LINE_NOTES, 'RowID', ups, dels);
 }
 
 /** 儲存科目說明 notes = { LineCode: 說明 }(只送有改的也可以) */
