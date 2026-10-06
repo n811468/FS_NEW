@@ -14595,13 +14595,12 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   function download(pack, label) {
-    var json = JSON.stringify(pack, null, 1);
-    var blob = new Blob([json], { type: 'application/json' });
+    var blob = new Blob([JSON.stringify(pack, null, 1)], { type: 'application/json' });
     var url = URL.createObjectURL(blob);
     var a = el('a', { href: url, download: 'FS資料包_' + safeName(label) + '_' + stamp() + '.json' });
     document.body.appendChild(a);
     a.click();
-    // 嵌在內部平台時把這次匯出交給外層頁面(記錄歷程、備份檔案)；直接開檔案時沒有外層，瀏覽器會丟掉這則訊息
+    // 嵌在內部平台時通知外層頁面記錄匯出歷程；直接開檔案時沒有外層，瀏覽器會丟掉這則訊息
     var scope = pack.scope || {};
     var scenarios = scope.kind === 'scenarios' ? (pack.tables.Scenarios || []) : [];
     window.parent.postMessage({ type: 'fs:exported', payload: {
@@ -14612,8 +14611,7 @@ window.addEventListener('DOMContentLoaded', () => {
       filename: a.download,
       dataScope: JSON.stringify(scope),
       dataPackageVersion: String(pack.formatVersion || ''),
-      iframeDisplayUser: window.FSLocal && window.FSLocal.getUser ? window.FSLocal.getUser() : '',
-      content: json
+      iframeDisplayUser: window.FSLocal && window.FSLocal.getUser ? window.FSLocal.getUser() : ''
     } }, 'https://16019-ai-hub.china-motor.com.tw');
     setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1000);
   }
