@@ -484,6 +484,37 @@ function moveTrailing_(item, opts) {
   let ref = item;
   trail.forEach(el => { ref.parentNode.insertBefore(el, ref.nextSibling); ref = el; });
 }
+/**
+ * 頁首的 ☰：寬螢幕把側邊欄收成只剩圖示(記在瀏覽器裡，下次打開一樣)；窄螢幕(手機)側邊欄平常是藏起來的，☰ 是把它叫出來。
+ */
+const SIDEBAR_PREF_KEY_ = 'fs.sidebarCollapsed';
+function isNarrowScreen_() { return !!(window.matchMedia && window.matchMedia('(max-width: 860px)').matches); }
+function toggleSidebar_() {
+  if (isNarrowScreen_()) { document.body.classList.toggle('nav-open'); syncSidebarToggle_(); return; }
+  const collapsed = !document.body.classList.contains('nav-collapsed');
+  try { localStorage.setItem(SIDEBAR_PREF_KEY_, collapsed ? '1' : ''); } catch (e) { /* 存不了就只有這次有效 */ }
+  setSidebarCollapsed_(collapsed);
+}
+function setSidebarCollapsed_(collapsed) {
+  document.body.classList.toggle('nav-collapsed', collapsed);
+  // 收起來只剩圖示：滑鼠移上去要看得到是哪一頁
+  document.querySelectorAll('.sidebar .nav-item').forEach(b => {
+    if (collapsed) b.setAttribute('data-tip', b.textContent.trim()); else b.removeAttribute('data-tip');
+  });
+  syncSidebarToggle_();
+}
+function syncSidebarToggle_() {
+  const btn = document.querySelector('.sidebar-toggle');
+  if (!btn) return;
+  const open = isNarrowScreen_() ? document.body.classList.contains('nav-open') : !document.body.classList.contains('nav-collapsed');
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function applySidebarPref_() {
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(SIDEBAR_PREF_KEY_) === '1'; } catch (e) { /* 預設展開 */ }
+  setSidebarCollapsed_(collapsed);
+}
+
 /** ⠿ 拖曳把手的 HTML(可以用鍵盤 Alt+↑↓ 操作) */
 function dragHandleHtml(label) {
   return `<span class="drag-handle" tabindex="0" role="button" aria-label="${esc(label || '拖曳調整順序')}" data-tip="拖曳調整順序（或 Alt+↑↓）">⠿</span>`;

@@ -61,7 +61,18 @@
   .nav-item.active { background: #fff; color: var(--sidebar); font-weight: 600; box-shadow: 0 6px 16px -10px rgba(0, 0, 0, .6); }
   .nav-item.active svg { opacity: 1; color: var(--primary); }
   .nav-item .nav-badge { margin-left: auto; font-size: 10px; background: #e9b949; color: #1b1300; border-radius: 10px; padding: 1px 6px; font-weight: 700; }
-  .sidebar-toggle { display: none; }
+  .sidebar-toggle { display: inline-flex; flex: none; }
+  /* 寬螢幕按 ☰：側邊欄收成只剩圖示(滑鼠移上去顯示頁名) */
+  @media (min-width: 861px) {
+    body.nav-collapsed .app { background: linear-gradient(to right, var(--sidebar) 64px, transparent 64px); }
+    body.nav-collapsed .sidebar { width: 64px; }
+    body.nav-collapsed .brand { justify-content: center; padding: 18px 0 14px; }
+    body.nav-collapsed .brand-text, body.nav-collapsed .nav-group-label, body.nav-collapsed .nav-item .nav-badge { display: none; }
+    body.nav-collapsed .nav-group { padding: 4px 8px; }
+    body.nav-collapsed .nav-group + .nav-group { border-top: 1px solid rgba(255, 255, 255, .08); margin-top: 4px; padding-top: 8px; }
+    body.nav-collapsed .nav-item { font-size: 0; justify-content: center; padding: 10px 0; gap: 0; }
+    body.nav-collapsed .nav-item svg { width: 19px; height: 19px; }
+  }
 
   .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .topbar { position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 16px; padding: 12px 28px;
@@ -709,6 +720,9 @@
   .bridge-legend .spacer { flex: 1; }
   .rpt-table td.recon-ok { color: var(--success); font-weight: 600; }
   .rpt-table td.recon-warn { color: var(--warning); font-weight: 600; }
+  .dash-unavailable { align-items: center; margin: 0 0 12px; }
+  .dash-unavailable > div { flex: 1; min-width: 0; }
+  .dash-unavailable ul { margin: 4px 0 0; padding-left: 18px; }
   .rpt-table td.recon-err { color: var(--danger); font-weight: 700; }
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 

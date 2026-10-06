@@ -404,12 +404,24 @@ function calculateComparison(selections) {
     return defsByType[typeId];
   };
 
+  // 算不出來的欄位(例：這個車系在這個情境沒有銷售構成)不拖垮整張比較表：另外列在 unavailable，其他欄位照常算
+  var unavailable = [];
   var columns = selections.map(function (sel) {
     if (isSnapshotId_(sel.ScenarioID)) return snapshotColumn_(sel);
     var scenario = scenarios.filter(function (s) { return s.ScenarioID === sel.ScenarioID; })[0] || {};
     var vehicle = vehicles.filter(function (v) { return v.VehicleID === sel.VehicleID; })[0];
     var vehicleType = vehicleTypes.filter(function (t) { return t.VehicleTypeID === scenario.VehicleTypeID; })[0] || {};
     var lineDefs = defsOf(scenario.VehicleTypeID || '');
+    var scenarioText = [scenario.Gate || '', scenario.ScenarioName || ''].filter(function (p) { return p; }).join(' ') || sel.ScenarioID;
+    var vehicleText = sel.VehicleID ? ((vehicle && vehicle.VehicleCode) || sel.VehicleID) : '加權平均';
+    var skip = function (reason) {
+      unavailable.push({ scenarioId: sel.ScenarioID, vehicleId: sel.VehicleID || '',
+        label: [scenario.VehicleTypeID || '', scenarioText, vehicleText].filter(function (p) { return p; }).join(' / '), reason: reason });
+      return null;
+    };
+    if (sel.VehicleID && !calcSalesMix_(sel.ScenarioID).some(function (r) { return r.VehicleID === sel.VehicleID; })) {
+      return skip('「' + scenarioText + '」還沒有「' + vehicleText + '」的銷售構成，到「銷售構成與售價」填，或從比較欄位移除這一欄');
+    }
 
     var vehicleCalc = sel.VehicleID ? calculatePLCore_(sel.ScenarioID, sel.VehicleID) : null;
     var lines = vehicleCalc ? vehicleCalc.lines : calculateScenarioWeighted(sel.ScenarioID);
@@ -451,7 +463,7 @@ function calculateComparison(selections) {
       checks: subtotalChecks_(amounts, lineDefs),
       profitCode: profitLineCode_(lineDefs)
     };
-  });
+  }).filter(function (c) { return c; });
 
   var allDefs = unionLineDefs_(columns.map(function (c) { return c.snapshotLines || defsOf(c.vehicleTypeId); }));
   columns.forEach(function (c) {
@@ -481,7 +493,7 @@ function calculateComparison(selections) {
     };
   });
 
-  return { columns: columns, lines: usedLines, subtotalCodes: PROTECTED_LINE_CODES };
+  return { columns: columns, lines: usedLines, subtotalCodes: PROTECTED_LINE_CODES, unavailable: unavailable };
 }
 
 /**

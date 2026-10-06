@@ -313,6 +313,8 @@ function selKey_(sel) {
  * 加一欄就把全部欄位重算一次，欄位一多會越加越慢。
  */
 let dashRequestSeq_ = 0;
+// 算不出來、先略過的欄位 { 欄位鍵: { label, reason } }：不拖垮其他欄位，也不每次重畫都再問一次後端
+let dashUnavailable_ = {};
 function refreshDashboard(force) {
   if (!comparisonOptions.length) { loadComparisonPicker(); return; }
   saveDashPrefs_();
@@ -322,8 +324,9 @@ function refreshDashboard(force) {
     renderDashboard(lastComparison);
     return;
   }
+  if (force) dashUnavailable_ = {};
   const known = (!force && lastComparison) ? (lastComparison.columns || []) : [];
-  const missing = comparisonSelections.filter(sel => !known.some(c => colKey_(c) === selKey_(sel)));
+  const missing = comparisonSelections.filter(sel => !known.some(c => colKey_(c) === selKey_(sel)) && !dashUnavailable_[selKey_(sel)]);
   if (!missing.length) {
     lastComparison = reorderComparison_(lastComparison, comparisonSelections);
     renderDashboard(lastComparison);
@@ -339,6 +342,7 @@ function refreshDashboard(force) {
       // 丟掉不會少算，反而是讓晚回來的舊結果蓋回去才會把新資料改回舊數字。
       if (seq !== dashRequestSeq_) return;
       setDashStatus_('');
+      (result.unavailable || []).forEach(u => { dashUnavailable_[selKey_({ ScenarioID: u.scenarioId, VehicleID: u.vehicleId })] = u; });
       lastComparison = force ? result : mergeComparison_(lastComparison, result);
       lastComparison = reorderComparison_(lastComparison, comparisonSelections);
       renderDashboard(lastComparison);
@@ -406,11 +410,25 @@ function renderDashboard(result) {
   const oldScroller = content.querySelector('.grid-scroll');
   const scrollLeft = oldScroller && oldScroller.scrollLeft ? oldScroller.scrollLeft : 0;
 
-  content.innerHTML = `${dashSubNavHtml(cols)}<div id="dash-view">${dashViewHtml_(cols, lines)}</div>`;
+  content.innerHTML = `${dashSubNavHtml(cols)}${dashUnavailableHtml_()}<div id="dash-view">${dashViewHtml_(cols, lines)}</div>`;
   const scroller = content.querySelector('.grid-scroll');
   if (scroller && scrollLeft) scroller.scrollLeft = scrollLeft;
   installTableCrosshair_(content);
   installBuilderSortable_();
+}
+
+/** 選了但算不出來的欄位：說明原因，一鍵從比較欄位移除 */
+function dashUnavailableHtml_() {
+  const list = comparisonSelections.map(sel => dashUnavailable_[selKey_(sel)]).filter(u => u);
+  if (!list.length) return '';
+  return `<div class="callout warn dash-unavailable"><div><b>${list.length} 個欄位算不出來，先略過：</b>
+    <ul>${list.map(u => `<li>${esc(u.label)}：${esc(u.reason)}</li>`).join('')}</ul></div>
+    <button type="button" class="btn secondary sm" onclick="dashDropUnavailable_()">從比較欄位移除</button></div>`;
+}
+function dashDropUnavailable_() {
+  comparisonSelections = comparisonSelections.filter(sel => !dashUnavailable_[selKey_(sel)]);
+  dashUnavailable_ = {};
+  refreshDashboard();
 }
 
 /** 比較欄位表：拖曳放開就照新順序重排(不打後端，已算好的欄位直接重排) */

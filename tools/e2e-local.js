@@ -95,6 +95,32 @@ async function main() {
   await page.waitForFunction(() => document.querySelectorAll('#wf-chart .wf-bar').length >= 3, null, { timeout: 15000 });
   assert(await page.$('#wf-body .seg-btn.active:has-text("單一欄位損益")'), '儀表板的「瀑布圖…」選同一欄應該開成單一欄位損益');
 
+  // 頁首 ☰：寬螢幕把側邊欄收成只剩圖示，重新整理後還記得；再按一次展開
+  await page.click('.sidebar-toggle');
+  assert(await page.waitForFunction(() => document.body.classList.contains('nav-collapsed') && document.querySelector('.sidebar').getBoundingClientRect().width < 80,
+    null, { timeout: 3000 }).then(() => true, () => false), '按 ☰ 側邊欄要收成只剩圖示');
+  assert(await page.getAttribute('.nav-item[data-tab="dashboard"]', 'data-tip') === '損益儀表板', '收起來時滑鼠移上去要看得到頁名');
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('#vehicletype-selector option').length >= 2);
+  assert(await page.evaluate(() => document.body.classList.contains('nav-collapsed')), '重新整理後側邊欄維持收起來');
+  await page.click('.sidebar-toggle');
+  await page.waitForFunction(() => document.querySelector('.sidebar').getBoundingClientRect().width > 200);
+  assert(!(await page.evaluate(() => document.body.classList.contains('nav-collapsed'))), '再按一次展開');
+
+  // 儀表板：比較欄位裡有一個車系在這個情境沒有銷售構成 → 只略過那一欄、說明原因，可以一鍵移除
+  await page.click('nav button[data-tab="dashboard"]');
+  await page.waitForFunction(() => /營業淨利/.test(document.getElementById('dashboard-content').textContent || ''), null, { timeout: 15000 });
+  await page.evaluate(() => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail)
+    .saveVehicle({ VehicleID: 'E2E-NOMIX', VehicleTypeID: document.getElementById('vehicletype-selector').value, VehicleCode: '入門' })));
+  const colsBefore = await page.evaluate(() => comparisonSelections.length);
+  await page.evaluate(() => { comparisonSelections.push({ ScenarioID: currentScenarioId, VehicleID: 'E2E-NOMIX' }); refreshDashboard(true); });
+  await page.waitForSelector('#dashboard-content .dash-unavailable', { timeout: 15000 });
+  assert(/入門/.test(await page.textContent('.dash-unavailable')) && /銷售構成/.test(await page.textContent('.dash-unavailable')), '要說明哪一欄、為什麼算不出來');
+  assert(!/計算失敗/.test(await page.textContent('#dashboard-content')), '其他欄位不能因為這一欄整個算不出來');
+  await page.click('.dash-unavailable button:has-text("從比較欄位移除")');
+  await page.waitForFunction(n => !document.querySelector('.dash-unavailable') && comparisonSelections.length === n, colsBefore, { timeout: 15000 });
+  await page.evaluate(() => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail).deleteVehicle('E2E-NOMIX')));
+
   // 參數與匯率同一頁：兩個表格都改，Ctrl+S 一次兩個都存
   await page.click('nav button[data-tab="paramrates"]');
   await page.waitForSelector('#grid-paramrates .rate-global');
@@ -502,7 +528,7 @@ async function main() {
     failures.forEach(f => console.log('  ✗ ' + f));
     process.exit(1);
   }
-  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、多項反推、調整影響試算、開發總投從零開始、瀑布圖工具、情境快照、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
+  console.log(`地端版瀏覽器測試通過：${checks} 項全部符合（file:// 開啟、不連外部網路、GATE 報告、科目與公式、自動完成、Excel 貼上、目標反推、多項反推、調整影響試算、開發總投從零開始、側邊欄收合、儀表板略過算不出來的欄位、瀑布圖工具、情境快照、拖曳排序、暫存/匯出/匯入/合併/多分頁保護）。`);
 }
 
 /**

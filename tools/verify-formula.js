@@ -499,6 +499,19 @@ check('開發總投部門說明：存在 LineNotes 但不混進科目說明；�
   assert(!gs.getDevDeptNotes(t)[dept], '刪除情境時部門說明一起刪');
 });
 
+check('儀表板：某個車系在這個情境沒有銷售構成時，只略過那一欄並說明原因，其他欄位照常算', () => {
+  reset();
+  const typeId = gs.getScenarios().filter(s => s.ScenarioID === sid)[0].VehicleTypeID;
+  gs.saveVehicle({ VehicleID: 'V-NOMIX', VehicleTypeID: typeId, VehicleCode: '入門' });
+  reset();
+  const cmp = gs.calculateComparison([{ ScenarioID: sid, VehicleID: '' }, { ScenarioID: sid, VehicleID: 'V-NOMIX' }]);
+  assert(cmp.columns.length === 1 && cmp.columns[0].isWeighted, '加權平均那一欄照常算');
+  assert(cmp.unavailable.length === 1 && cmp.unavailable[0].vehicleId === 'V-NOMIX' && /銷售構成/.test(cmp.unavailable[0].reason) && /入門/.test(cmp.unavailable[0].label),
+    '算不出來的欄位要說明原因：' + JSON.stringify(cmp.unavailable));
+  gs.deleteVehicle('V-NOMIX');
+  reset();
+});
+
 check('情境快照：存下當時的數字，之後改資料不影響；可以當成比較欄位', () => {
   reset();
   const kOf = () => gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;
