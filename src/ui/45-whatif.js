@@ -157,6 +157,7 @@ function runGoalSeek_() {
       box.innerHTML = `<div class="goal-answer">
         <div class="goal-big">${esc(r.label)}：${fmt(r.base, digits)} → <b>${fmt(r.value, digits)}</b> ${esc(r.unit || '')}
           ${pct !== null ? `<span class="muted">（${signed_(pct, 1)}%）</span>` : ''}</div>
+        ${lever.driver === 'devcut' && r.value > 100 ? `<div class="callout warn" style="margin:6px 0;"><div>開發總投要低減超過 100% 才達得到目標，實務上做不到；請加其他項目一起試（＋ 加一個項目）。</div></div>` : ''}
         ${r.value < 0 && r.base >= 0 ? `<div class="callout warn" style="margin:6px 0;"><div>要調到負數才達得到目標，實務上做不到；只靠「${esc(r.label)}」不夠，請加其他項目一起試（＋ 加一個項目）。</div></div>` : ''}
         <div class="muted">${esc(whatIfMetricLabel_(m.metric, m.basis))}：目前 ${fmt(r.metricBase)} → ${fmt(r.achieved)}（目標 ${fmt(num(m.target))}）。
           ${info.driver && info.driver.type === 'volume' ? '台數變動時，開發總投的攤提台數也一起變。' : ''}其他假設都維持目前的數字。</div>
@@ -529,7 +530,7 @@ function drawImpactResult_() {
   const rows = r.lines.filter(l => !p.changedOnly || changed(l) || l.isProfit);
   const multi = r.adjustments.length > 1;
   const profit = r.lines.find(l => l.isProfit);
-  const adjText = r.adjustments.map(a => `${a.label} ${fmt(a.base, dg(a.base))} → ${fmt(a.value, dg(a.base))} ${a.unit || ''}${a.pct === null ? '' : `（${signed_(a.pct, 1)}%）`}`);
+  const adjText = r.adjustments.map(a => `${a.label} ${fmt(a.base, dg(a.base))} → ${fmt(a.value, dg(a.base))} ${a.unit || ''}${a.unit === '%' ? `（${signed_(a.value - a.base, 2)} 個百分點）` : a.pct === null ? '' : `（${signed_(a.pct, 1)}%）`}`);
   const head = profit ? (() => {
     const d = profit[basis].after - profit[basis].base;
     return `<div class="goal-answer"><div class="goal-big">${esc(profit.name)}${basis === 'month' ? '（月總額）' : '（單台）'}：${fmt(profit[basis].base)} → <b>${fmt(profit[basis].after)}</b>

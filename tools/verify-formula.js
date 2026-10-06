@@ -434,6 +434,43 @@ check('目標反推另存成新情境：資料寫實後重算的營業淨利 = �
   gs.deleteScenario(saved.scenario.ScenarioID); gs.deleteScenario(p.scenario.ScenarioID);
 });
 
+check('開發總投低減目標 15% 改成 20%：攤提 × 80/85、另存後寫進低減%(原始金額不動)、現況/目標互轉數字接得起來', () => {
+  reset();
+  const src = gs.getScenarios().filter(s => s.ScenarioID === sid)[0];
+  const t = gs.saveScenario({ ScenarioID: '', Gate: src.Gate, ScenarioName: '低減目標測試', ScenarioType: '目標', VehicleTypeID: src.VehicleTypeID,
+    AmortMonthlyVolume: src.AmortMonthlyVolume, AmortLifeCycleYears: src.AmortLifeCycleYears }).ScenarioID;
+  gs.copyScenarioData(sid, t, ['salesmix', 'costofsales', 'devinvestment', 'operatingexpense', 'parameters']);
+  const devOf = id => gs.getDevInvestment(id);
+  gs.batchWriteRows_(gs.SHEETS.DEV_INVESTMENT, 'RowID', devOf(t).map(r => Object.assign({}, r, { ChallengeReductionPct: 15 })), []);
+  reset();
+  assert(!gs.getWhatIfOptions(sid).drivers.some(d => d.driver.type === 'devcut'), '現況情境沒有低減目標可以調');
+  const opt = gs.getWhatIfOptions(t).drivers.filter(d => d.driver.type === 'devcut')[0];
+  assert(opt, '目標情境要有「開發總投低減目標」');
+  near(opt.base, 15, '目前整體低減 15%', 1e-9);
+  // 試算：15% → 20%，每個攤提科目 × 80/85，營業淨利的變動 = 攤提少掉的部分
+  const r = gs.simulateAdjustments(t, [{ driver: { type: 'devcut' }, by: 'to', value: 20 }]);
+  const dev = gs.driverBase_(t, { type: 'dev' }).value;
+  const k = r.lines.filter(l => l.code === 'K')[0];
+  near(k.unit.after - k.unit.base, dev * (1 - 80 / 85), '營業淨利多出 攤提 × (1 − 80/85)', 1);
+  // 另存成目標情境：低減% 改成 20，原始金額不動
+  const before = devOf(t).map(x => x.Amount);
+  const a = gs.saveWhatIfAsScenario(t, [{ driver: { type: 'devcut' }, value: 20 }], { ScenarioName: '低減20', ScenarioType: '目標' });
+  near(a.actual, a.expected, '另存(目標)重算 = 試算', 1);
+  const aRows = devOf(a.scenario.ScenarioID);
+  assert(aRows.every(x => Math.abs(Number(x.ChallengeReductionPct) - 20) < 1e-6), '低減% 應該改成 20：' + aRows.map(x => x.ChallengeReductionPct));
+  assert(aRows.map(x => x.Amount).join() === before.join(), '原始投資金額不能動');
+  // 另存成現況(不套低減)：低減寫實到金額，數字照樣接得起來
+  const b = gs.saveWhatIfAsScenario(t, [{ driver: { type: 'devcut' }, value: 20 }], { ScenarioName: '低減20現況', ScenarioType: '現況' });
+  near(b.actual, b.expected, '另存(現況)重算 = 試算', 1);
+  // 現況情境另存成目標：開發總投 −10% 變成低減目標 10%
+  const c = gs.saveWhatIfAsScenario(sid, [{ driver: { type: 'dev' }, value: gs.driverBase_(sid, { type: 'dev' }).value * 0.9 }], { ScenarioName: '現況轉目標', ScenarioType: '目標' });
+  near(c.actual, c.expected, '現況 → 目標重算 = 試算', 1);
+  assert(devOf(c.scenario.ScenarioID).every(x => Math.abs(Number(x.ChallengeReductionPct) - 10) < 1e-6), '開發總投 −10% 寫成低減目標 10%');
+  [a, b, c].forEach(x => gs.deleteScenario(x.scenario.ScenarioID));
+  gs.deleteScenario(t);
+  reset();
+});
+
 check('情境快照：存下當時的數字，之後改資料不影響；可以當成比較欄位', () => {
   reset();
   const kOf = () => gs.calculatePLAllVehicles(sid).weightedAverage.filter(l => l.LineCode === 'K')[0].Amount;

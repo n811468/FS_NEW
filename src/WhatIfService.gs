@@ -10,6 +10,8 @@
  *   { type: 'price' }                建議零售價(加權平均，元)，各車系等比例調整
  *   { type: 'line', code: 'b1' }     某科目的單台金額(加權平均，元)，各車系等比例調整
  *   { type: 'dev' }                  開發總投攤提(加權單台合計，元)，所有攤提科目等比例調整
+ *   { type: 'devcut' }               開發總投挑戰低減目標(整體 %，只有目標情境)：原本低減 15% 改成 20% =
+ *                                    低減後金額從原始的 85% 變成 80%，所有攤提科目 × 80/85(各列的低減比例同步調整)
  *   { type: 'param', name: '營業稅率' } 參數值(依參數單位，% 參數填 5 = 5%)，全車系套用
  *   { type: 'fx', currency: 'CNY' }   匯率(1 外幣 = ? 元)
  * 衡量指標(metric)：{ code: 'K', basis: 'unit' | 'month' }，code 空白 = 營業淨利(K 被刪掉時是損益表最後一行總計)
@@ -70,6 +72,11 @@ function driverBase_(scenarioId, driver) {
     defs.forEach(function (d) { var l = w.filter(function (x) { return x.LineCode === d.LineCode; })[0]; if (l) sum += l.Amount; });
     return { value: sum, label: '開發總投攤提(單台合計)', unit: '元/台' };
   }
+  if (t === 'devcut') {
+    var dc = devCutTotals_(scenarioId);
+    if (!dc) throw new Error('現況情境沒有挑戰低減目標，或沒有開發總投資料');
+    return { value: (1 - dc.reduced / dc.original) * 100, label: '開發總投低減目標(整體)', unit: '%' };
+  }
   if (t === 'param') {
     var pdef = getParamDefs().filter(function (p) { return p.ParamName === driver.name; })[0];
     if (!pdef) throw new Error('找不到參數：' + driver.name);
@@ -94,6 +101,10 @@ function driverOverrides_(scenarioId, driver, value, base) {
     case 'price': o.price = factor(); break;
     case 'line': o.lineScale = {}; o.lineScale[driver.code] = factor(); break;
     case 'dev': o.dev = factor(); break;
+    case 'devcut':
+      if (base >= 100) throw new Error('開發總投目前已經低減 100%，無法再換算');
+      o.dev = (1 - value / 100) / (1 - base / 100);
+      break;
     case 'param': o.params = {}; o.params[driver.name] = value; break;
     case 'fx': o.fx = {}; o.fx[driver.currency] = value; break;
   }
@@ -101,7 +112,7 @@ function driverOverrides_(scenarioId, driver, value, base) {
 }
 function driverLabel_(d) {
   return d.type === 'volume' ? '月總銷量' : d.type === 'price' ? '建議零售價' : d.type === 'line' ? d.code :
-    d.type === 'dev' ? '開發總投攤提' : d.type === 'param' ? d.name : d.type === 'fx' ? d.currency + '匯率' : d.type;
+    d.type === 'dev' ? '開發總投攤提' : d.type === 'devcut' ? '開發總投低減目標' : d.type === 'param' ? d.name : d.type === 'fx' ? d.currency + '匯率' : d.type;
 }
 
 /** 假設分析頁的選項：可以調的項目(含目前值)與可以看的指標 */
@@ -113,6 +124,10 @@ function getWhatIfOptions(scenarioId) {
   var drivers = [
     { type: 'volume' }, { type: 'price' }, { type: 'dev' }
   ].map(function (d) { var b = driverBase_(scenarioId, d); return { driver: d, label: b.label, unit: b.unit, base: b.value }; });
+  if (devCutTotals_(scenarioId)) {
+    var dcb = driverBase_(scenarioId, { type: 'devcut' });
+    drivers.push({ driver: { type: 'devcut' }, label: dcb.label, unit: dcb.unit, base: dcb.value });
+  }
   defs.filter(function (d) { return (d.CalcType === CALC_TYPES.INPUT || d.CalcType === CALC_TYPES.DEV_AMORT) && Math.abs(weighted[d.LineCode] || 0) > 0.5; })
     .forEach(function (d) { drivers.push({ driver: { type: 'line', code: d.LineCode }, label: d.LineName, unit: '元/台', base: weighted[d.LineCode], group: '科目' }); });
   getParamDefs().forEach(function (p) {
@@ -337,6 +352,7 @@ function solveGoalPlan(scenarioId, metric, target, levers) {
     var lo = -Infinity, hi = Infinity;
     if (it.cap !== null) { var room = Math.abs(it.base) * it.cap / 100; lo = it.base - room; hi = it.base + room; }
     if (it.lower !== null) lo = Math.max(lo, it.lower);
+    if (it.driver.type === 'devcut') hi = Math.min(hi, 100);   // 低減超過 100% = 攤提變負數，做不到
     return { lo: lo, hi: hi };
   };
   /**
@@ -444,6 +460,23 @@ function solveGoalPlan(scenarioId, metric, target, levers) {
     alreadyMet: (target - metricBase) * dir <= 0.5,
     levers: out, warnings: warnings, message: message
   };
+}
+
+/**
+ * 開發總投的原始金額與低減後金額合計(換算成本幣、只算有攤提落點的列)。
+ * 現況情境(不套低減)、沒有開發總投時回傳 null —— 這時沒有「低減目標」可以調。
+ */
+function devCutTotals_(scenarioId) {
+  if (isBaselineScenario_(scenarioId)) return null;
+  var params = getParameters(scenarioId);
+  var original = 0, reduced = 0;
+  getDevInvestment(scenarioId).forEach(function (r) {
+    if (!devAmortTargetOf_(r)) return;
+    var amount = toNumber_(r.Amount) * fxRateFor_(params, r.Currency, '');
+    original += amount;
+    reduced += amount * (1 - pct_(r.ChallengeReductionPct));
+  });
+  return original > 0 ? { original: original, reduced: reduced } : null;
 }
 
 /** 已知調整套用後的值：by 'pct' 調 k %、'abs' 加減 k、'to' 調到 k */
@@ -597,10 +630,20 @@ function saveWhatIfAsScenario(scenarioId, levers, meta) {
         });
       });
     }
-    if (o.dev || Object.keys(lineScale).length) {
+    // 開發總投：目標情境把調整寫進「挑戰低減目標%」，原始投資金額不動(GATE 報告的開發總投 by 部門照樣對得起來)；
+    // 例：原本低減 15%、調整倍數 80/85 → 新的低減目標 20%。調到比原始金額還高、或新情境是現況(不套低減)時才改金額。
+    // 來源是現況時原本的低減% 不算數，新情境是現況時低減% 清空，前後兩種性質不同時數字也照樣接得起來。
+    var srcBaseline = isBaselineScenario_(scenarioId);
+    var newBaseline = isBaselineScenario_(newId);
+    if (o.dev || Object.keys(lineScale).length || srcBaseline !== newBaseline) {
       scaleRows(SHEETS.DEV_INVESTMENT, 'RowID', function (r) {
         var f = (o.dev || 1) * (lineScale[r.TargetLineCode] !== undefined ? lineScale[r.TargetLineCode] : 1);
-        return f !== 1 ? { Amount: toNumber_(r.Amount) * f } : null;
+        var keep = srcBaseline ? 1 : 1 - pct_(r.ChallengeReductionPct);   // 原始金額的幾成留下來
+        var m = keep * f;
+        if (f === 1 && srcBaseline === newBaseline) return null;
+        if (newBaseline) return { Amount: toNumber_(r.Amount) * m, ChallengeReductionPct: '' };
+        if (m <= 1) return { ChallengeReductionPct: Math.round((1 - m) * 100 * 1e6) / 1e6 };
+        return { Amount: toNumber_(r.Amount) * m, ChallengeReductionPct: '' };
       });
     }
     if (o.params || o.fx) {
