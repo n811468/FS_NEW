@@ -65,7 +65,8 @@ const int = (a, b) => a + Math.floor(R() * (b - a + 1));
 
 /* =====================================================================
  * 參考實作：照公式說明(FormulaEngine.gs 開頭的語法說明)獨立寫的解析器與計算器，不呼叫系統的公式引擎。
- *   優先順序(低 → 高)：比較 < 加減 < 乘除 < 負號 < 次方(右結合) < 百分比
+ *   優先順序(低 → 高)：比較 < 加減 < 乘除 < 負號 < 次方 < 百分比
+ *   負號直接接次方(-2^2)、連續次方(2^3^2)沒加括號：意思不明確，不能用
  *   除以 0 為 0；比較成立為 1；ROUND 遠離 0；比較與四捨五入前先取 15 位有效數字(同 Excel)
  * ===================================================================== */
 const Ref = (() => {
@@ -108,6 +109,8 @@ const Ref = (() => {
   function parse(src) {
     const t = lex(src);
     let p = 0;
+    const inParens = new Set();
+    const barePower = n => n.t === 'bin' && n.op === '^' && !inParens.has(n);
     const isOp = v => t[p].k === 'op' && t[p].v === v;
     const need = v => { if (!isOp(v)) throw syntax('缺 ' + v); p++; };
     function expr(min) {
@@ -119,10 +122,20 @@ const Ref = (() => {
       return left;
     }
     function prefix() {
-      if (isOp('-')) { p++; return { t: 'neg', a: prefix() }; }
+      if (isOp('-')) {
+        p++;
+        const a = prefix();
+        if (barePower(a)) throw syntax('負號接次方要加括號');
+        return { t: 'neg', a };
+      }
       if (isOp('+')) { p++; return prefix(); }
       const base = postfix();
-      if (isOp('^')) { p++; return { t: 'bin', op: '^', a: base, b: prefix() }; }
+      if (isOp('^')) {
+        p++;
+        const b = prefix();
+        if (barePower(b)) throw syntax('連續次方要加括號');
+        return { t: 'bin', op: '^', a: base, b };
+      }
       return base;
     }
     function postfix() {
@@ -147,7 +160,7 @@ const Ref = (() => {
         if (args.length < FUNCS[f][0] || args.length > FUNCS[f][1]) throw syntax(f + ' 參數個數');
         return { t: 'call', f, args };
       }
-      if (isOp('(')) { p++; const e = expr(1); need(')'); return e; }
+      if (isOp('(')) { p++; const e = expr(1); need(')'); inParens.add(e); return e; }
       throw syntax('不完整');
     }
     if (t[0].k === 'end') throw syntax('空的');
@@ -428,7 +441,7 @@ function genExpr(depth) {
 }
 
 /**
- * AST → 公式文字：照優先順序只加必要的括號(這樣才測得到解析器的優先順序)，
+ * AST → 公式文字：照優先順序只加必要的括號(這樣才測得到解析器的優先順序；負號接次方、連續次方一定加括號)，
  * 再隨機加多餘括號、空白、全形符號、小寫函式名稱、開頭的 =。
  */
 const FW = { '*': ['×', '＊'], '/': ['÷', '／'], '-': ['−', '－'], '+': ['＋'], '(': ['（'], ')': ['）'], ',': ['，'], '%': ['％'], '=': ['＝'] };
@@ -443,13 +456,14 @@ function printExpr(ast, style) {
       case 'num': out = { s: fmtNum(n.v), p: 9 }; break;
       case 'code': out = { s: n.v, p: 9 }; break;
       case 'name': out = { s: '[' + n.v + ']', p: 9 }; break;
-      case 'neg': { const a = show(n.a); out = { s: w('-') + (a.p >= 4 ? a.s : par(a.s)), p: 4 }; break; }
+      case 'neg': { const a = show(n.a); out = { s: w('-') + (a.p >= 4 && a.p !== 5 ? a.s : par(a.s)), p: 4 }; break; }
       case 'pct': { const a = show(n.a); out = { s: (a.p >= 6 ? a.s : par(a.s)) + w('%'), p: 6 }; break; }
       case 'bin': {
         const a = show(n.a), b = show(n.b);
         const lv = { '^': [6, 4, 5], '*': [3, 4, 3], '/': [3, 4, 3], '+': [2, 3, 2], '-': [2, 3, 2] }[n.op] || [1, 2, 1];
         const op = n.op === '<>' && chance(0.3) ? '!=' : n.op.length === 1 ? w(n.op) : n.op;
-        out = { s: (a.p >= lv[0] ? a.s : par(a.s)) + sp() + op + sp() + (b.p >= lv[1] ? b.s : par(b.s)), p: lv[2] };
+        const bOk = b.p >= lv[1] && !(n.op === '^' && b.p === 5);
+        out = { s: (a.p >= lv[0] ? a.s : par(a.s)) + sp() + op + sp() + (bOk ? b.s : par(b.s)), p: lv[2] };
         break;
       }
       case 'call': {
@@ -527,12 +541,20 @@ check('跟 Excel 的已知答案一致：四捨五入、浮點尾差、比較、
     ['ROUNDDOWN(4.35 * 100)', 435], ['ROUNDDOWN(-1.7)', -1], ['ROUNDDOWN(0.29 * 100)', 29], ['ROUNDDOWN(2.9999999999999996)', 3],
     ['0.1 + 0.2 = 0.3', 1], ['0.1 + 0.2 <> 0.3', 0], ['0.1 + 0.2 <= 0.3', 1], ['0.1 + 0.2 > 0.3', 0], ['1 = 1.0', 1],
     ['15% * 7', 1.05], ['50%^2', 0.25], ['200% * 3', 6], ['10 / 0', 0], ['IF(1 > 2, 5)', 0], ['2^-1', 0.5],
-    // 系統跟數學課本一樣：負號比次方晚算、次方由右往左；Excel 剛好相反(-2^2=4、2^3^2=64)。
-    // 匯出 Excel 驗算檔時會補括號(見下一項)，所以驗算檔的數字照樣跟系統一樣。
-    ['-2^2', -4], ['2^3^2', 512], ['(-2)^2', 4], ['(2^3)^2', 64]
+    // 加了括號，意思就跟 Excel 一樣清楚
+    ['-(2^2)', -4], ['(-2)^2', 4], ['(2^3)^2', 64], ['2^(3^2)', 512], ['5 - 2^2', 1], ['2^-1 * 4', 2], ['-2 * 3', -6]
   ];
   const bad = cases.filter(([f, want]) => !same(engine.num_(engine.evalFormulaAst_(engine.parseFormula_(f), env)), want))
     .map(([f, want]) => `${f}：系統 ${engine.num_(engine.evalFormulaAst_(engine.parseFormula_(f), env))}，應為 ${want}`);
+  assert(!bad.length, bad.join('\n      '));
+});
+
+check('負號接次方、連續次方沒加括號：數學課本跟 Excel 算法不同，一律要求加括號', () => {
+  const ambiguous = ['-2^2', '2^3^2', '-P8^2', 'P8 * -[營業稅率]^2', '2^-3^2', '-(2)^2', '-2^2^2', 'ROUND(-P8^2, 0)', '(1 + 5%)^2^3'];
+  const clear = ['-(2^2)', '(-2)^2', '(2^3)^2', '2^(3^2)', '5 - 2^2', '2^-1', '(1 + [營業稅率])^[LC年限]', '-2%', '--2', 'P8^2 * -1'];
+  const bad = [];
+  ambiguous.forEach(f => { const r = engine.inspectFormula_(f); if (r.ok || !/加括號/.test(r.error)) bad.push(`${f}：應該要求加括號(${r.ok ? '接受了' : r.error})`); });
+  clear.forEach(f => { const r = engine.inspectFormula_(f); if (!r.ok) bad.push(`${f}：意思清楚，不應該擋(${r.error})`); });
   assert(!bad.length, bad.join('\n      '));
 });
 
@@ -540,7 +562,7 @@ check('負號、次方、百分比翻成 Excel 公式時補上括號，Excel 算
   const g = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs']);
   const ctx = { code: c => c, name: n => n, sumOf: () => 'SUM()', ref: () => '0', note: () => { } };
   const tr = f => g.verifyPrintAst_(g.parseFormula_(f), ctx, 'excel');
-  const cases = [['-2^2', '-(2^2)'], ['2^3^2', '2^(3^2)'], ['-P8^2', '-(P8^2)'], ['P8^-1', 'P8^(-1)'], ['-P8%', '-(P8/100)']];
+  const cases = [['-(2^2)', '-(2^2)'], ['(-2)^2', '(-2)^2'], ['2^(3^2)', '2^(3^2)'], ['(2^3)^2', '(2^3)^2'], ['P8^-1', 'P8^(-1)'], ['-P8%', '-(P8/100)']];
   const bad = cases.filter(([f, want]) => tr(f).replace(/\s/g, '') !== want).map(([f, want]) => `${f} → ${tr(f)}，應為 ${want}`);
   assert(!bad.length, bad.join('\n      '));
 });
@@ -884,6 +906,8 @@ check('守門：打錯、引用不存在、參數個數不對、各種循環引�
     ['ROUND 三個參數', () => g.saveChartLine('DA', Object.assign(line('d4'), { Formula: 'ROUND(P8, 1, 2)' })), /參數個數/],
     ['IF 少了成立的值', () => g.saveChartLine('DA', Object.assign(line('d4'), { Formula: 'IF(P8 > 0)' })), /參數個數/],
     ['ABS 沒有參數', () => g.saveChartLine('DA', Object.assign(line('d4'), { Formula: 'ABS()' })), /參數個數/],
+    ['負號接次方沒加括號', () => g.saveChartLine('DA', Object.assign(line('d4'), { Formula: '-P8^2 * 0 + P8 * 1%' })), /加括號/],
+    ['連續次方沒加括號', () => g.saveChartLine('DA', Object.assign(line('d4'), { Formula: 'P8 * 2^3^2 / 512 * 1%' })), /加括號/],
     ['CHILDREN 帶參數', () => g.saveChartLine('DA', Object.assign(line('B'), { Formula: 'CHILDREN(1)' })), /參數個數/],
     ['公式是空的', () => g.saveChartLine('DA', Object.assign(line('d4'), { Formula: '  ' })), /請輸入公式/],
     ['REF 找不到情境', () => g.saveChartLine('DA', Object.assign(line('d4'), { Formula: 'REF("不存在的情境", "b4")' })), /REF 找不到情境/],
@@ -945,6 +969,31 @@ check('守門：跨情境 REF 互相引用 → 計算時明確報錯(損益表�
   g.saveChartLine('DE', Object.assign(lineOf('DE', 'b4'), { CalcType: 'INPUT', Formula: '' }));
   const fixed = g.calculatePLCore_(s, 'V1');
   assert(!Object.keys(fixed.errors).length, '拆掉循環之後不應該還有錯誤：' + JSON.stringify(fixed.errors));
+});
+
+check('舊資料裡沒加括號的 -a^b、a^b^c：開頁時照原本的算法補上括號，數字不變', () => {
+  const g = loadAppsScript(GS_FILES);
+  const s = gatef.buildScenario(g);
+  g.getBootstrap('DA');
+  const before = sysCalcScenario(g, s);
+  // 直接寫進分頁(模擬以前就存好的公式)：意思等於原本的 P8 * [季Margin率]、7166
+  const old = { d4: 'P8 * [季Margin率] + -P8^2 * 0 + 2^3^2 - 512', b4: '-[構成比]^2 * 0 + 7166' };
+  const rawRow = code => g.copyLineRow_(g.getPLLineItems('DA').filter(d => d.LineCode === code)[0], 'DA');
+  g.upsertRow_('PLLineItems', 'LineID', Object.assign(rawRow('d4'), { Formula: old.d4 }));          // 不經過存檔檢查，直接寫進分頁
+  g.upsertRow_('PLLineItems', 'LineID', Object.assign(rawRow('b4'), { VehicleFormulas: JSON.stringify({ V2: old.b4 }) }));
+  assert(!g.inspectFormula_(old.d4).ok, '舊公式現在應該要求加括號');
+  g.SHEET_CACHE_ = {}; g.resetCalcMemo_();
+  g.getBootstrap('DA');
+  const d4 = g.getPLLineItems('DA').filter(d => d.LineCode === 'd4')[0];
+  const b4 = g.getPLLineItems('DA').filter(d => d.LineCode === 'b4')[0];
+  assert(d4.Formula === 'P8*[季Margin率]+-(P8^2)*0+2^(3^2)-512', '補括號後的公式：' + d4.Formula);
+  assert(parseVF(b4.VehicleFormulas).V2 === '-([構成比]^2)*0+7166', '車系個別公式補括號：' + b4.VehicleFormulas);
+  assert(!g.getChartEditor('DA', s).problems.some(p => p.level === 'error'), '補完括號之後科目表不應該有錯誤');
+  const d = diffNumbers(before, sysCalcScenario(g, s));
+  assert(!d.length, '補括號之後數字變了：' + d.join('；'));
+  const again = chartRows(g, 'DA');
+  g.getBootstrap('DA');
+  assert(chartRows(g, 'DA') === again, '再開一次頁不應該再改');
 });
 
 /* =====================================================================

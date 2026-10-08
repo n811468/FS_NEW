@@ -8,7 +8,8 @@
  *              或同一張科目表裡的科目名稱(如 [材料成本-LP])。比率參數取出來就是小數(5% → 0.05)。
  *   運算子     + - * / ^ ( )，比較 < > <= >= = <>（成立為 1、不成立為 0）
  *              也接受全形與數學符號：× ÷ − （ ），方便直接從簡報/Excel 貼上
- *              負號比次方晚算、次方由右往左(-2^2 = -4、2^3^2 = 512)；匯出 Excel 時會補括號
+ *              負號接次方(-2^2)、連續次方(2^3^2)要加括號：數學課本跟 Excel 的算法不同(−4 / 4、512 / 64)，
+ *              不加括號就不知道使用者要哪一個，存檔時擋下來，不猜
  *   函式       SUM(a,b,...)、ROUND(x[,位數])、ROUNDUP、ROUNDDOWN、MIN、MAX、ABS、IF(條件,成立,不成立)
  *              CHILDREN()    這個科目底下所有子科目的合計(小計用)
  *              TAXDEDUCT()   勾選「貨物稅完稅價格可扣除」的科目合計
@@ -112,11 +113,13 @@ function tokenizeFormula_(src) {
  *   power := postfix ( ^ unary )?
  *   postfix := primary %*
  */
-function parseFormula_(src) {
+function parseFormula_(src, allowAmbiguousPower) {
   var key = String(src === undefined || src === null ? '' : src);
-  if (FORMULA_AST_CACHE_[key]) return FORMULA_AST_CACHE_[key];
+  if (!allowAmbiguousPower && FORMULA_AST_CACHE_[key]) return FORMULA_AST_CACHE_[key];
   var tokens = tokenizeFormula_(key);
   var p = 0;
+  var wrapped = [];   // 寫在括號裡的節點：(-2)^2、-(2^2) 的意思是清楚的
+  var isBarePower = function (n) { return !allowAmbiguousPower && n.t === 'bin' && n.op === '^' && wrapped.indexOf(n) === -1; };
   function peek() { return tokens[p]; }
   function isOp(v) { var t = tokens[p]; return t.t === 'op' && t.v === v; }
   function expectOp(v) {
@@ -148,13 +151,23 @@ function parseFormula_(src) {
     return left;
   }
   function unary() {
-    if (isOp('-')) { p++; return { t: 'neg', a: unary() }; }
+    if (isOp('-')) {
+      var at = tokens[p++].pos;
+      var operand = unary();
+      if (isBarePower(operand)) throw formulaError_('負號後面接次方，請加括號說明要哪一種：-(a^b) 還是 (-a)^b', at);
+      return { t: 'neg', a: operand };
+    }
     if (isOp('+')) { p++; return unary(); }
     return power();
   }
   function power() {
     var base = postfix();
-    if (isOp('^')) { p++; return { t: 'bin', op: '^', a: base, b: unary() }; }
+    if (isOp('^')) {
+      var at = tokens[p++].pos;
+      var exponent = unary();
+      if (isBarePower(exponent)) throw formulaError_('連續次方，請加括號說明要哪一種：(a^b)^c 還是 a^(b^c)', at);
+      return { t: 'bin', op: '^', a: base, b: exponent };
+    }
     return base;
   }
   function postfix() {
@@ -191,6 +204,7 @@ function parseFormula_(src) {
       p++;
       var inner = compare();
       expectOp(')');
+      wrapped.push(inner);
       return inner;
     }
     if (tok.t === 'end') throw formulaError_('公式不完整', tok.pos);
@@ -199,7 +213,7 @@ function parseFormula_(src) {
   if (peek().t === 'end') throw formulaError_('公式是空的');
   var ast = compare();
   if (peek().t !== 'end') throw formulaError_('多出了「' + peek().v + '」', peek().pos);
-  FORMULA_AST_CACHE_[key] = ast;
+  if (!allowAmbiguousPower) FORMULA_AST_CACHE_[key] = ast;
   return ast;
 }
 
