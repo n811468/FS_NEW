@@ -24,7 +24,7 @@ function assertEqual(actual, expected, message) {
   }
 }
 
-const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs']);
+const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs', 'VerifyImport.gs']);
 gs.setupSpreadsheet();
 gs.saveVehicleType({ VehicleTypeID: 'DA' });
 gs.saveVehicleType({ VehicleTypeID: 'DE' });

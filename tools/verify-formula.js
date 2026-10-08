@@ -27,7 +27,7 @@ function throws(fn, pattern, msg) {
   throw new Error(msg + '：應該要擋下來');
 }
 
-const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs']);
+const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs', 'VerifyImport.gs']);
 const sid = gatef.buildScenario(gs);
 gs.getBootstrap('DA');   // 開頁：DA 會有自己的一份科目表
 const amt = (scenarioId, vid, code) => gs.calculatePLCore_(scenarioId, vid).lineValues[code];

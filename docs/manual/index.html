@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>車型損益試算使用手冊</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* 版面：左側固定目錄 + 右側一欄正文；每章一個章號，圖片全寬附圖號與說明，操作步驟用編號清單 */
+:root {
+  --paper: #fbfcfe;
+  --panel: #f1f4fa;
+  --ink: #18213a;
+  --muted: #5b6580;
+  --line: #dde3ef;
+  --accent: #2f54d8;
+  --accent-soft: #e6ecfd;
+  --mark: #e5484d;
+  --good: #1d7a46;
+  --good-soft: #e3f4ea;
+  --warn-soft: #fff4dc;
+  --warn-ink: #7a5300;
+  --shadow: 0 1px 2px rgba(24, 33, 58, .06), 0 8px 24px rgba(24, 33, 58, .08);
+  --display: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
+  --body: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif;
+  --mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #10141f; --panel: #171d2c; --ink: #e5e9f4; --muted: #9aa4bf; --line: #2a3349;
+    --accent: #8aa6ff; --accent-soft: #1f2a4d; --mark: #ff6b6f; --good: #5fd08d; --good-soft: #15301f;
+    --warn-soft: #3a2f12; --warn-ink: #f3cf7a; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #10141f; --panel: #171d2c; --ink: #e5e9f4; --muted: #9aa4bf; --line: #2a3349;
+  --accent: #8aa6ff; --accent-soft: #1f2a4d; --mark: #ff6b6f; --good: #5fd08d; --good-soft: #15301f;
+  --warn-soft: #3a2f12; --warn-ink: #f3cf7a; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.8 var(--body); }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+.wrap { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 48px; max-width: 1280px; margin: 0 auto; padding-inline: 24px; }
+nav.toc { position: sticky; top: env(safe-area-inset-top, 0px); align-self: start; max-height: 100vh; overflow-y: auto; padding-block: 32px; font-size: 14px; }
+.toc .brand { display: flex; gap: 10px; align-items: center; margin-bottom: 24px; }
+.toc .brand b { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--accent); color: var(--paper); font: 700 14px/1 var(--body); }
+.toc .brand span { font-weight: 700; line-height: 1.3; }
+.toc .brand small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.toc > ol > li > a { display: flex; gap: 10px; padding: 6px 10px; border-radius: 8px; text-decoration: none; color: var(--ink); font-weight: 500; }
+.toc > ol > li > a:hover { background: var(--panel); }
+.toc a .no { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.6em; }
+.toc ol ol { padding-left: 36px; margin-block: 2px 8px; }
+.toc ol ol a { display: block; padding: 2px 0; color: var(--muted); text-decoration: none; font-size: 13px; }
+.toc ol ol a:hover { color: var(--accent); }
+
+main { padding-block: 40px 96px; min-width: 0; }
+header.cover { padding-block: 24px 40px; border-bottom: 1px solid var(--line); margin-bottom: 48px; }
+.eyebrow { font-size: 13px; letter-spacing: .12em; color: var(--accent); font-weight: 700; }
+h1 { font: 800 clamp(32px, 5vw, 48px)/1.2 var(--display); margin: 8px 0 16px; text-wrap: balance; }
+.lede { font-size: 18px; color: var(--muted); max-width: 40em; margin: 0; }
+.flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 28px; font-size: 14px; }
+.flow span { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); white-space: nowrap; }
+.flow i { color: var(--muted); font-style: normal; }
+
+section.chapter { margin-bottom: 72px; }
+.chapter > h2 { display: flex; align-items: baseline; gap: 14px; font: 800 28px/1.3 var(--display); margin: 0 0 8px; padding-top: 16px; text-wrap: balance; }
+.chapter > h2 .no { color: var(--accent); font-size: 22px; font-variant-numeric: tabular-nums; }
+.chapter > .intro { color: var(--muted); max-width: 42em; margin: 0 0 28px; }
+h3 { font: 700 20px/1.4 var(--body); margin: 44px 0 10px; text-wrap: balance; }
+h3 small { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 8px; }
+p, ul, ol.steps { max-width: 44em; }
+ul { padding-left: 1.3em; }
+li + li { margin-top: 4px; }
+ol.steps { counter-reset: s; list-style: none; padding: 0; display: grid; gap: 10px; }
+ol.steps > li { counter-increment: s; position: relative; padding-left: 40px; margin: 0; }
+ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: 2px; width: 26px; height: 26px; border-radius: 13px; background: var(--accent-soft); color: var(--accent); font: 700 13px/26px var(--body); text-align: center; }
+.callout-no { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 11px; background: var(--mark); color: #fff; font: 700 12px/1 var(--body); vertical-align: 2px; margin-right: 4px; }
+kbd, code { font-family: var(--mono); font-size: .86em; }
+kbd { padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--panel); }
+code { padding: 1px 5px; border-radius: 4px; background: var(--panel); }
+.ui { font-weight: 700; color: var(--ink); background: var(--accent-soft); padding: 0 6px; border-radius: 4px; white-space: nowrap; }
+
+figure { margin: 20px 0 28px; }
+figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); background: #fff; }
+figure.narrow img { width: auto; max-width: min(100%, 760px); }
+figcaption { margin-top: 10px; font-size: 14px; color: var(--muted); max-width: 52em; }
+figcaption b { color: var(--ink); margin-right: 6px; font-variant-numeric: tabular-nums; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.grid2 figure { margin: 0; }
+
+.tip, .warn { padding: 14px 18px; border-radius: 10px; margin: 20px 0; max-width: 46em; font-size: 15px; }
+.tip { background: var(--good-soft); }
+.tip strong { color: var(--good); }
+.warn { background: var(--warn-soft); color: var(--warn-ink); }
+.warn strong { color: var(--warn-ink); }
+
+.table-wrap { overflow-x: auto; margin: 16px 0 24px; max-width: 100%; }
+table { border-collapse: collapse; font-size: 14px; min-width: 520px; width: 100%; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: var(--panel); font-weight: 700; white-space: nowrap; }
+td code { white-space: nowrap; }
+
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 20px; }
+
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; padding-inline: 16px; }
+  nav.toc { position: static; max-height: none; padding-block: 20px 0; border-bottom: 1px solid var(--line); }
+  .toc ol ol { display: none; }
+  .toc > ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc" aria-label="目錄">
+  <div class="brand"><b>FS</b><span>車型損益試算<small>使用手冊</small></span></div>
+  <ol>
+    <li><a href="#start"><span class="no">1</span>開始使用</a>
+      <ol><li><a href="#open">打開與載入資料</a></li><li><a href="#layout">畫面配置</a></li><li><a href="#backup">備份與交換</a></li></ol></li>
+    <li><a href="#masters"><span class="no">2</span>車型、車系與情境</a>
+      <ol><li><a href="#vehicle">新增車型</a></li><li><a href="#scenario">新增情境</a></li><li><a href="#snapshot">情境快照</a></li></ol></li>
+    <li><a href="#inputs"><span class="no">3</span>輸入資料</a>
+      <ol><li><a href="#salesmix">銷售構成與售價</a></li><li><a href="#costs">成本與費用</a></li><li><a href="#dev">開發總投</a></li></ol></li>
+    <li><a href="#settings"><span class="no">4</span>科目與公式</a>
+      <ol><li><a href="#chart">科目表</a></li><li><a href="#formula">編輯公式</a></li><li><a href="#params">參數與匯率</a></li></ol></li>
+    <li><a href="#results"><span class="no">5</span>看結果</a>
+      <ol><li><a href="#dashboard">損益儀表板</a></li><li><a href="#whatif">目標反推與敏感度</a></li><li><a href="#waterfall">瀑布圖工具</a></li><li><a href="#report">GATE 報告</a></li></ol></li>
+    <li><a href="#excel"><span class="no">6</span>Excel 驗算檔</a>
+      <ol><li><a href="#excel-export">匯出</a></li><li><a href="#excel-sheets">驗算的六張工作表</a></li><li><a href="#excel-verify">怎麼驗算</a></li><li><a href="#excel-change">改公式之後的檢查</a></li><li><a href="#excel-fix">發現錯誤怎麼辦</a></li><li><a href="#excel-import">從 Excel 匯入</a></li><li><a href="#excel-rules">翻譯規則</a></li></ol></li>
+    <li><a href="#tips"><span class="no">7</span>小技巧與常見問題</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="cover">
+  <div class="eyebrow">FEASIBILITY STUDY · 使用手冊</div>
+  <h1>車型損益試算系統使用手冊</h1>
+  <p class="lede">從打開檔案、建立車型與情境、輸入數字，到看損益、做 GATE 報告，最後匯出 Excel 驗算檔確認每一個數字。書中的畫面全部是系統實際操作的截圖，數字來自內建的示範資料（車型代號與金額都是亂數產生的）。</p>
+  <div class="flow" aria-label="工作流程">
+    <span>車型與情境</span><i>→</i><span>銷售構成與售價</span><i>→</i><span>成本與費用</span><i>→</i><span>開發總投</span><i>→</i><span>科目與公式</span><i>→</i><span>儀表板・GATE 報告</span><i>→</i><span>Excel 驗算檔</span>
+  </div>
+</header>
+
+<!-- ======================= 1 ======================= -->
+<section class="chapter" id="start">
+  <h2><span class="no">1</span>開始使用</h2>
+  <p class="intro">系統是一個 HTML 檔（<code>FS-local.html</code>），用 Chrome 或 Edge 雙擊就能用。不需要網路、帳號或安裝，資料只存在自己電腦的瀏覽器裡。</p>
+
+  <h3 id="open">打開與載入資料</h3>
+  <p>第一次打開是空的資料庫，畫面上方的藍色提示列有三個起點：</p>
+  <figure>
+    <img src="img/01-empty.png" alt="第一次打開的畫面：空資料庫提示列上有建立第一個車型、匯入資料包、載入示範資料三個按鈕" loading="lazy">
+    <figcaption><b>圖 1-1</b>空的資料庫。<span class="callout-no">1</span>建立第一個車型 <span class="callout-no">2</span>匯入同事給的或自己備份的資料包 <span class="callout-no">3</span>載入示範資料先看看系統長什麼樣子。</figcaption>
+  </figure>
+  <ul>
+    <li><span class="ui">建立第一個車型</span>：到「車型與情境」，頁首的「下一步」會依序提示 車系 → 情境 → 銷售構成 → 成本與費用 → 開發總投。</li>
+    <li><span class="ui">匯入資料包…</span>：讀進 JSON 資料包（舊格式也能讀，會自動升級，數字不變）。</li>
+    <li><span class="ui">載入示範資料看看</span>：兩個車型，其中一個有 GATE F 的現況與目標情境、作法與說明。本手冊的截圖都用這組資料。</li>
+  </ul>
+
+  <h3 id="layout">畫面配置</h3>
+  <figure>
+    <img src="img/03-layout.png" alt="系統主畫面：左側導覽、右上角車型與情境、工具列、頁面內的子頁籤" loading="lazy">
+    <figcaption><b>圖 1-2</b>主畫面。<span class="callout-no">1</span>左側導覽依工作流程分四組 <span class="callout-no">2</span>目前的車型與情境，所有輸入頁都以它為範圍 <span class="callout-no">3</span>地端版工具列：匯出、匯入、更多 <span class="callout-no">4</span>頁面內的子頁籤與動作。</figcaption>
+  </figure>
+  <ul>
+    <li>左側導覽：<b>結果呈現</b>（儀表板、GATE 報告、目標反推、瀑布圖）→ <b>輸入資料</b>（目前情境）→ <b>計算設定</b>（科目與公式、參數與匯率）→ <b>主檔</b>（車型與情境）。</li>
+    <li>頁首左邊的 <kbd>☰</kbd> 把側邊欄收成只剩圖示，表格多一塊寬度；瀏覽器會記住。</li>
+    <li>有未儲存的修改時，畫面底部浮出「儲存 / 放棄修改」，<kbd>Ctrl</kbd>+<kbd>S</kbd> 也能存；切頁前會先確認。</li>
+  </ul>
+
+  <h3 id="backup">備份與交換</h3>
+  <figure class="narrow">
+    <img src="img/04-export-menu.png" alt="工具列的匯出選單：匯出全部、匯出車型、匯出情境、Excel 驗算檔" loading="lazy">
+    <figcaption><b>圖 1-3</b>工具列「匯出 ▾」。前三項是資料包（JSON），最後一項是 Excel 驗算檔（第 6 章）。</figcaption>
+  </figure>
+  <div class="table-wrap"><table>
+    <thead><tr><th>選項</th><th>內容</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td>匯出全部（備份）</td><td>整份資料庫</td><td><b>這是備份</b>，請定期存到共用資料夾</td></tr>
+      <tr><td>匯出車型（含所有情境）</td><td>上方選的車型：車系、所有情境、科目表</td><td>交給同事「合併匯入」，對方的這個車型整個換成這一包</td></tr>
+      <tr><td>匯出情境（只有這一個）</td><td>上方選的一個情境</td><td>交給同事合併，對方只新增或更新這個情境</td></tr>
+      <tr><td>Excel 驗算檔（目前情境）</td><td>輸入數字＋每個科目的 Excel 公式</td><td>在 Excel 裡重算、逐格比對系統數字；不能匯入</td></tr>
+    </tbody>
+  </table></div>
+  <div class="warn"><strong>資料只在這台電腦的瀏覽器裡。</strong>清除瀏覽資料或換電腦就會消失。工具列會提醒「有修改還沒整份備份」，看到就做一次「匯出全部」。</div>
+</section>
+
+<!-- ======================= 2 ======================= -->
+<section class="chapter" id="masters">
+  <h2><span class="no">2</span>車型、車系與情境</h2>
+  <p class="intro">「車型與情境」一頁由上而下是車型、車系、情境、情境快照四個區塊。車型是最上層的單位，每個車型各自有一份科目表。</p>
+
+  <h3 id="vehicle">新增車型與車系</h3>
+  <ol class="steps">
+    <li>按 <span class="ui">＋ 新增車型</span>，填車型代號（不能有空白、逗號、| 或引號）。</li>
+    <li>選科目表從哪裡開始：標準範本，或複製一個科目結構比較接近的既有車型。</li>
+    <li>在「車系」區塊新增車系（標準型、豪華型、長軸版…），拖曳 ⠿ 調整順序，所有頁面的車系欄位都照這個順序。</li>
+  </ol>
+  <div class="grid2">
+    <figure>
+      <img src="img/02-new-vehicle-dialog.png" alt="新增車型對話框" loading="lazy">
+      <figcaption><b>圖 2-1</b>新增車型：填代號、選科目表的來源。</figcaption>
+    </figure>
+    <figure>
+      <img src="img/05-masters.png" alt="車型與情境頁：車型、車系清單" loading="lazy">
+      <figcaption><b>圖 2-2</b>車型與車系。代號之後可以用「改代號」修改，引用它的資料會一起改。</figcaption>
+    </figure>
+  </div>
+
+  <h3 id="scenario">新增情境</h3>
+  <p>情境是「某個 GATE 的某一版數字」，例如 GATE F 現況、GATE F 目標。目標情境才有開發總投的挑戰低減目標。</p>
+  <ol class="steps">
+    <li>按 <span class="ui">＋ 新增情境…</span>，選 GATE 別、情境性質（現況／目標），情境名稱預設是 性質＋今天日期。</li>
+    <li>要以既有情境為基礎時，選來源情境並勾選要帶入的資料：銷售構成、銷貨成本、開發總投、營業費用、費率、報告說明、改善作法。只能在同一個車型內帶入。</li>
+    <li>已經建好的情境用 <span class="ui">帶入目前情境…</span>，同一組勾選。表格裡藍底那一列是右上角目前選的情境。</li>
+  </ol>
+  <figure>
+    <img src="img/07-new-scenario-dialog.png" alt="新增情境對話框：GATE、性質、名稱、來源情境與要帶入的資料" loading="lazy">
+    <figcaption><b>圖 2-3</b>新增情境：以現況為基礎建立目標情境時，勾選要帶入的資料。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/06-scenarios.png" alt="情境清單" loading="lazy">
+    <figcaption><b>圖 2-4</b>情境清單。同一個 GATE 底下名稱不能重複，拖曳 ⠿ 調整情境選單的順序。</figcaption>
+  </figure>
+
+  <h3 id="snapshot">情境快照</h3>
+  <p>按 <span class="ui">把目前情境存成快照</span>，把當下算出來的損益（加權平均與每個車系）存一份，之後資料怎麼改都不影響它。儀表板、瀑布圖工具的情境選單裡「情境快照」一組可以直接拿來比較，GATE 報告的「前回」也可以選快照。</p>
+  <figure>
+    <img src="img/08-snapshots.png" alt="情境快照區塊" loading="lazy">
+    <figcaption><b>圖 2-5</b>情境快照。「跟現在比較」直接畫出 快照 → 現在 的差異瀑布圖。</figcaption>
+  </figure>
+</section>
+
+<!-- ======================= 3 ======================= -->
+<section class="chapter" id="inputs">
+  <h2><span class="no">3</span>輸入資料</h2>
+  <p class="intro">先在右上角選好車型與情境，再依序填銷售構成與售價、成本與費用、開發總投。每個表格都可以從 Excel 選一塊數字複製，點起始格按 <kbd>Ctrl</kbd>+<kbd>V</kbd> 整塊貼上。</p>
+
+  <h3 id="salesmix">銷售構成與售價</h3>
+  <p>每個車系一列。改台數時構成比重算；改構成比時依車型月總台數反推台數，兩者永遠一致。這裡的售價欄位是售價結構（P1~P9）公式的來源，例如公式裡的 <code>[建議零售價]</code>、<code>[廢車處理費(含稅)]</code>。</p>
+  <figure>
+    <img src="img/09-salesmix.png" alt="銷售構成與售價表格" loading="lazy">
+    <figcaption><b>圖 3-1</b>銷售構成與售價。只填構成比、沒填月台數或 LC 年限時，LC 總台數是 0，開發總投攤提會算成 0，表格下方會提醒。</figcaption>
+  </figure>
+
+  <h3 id="costs">成本與費用</h3>
+  <p>頁面上方切換 <span class="ui">銷貨成本</span>／<span class="ui">營業費用</span>。列是成本項目、欄是車系，填單台金額，可以選幣別（依「參數與匯率」頁的匯率換算）。</p>
+  <figure>
+    <img src="img/10-costs.png" alt="銷貨成本表格" loading="lazy">
+    <figcaption><b>圖 3-2</b>銷貨成本。上半部是手動輸入的科目；公式或開發總投攤提的科目列在下方唯讀，滑鼠移到金額上可以看完整計算過程。「報告說明」欄直接印在 GATE 報告上。</figcaption>
+  </figure>
+  <div class="grid2">
+    <figure>
+      <img src="img/11-costs-paste.png" alt="從 Excel 貼上整張表對話框" loading="lazy">
+      <figcaption><b>圖 3-3</b>從 Excel 貼上整張表：連科目名稱與車系標題一起複製，依名稱自動對應，先顯示對應結果讓你確認。</figcaption>
+    </figure>
+    <figure>
+      <img src="img/12-opex.png" alt="營業費用表格" loading="lazy">
+      <figcaption><b>圖 3-4</b>營業費用：依銷售費用、產品貢獻前費用、固定營業費用、前瞻費用分段。</figcaption>
+    </figure>
+  </div>
+  <div class="tip"><strong>貼上的格式：</strong>千分位逗號、<code>(1,234)</code> 負數、<code>-</code> 當 0、全形數字都認得。填不進去的格子（不是數字、唯讀、超出表格）會標紅，提示裡列出內容。</div>
+
+  <h3 id="dev">開發總投</h3>
+  <p>跟 Excel 的「開發總投 by 部門」一樣，一個部門一列：投資金額（模具／設備／費用／總計）｜低減目標｜低減後｜說明。上方是投資總額、低減後、整體低減與單台攤提。</p>
+  <figure>
+    <img src="img/13-dev-sum.png" alt="開發總投部門彙總表" loading="lazy">
+    <figcaption><b>圖 3-5</b>部門彙總（目標情境）。一格只有一筆台幣時直接點格子改；右上角有小三角的格子有好幾筆或外幣，要在右側面板改。下方「攤提落點 → 單台攤提」即時試算每個攤提落點與每個車系。</figcaption>
+  </figure>
+  <ol class="steps">
+    <li>點部門名稱打開右側面板：可以改部門名稱，投資明細依模具／設備／費用分組，每一筆有項目、金額、幣別、攤提落點、分攤車系。</li>
+    <li>低減目標預設整個部門一個 %；切「資產、費用分開」可以各填一個。談定的是金額時，直接填低減後金額，% 自動算。</li>
+    <li>預設全車系分攤（÷ LC 總台數）；點「全車系 ▾」勾選部分車系，就只攤給那幾個車系（÷ 這些車系的攤提台數）。</li>
+    <li>改完按 <span class="ui">儲存</span>。有金額卻沒選攤提落點的那一筆，儲存時會打開那個部門的面板提醒。</li>
+  </ol>
+  <figure>
+    <img src="img/14-dev-drawer.png" alt="開發總投右側面板" loading="lazy">
+    <figcaption><b>圖 3-6</b>右側面板：低減目標、各筆投資明細、攤提落點與分攤車系、部門說明。</figcaption>
+  </figure>
+  <div class="grid2">
+    <figure>
+      <img src="img/15-dev-list.png" alt="開發總投每一筆明細" loading="lazy">
+      <figcaption><b>圖 3-7</b>每一筆明細：一筆一列，點一列打開那個部門的面板。</figcaption>
+    </figure>
+    <figure>
+      <img src="img/16-dev-compare.png" alt="開發總投比較" loading="lazy">
+      <figcaption><b>圖 3-8</b>比較：幾個情境的部門並排，每一欄後面接差異，下方瀑布圖看差在哪些部門。</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ======================= 4 ======================= -->
+<section class="chapter" id="settings">
+  <h2><span class="no">4</span>科目與公式</h2>
+  <p class="intro">每個車型有自己的科目表。每個科目選一種計算來源：手動輸入、公式計算、開發總投攤提。預設公式跟原本 Gate F 試算表逐格相同，全部都可以改。</p>
+
+  <h3 id="chart">科目表</h3>
+  <figure>
+    <img src="img/17-chart-tree.png" alt="科目與公式頁的科目樹" loading="lazy">
+    <figcaption><b>圖 4-1</b>左邊長得像損益表：科目縮排在它的小計底下，旁邊是目前情境的加權平均金額。圖示 ✎ 手動輸入、ƒ 公式、⚙ 開發攤提；紅色「!」= 公式錯誤，「?」= 沒有被算進營業淨利。</figcaption>
+  </figure>
+  <ul>
+    <li>小計那一列右邊的 <b>＋</b> 直接在那一段新增科目；拖曳 ⠿ 調整順序，放開就存。</li>
+    <li>順序跟 Excel 損益表一樣：「前一段 − 明細」的小計（銷貨毛利、產品貢獻）排在明細下面，「明細加總」的群組（銷貨成本合計）排在明細上面。</li>
+    <li>右上「⋯ 整份科目表」：從其他車型或範本複製、存成標準範本、恢復預設科目。</li>
+  </ul>
+
+  <h3 id="formula">編輯公式</h3>
+  <p>點左邊一個科目，右邊一步一步設定：名稱與「計入哪個小計」→ <b>①</b> 怎麼算 → <b>②</b> 公式 → <b>③</b> 每個車系「目前 → 修改後」與營業淨利變多少。還沒儲存不影響其他頁面。</p>
+  <figure>
+    <img src="img/18-chart-rows.png" alt="一行一項的公式編輯：季Margin = 廠價(未稅) × 季Margin率" loading="lazy">
+    <figcaption><b>圖 4-2</b>「一行一項」：每一行是「＋／− 一個來源」，後面接「× 或 ÷ 係數」，每一行右邊直接顯示算出多少。例：季Margin = ＋ 廠價(未稅) × 季Margin率。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/19-chart-chips.png" alt="自由公式編輯：貨物稅公式以膠囊顯示" loading="lazy">
+    <figcaption><b>圖 4-3</b>「自由公式」：有 IF、ROUND、括號巢狀時自動用這個。公式是一顆一顆膠囊，每顆底下顯示目前的值。</figcaption>
+  </figure>
+  <div class="table-wrap"><table>
+    <thead><tr><th>寫法</th><th>意思</th><th>例子</th></tr></thead>
+    <tbody>
+      <tr><td><code>[名稱]</code></td><td>科目名稱、系統變數、參數（% 參數取出來是小數）、匯率</td><td><code>[廠價(未稅)] * [季Margin率]</code></td></tr>
+      <tr><td>科目代碼</td><td>直接打代碼也可以</td><td><code>P5 - P6 - P7</code></td></tr>
+      <tr><td><code>+ - * / ^ ( )</code>、<code>15%</code></td><td>運算；全形 × ÷ − （）也可以</td><td><code>[一般材料] * 1.2</code></td></tr>
+      <tr><td><code>CHILDREN()</code></td><td>子科目合計</td><td><code>[生產毛利] - CHILDREN()</code></td></tr>
+      <tr><td><code>TAXDEDUCT()</code></td><td>勾「貨物稅完稅價格可扣除」的科目合計</td><td>貨物稅公式</td></tr>
+      <tr><td><code>ROUND</code> <code>ROUNDUP</code> <code>ROUNDDOWN</code> <code>SUM</code> <code>MIN</code> <code>MAX</code> <code>ABS</code> <code>IF</code></td><td>跟 Excel 同名同義</td><td><code>ROUND([實際零售價(含稅)] * [營業稅率] / (1 + [營業稅率]))</code></td></tr>
+      <tr><td><code>REF("情境", "科目"[, "車系"])</code></td><td>引用另一個情境（可以是別的車型）的科目</td><td><code>REF("S3 GATE E 實績", "b4") * 1.2</code></td></tr>
+    </tbody>
+  </table></div>
+  <div class="tip"><strong>除以 0 = 0。</strong>試算初期台數還沒填時，整張表不會因此全部變成錯誤。公式語法錯誤、引用不存在的科目、循環引用會在存檔時擋下來。</div>
+
+  <h3 id="params">參數與匯率</h3>
+  <figure>
+    <img src="img/20-params.png" alt="參數與匯率頁" loading="lazy">
+    <figcaption><b>圖 4-4</b>上半部是參數與比率，下半部是匯率（1 外幣 = ? 台幣）。名稱、單位、預設值所有車型共用；數值每個情境各填一份，個別車系不同才填車系欄位。</figcaption>
+  </figure>
+  <ul>
+    <li>標「沿用預設值」= 這個情境沒填，用預設值；標「未填 = 0」= 沒填也沒有預設值，公式會當成 0。</li>
+    <li>幣別選單只會出現這個情境填了匯率的幣別。</li>
+  </ul>
+</section>
+
+<!-- ======================= 5 ======================= -->
+<section class="chapter" id="results">
+  <h2><span class="no">5</span>看結果</h2>
+  <p class="intro">儀表板跨車型、情境、車系並排比較；目標反推回答「要做到多少」；瀑布圖說明差在哪；GATE 報告整理成審議用的投影片。</p>
+
+  <h3 id="dashboard">損益儀表板</h3>
+  <ol class="steps">
+    <li>到 <span class="ui">比較欄位</span> 加入要比的 車型 × 情境 × 車系（或加權平均），拖曳 ⠿ 調整順序，點 ★ 設成比較基準。</li>
+    <li>切到 <span class="ui">損益表</span>，第二小欄選「與基準的差異」就看到每一欄跟基準差多少。</li>
+    <li>金額單位（元／千元／萬元）全系統共用；金額基礎可以切單台、年度總額、LC 總額。</li>
+  </ol>
+  <figure>
+    <img src="img/21-dash-columns.png" alt="儀表板比較欄位設定" loading="lazy">
+    <figcaption><b>圖 5-1</b>比較欄位：現況與目標的加權平均，加上目標情境的兩個車系。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/22-dash-table.png" alt="儀表板損益表，四個比較欄位並排" loading="lazy">
+    <figcaption><b>圖 5-2</b>損益表。上方的重點指標卡片一欄一張，星號那一欄是比較基準。</figcaption>
+  </figure>
+  <div class="grid2">
+    <figure>
+      <img src="img/23-dash-hover.png" alt="滑鼠移到金額上顯示計算過程" loading="lazy">
+      <figcaption><b>圖 5-3</b>滑鼠移到格子上：這一欄實際的計算過程。科目名稱旁的 ƒ 顯示公式。</figcaption>
+    </figure>
+    <figure>
+      <img src="img/24-dash-chart.png" alt="儀表板圖表" loading="lazy">
+      <figcaption><b>圖 5-4</b>圖表：科目比較、依欄位、損益結構。</figcaption>
+    </figure>
+  </div>
+  <p>某一欄算不出來（例如那個車系在這個情境還沒有銷售構成）時只略過那一欄，上方說明原因，按「從比較欄位移除」一鍵拿掉。「匯出 CSV」下載 .csv 或複製到剪貼簿；「匯出 Excel 驗算檔」見第 6 章。</p>
+
+  <h3 id="whatif">目標反推與敏感度</h3>
+  <p>只在畫面上試算，不會改到存檔的數字。算出結果後可以「另存成新情境…」。</p>
+  <figure>
+    <img src="img/26-whatif-goal.png" alt="目標反推：損益兩平要賣多少錢" loading="lazy">
+    <figcaption><b>圖 5-5</b>目標反推：「要讓營業淨利單台等於 0，建議零售價要調到多少？」常見問題（損益兩平要賣幾台、賣多少錢、材料成本要降到多少）一鍵帶入。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/27-whatif-combo.png" alt="組合拳：已知調整、負責金額、補足缺口" loading="lazy">
+    <figcaption><b>圖 5-6</b>組合拳：每一列選一種方式。<b>已知調整</b>直接套用；<b>負責金額</b>算出要調到多少；<b>補足缺口</b>依列表順序補剩下的缺口。結果附瀑布圖。</figcaption>
+  </figure>
+  <div class="grid2">
+    <figure>
+      <img src="img/28-whatif-impact.png" alt="調整影響試算" loading="lazy">
+      <figcaption><b>圖 5-7</b>調整影響試算：材料成本-KD 降 3%，損益表每一行變多少。</figcaption>
+    </figure>
+    <figure>
+      <img src="img/29-whatif-sens.png" alt="敏感度分析二維表" loading="lazy">
+      <figcaption><b>圖 5-8</b>敏感度分析：兩項假設同時變動，目前的數字框起來。勾「附敏感度分析」就放進 GATE 報告。</figcaption>
+    </figure>
+  </div>
+
+  <h3 id="waterfall">瀑布圖工具</h3>
+  <figure>
+    <img src="img/30-waterfall.png" alt="瀑布圖工具：兩個欄位的差異拆解" loading="lazy">
+    <figcaption><b>圖 5-9</b>瀑布圖工具。四種來源：兩個欄位的差異、單一欄位損益、原因拆解、自訂。可以下載 PNG／SVG，或「複製表格」貼到 Excel。</figcaption>
+  </figure>
+  <ul>
+    <li><b>兩個欄位的差異</b>：營業淨利（或任一段小計）差在哪些科目；年度與 LC 總額可以拆出「銷量影響」。</li>
+    <li><b>原因拆解</b>：選起點、終點情境與科目，中間每一根是自己填的原因，對不起來的部分自動變成「其他」。原因跟 GATE 報告的「目標成本作法」是同一份清單。</li>
+    <li>差異只佔整根一小段時縱軸自動放大，圖上註明「縱軸未從 0 開始」。</li>
+  </ul>
+
+  <h3 id="report">GATE 報告</h3>
+  <p>選「目標／本回」「現況」「前回（選填）」，產生一張一頁的 16:9 投影片。「列印 / 存成 PDF」時選「另存為 PDF」；每張右上角「複製表格」直接貼進 PowerPoint 或 Excel。</p>
+  <figure>
+    <img src="img/31-report.png" alt="GATE 報告頁" loading="lazy">
+    <figcaption><b>圖 5-10</b>GATE 報告：上方選情境與金額單位，下方是投影片。</figcaption>
+  </figure>
+  <div class="grid2">
+    <figure><img src="img/32-slide-summary.png" alt="損益目標與差距摘要投影片" loading="lazy"><figcaption><b>圖 5-11</b>損益目標與差距摘要：差距、作法覆蓋率、損益兩平月銷量。</figcaption></figure>
+    <figure><img src="img/33-slide-bridge.png" alt="現況到目標差距拆解投影片" loading="lazy"><figcaption><b>圖 5-12</b>現況 → 目標 差距拆解（瀑布圖）。</figcaption></figure>
+    <figure><img src="img/35-slide-actions.png" alt="目標成本作法投影片" loading="lazy"><figcaption><b>圖 5-13</b>目標成本作法：效果是對營業淨利的單台影響，正數 = 改善。</figcaption></figure>
+    <figure><img src="img/37-slide-reconcile.png" alt="作法對帳投影片" loading="lazy"><figcaption><b>圖 5-14</b>作法對帳：作法效果合計 vs 實際改善，標出對不起來的科目。</figcaption></figure>
+  </div>
+  <figure>
+    <img src="img/38-slide-fs.png" alt="細車型 FS 損益狀況投影片" loading="lazy">
+    <figcaption><b>圖 5-15</b>細車型 FS 損益狀況：各車系＋加權平均＋%＋說明。「說明」欄可以直接點進去改，跟成本與費用頁的「報告說明」是同一份。</figcaption>
+  </figure>
+</section>
+
+<!-- ======================= 6 ======================= -->
+<section class="chapter" id="excel">
+  <h2><span class="no">6</span>Excel 驗算檔</h2>
+  <p class="intro">把一個情境的輸入數字與「科目與公式」頁建好的公式原樣搬進 Excel。損益表每一格都是真的 Excel 公式，打開就由 Excel 自己重算，再逐格跟系統的數字比對。最重要的用途是<b>改了公式或科目之後，確認計算沒有出問題</b>：除了驗算，檔案裡還有四項不依賴目前公式的檢查。</p>
+
+  <h3 id="excel-export">匯出</h3>
+  <ol class="steps">
+    <li><b>改公式、科目之前</b>：到「車型與情境」或 GATE 報告按 <span class="ui">存成快照</span>（例：「改公式前」）。</li>
+    <li>改「科目與公式」頁的公式、科目，存檔。</li>
+    <li>儀表板工具列按 <span class="ui">匯出 Excel 驗算檔</span>（或工具列「匯出 ▾ → Excel 驗算檔（目前情境）」），在對話框選情境，「跟快照比」選第 1 步存的快照。</li>
+    <li>瀏覽器下載 <code>驗算_車型_GATE_情境.xlsx</code>，用 Excel 打開，先看「說明」頁。</li>
+  </ol>
+  <div class="grid2">
+    <figure>
+      <img src="img/25-verify-button.png" alt="儀表板工具列的匯出 Excel 驗算檔按鈕" loading="lazy">
+      <figcaption><b>圖 6-1</b><span class="callout-no">1</span>儀表板工具列的「匯出 Excel 驗算檔」。</figcaption>
+    </figure>
+    <figure>
+      <img src="img/46-verify-dialog.png" alt="匯出對話框：選情境與要比較的快照" loading="lazy">
+      <figcaption><b>圖 6-2</b>匯出對話框：選情境，以及改公式前存的快照。沒有快照可以留「不比較」。</figcaption>
+    </figure>
+  </div>
+
+  <h3 id="excel-sheets">六張工作表</h3>
+  <p>以下是示範資料目標情境的實際畫面（用 LibreOffice 打開）。為了示範檢查的效果，匯出前先存了快照，再刻意改了三個地方：生產毛利的公式寫錯（多加回一般材料）、季Margin 改成固定 1%、新增一個沒有掛在任何小計底下的「新增的認證費」。顏色的意思：<b>藍字黃底</b> = 輸入值，<b>黑字</b> = 公式，<b>綠字</b> = 引用其他工作表，<b>灰底</b> = 系統數字（匯出當下的固定值）。</p>
+  <figure>
+    <img src="img/40-xlsx-info.png" alt="說明工作表：驗算結果全部一致" loading="lazy">
+    <figcaption><b>圖 6-3</b>說明：最上面是驗算結果與容差（預設 0.01 元，可以改），接著是「改公式、改科目之後的檢查」四項。注意這個例子驗算是「✓ 全部一致」，公式改壞的地方是靠下面四項抓到的。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/41-xlsx-input.png" alt="輸入工作表" loading="lazy">
+    <figcaption><b>圖 6-4</b>輸入：銷售構成與售價、參數（% 參數存成小數）、匯率、系統變數（LC總台數、構成比、攤提總台數都是公式）、手動輸入的成本與費用。「共用」欄是全車系的值，車系沒有個別值時引用它。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/42-xlsx-dev.png" alt="開發總投工作表" loading="lazy">
+    <figcaption><b>圖 6-5</b>開發總投：每一筆的台幣金額、低減後、各車系單台攤提；最下面依攤提落點 SUMIF 彙總，損益試算表的開發攤提科目引用這裡。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/43-xlsx-pl.png" alt="損益試算工作表" loading="lazy">
+    <figcaption><b>圖 6-6</b>損益試算：科目 × 車系，每一格都是 Excel 公式；加權平均 = SUMPRODUCT(各車系, 構成比)。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/44-xlsx-check.png" alt="驗算工作表：系統數字與差異" loading="lazy">
+    <figcaption><b>圖 6-7</b>驗算：左半部是系統數字，右半部 = 損益試算（Excel 重算）− 系統數字，最右邊「結果」超過容差就標紅。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/45-xlsx-formulas.png" alt="公式區工作表：系統公式與 Excel 公式並排" loading="lazy">
+    <figcaption><b>圖 6-8</b>公式區：每個科目的系統公式（科目名稱）、存檔的公式、Excel 公式並排（右側還有對照說明、驗算結果、系統預設的算法與「跟系統預設比較」）；車系有個別公式時每一種各一列。最下面是名稱對照表：公式裡每個 [名稱] 引用「輸入」表的哪一格。Excel 公式欄用 <code>FORMULATEXT</code> 讀損益試算表那一格，在 Excel 裡顯示成 <code>='輸入'!D31</code> 這種寫法（截圖是 LibreOffice 的寫法）。</figcaption>
+  </figure>
+
+  <h3 id="excel-verify">怎麼驗算</h3>
+  <ol class="steps">
+    <li>打開檔案時 Excel 會重算全部公式（檔案設定成開啟時完整重算）。先看「說明」頁的驗算結果：<b>全部一致</b> = 系統的計算跟 Excel 用同一套公式算出來一樣。</li>
+    <li>想知道某個科目怎麼算：到「公式區」找那一列，左邊是系統公式，右邊是 Excel 公式；也可以點「損益試算」那一格，在 Excel 的公式列直接看。</li>
+    <li>想追一個數字的來源：在「損益試算」選那一格，用 Excel 的「追蹤前導參照」，會一路指到「輸入」與「開發總投」的格子。</li>
+    <li>想試算：改「輸入」或「開發總投」的藍字，損益試算跟著重算；「驗算」頁會顯示跟匯出當時的差異，那是改動的影響，不是錯誤。</li>
+  </ol>
+  <div class="tip"><strong>每次改版都驗過：</strong>開發時用 <code>node tools/verify-excel.js</code> 把檔案裡的快取值全部拿掉，交給 LibreOffice 從頭重算，逐格對系統數字（含車系個別公式、REF 跨車型、外幣成本、只攤給部分車系的外幣投資、低減目標、攤提基準台數、IF／比較／除法等自訂公式），也確認故意改壞的科目表會被下一節的檢查抓到。</div>
+
+  <h3 id="excel-change">改公式之後的檢查</h3>
+  <p>「驗算」一致只代表系統照<b>現在的公式</b>算對了。公式本身改壞時（小計少算一段、科目沒掛進小計、同一筆成本扣兩次），Excel 用同一個公式重算也會一致。下面四項檢查不看現在的公式怎麼寫，專門抓這類問題。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>檢查</th><th>怎麼做</th><th>抓得到</th></tr></thead>
+    <tbody>
+      <tr><td>結構檢查</td><td>用系統預設的算法在 Excel 另外算一次各段小計：A = P8 + P9、B = Σ子科目、C = A − B、E = C − Σ子科目…，以及 營業淨利 = 收入 − 全部成本費用明細</td><td>小計公式改壞、少算或多算一段</td></tr>
+      <tr><td>科目影響</td><td>系統把每個明細科目逐一 +1,000 元重算，營業淨利的變化 ÷ 1,000</td><td>沒有算進營業淨利（0）、重複計算（−2）、掛錯段落（正負號相反）</td></tr>
+      <tr><td>跟系統預設比較</td><td>每個科目的公式、計算來源、所屬小計跟系統預設（原 Gate F 試算表的算法）比</td><td>哪些科目被改過、哪些是新增的，審核時只看這幾條</td></tr>
+      <tr><td>變動檢查</td><td>選了快照才有：每個科目 快照 → 現在 的差異，加上公式有沒有改</td><td>「公式沒改、數字卻變了」的科目：上游被改到，或輸入有改</td></tr>
+    </tbody>
+  </table></div>
+  <figure>
+    <img src="img/47-xlsx-structure.png" alt="結構檢查工作表：生產毛利與整條損益鏈跟預設算法不同" loading="lazy">
+    <figcaption><b>圖 6-9</b>結構檢查：生產毛利（C）跟預設算法 A − B 差了 7,109（就是被多加回去的一般材料），整條損益鏈也對不起來。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/48-xlsx-impact.png" alt="科目影響工作表" loading="lazy">
+    <figcaption><b>圖 6-10</b>科目影響：一般材料被 C 的公式加回去，係數變成 0；「新增的認證費」沒有掛在任何小計底下，也是 0。廣宣、促銷、批標售、季Margin 會連動貨物稅（可扣除貨物稅的科目），約 −0.88 是正常的。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/49-xlsx-changes.png" alt="變動檢查工作表" loading="lazy">
+    <figcaption><b>圖 6-11</b>變動檢查（最右邊一欄是可能的原因）：銷貨成本合計（B）的公式沒改，數字卻變了，因為季Margin 改了之後連動貨物稅；判讀欄標「⚠ 公式沒改，數字卻變了」。往下看會看到 C、d4「公式改過」。</figcaption>
+  </figure>
+  <div class="tip"><strong>標紅、標黃不一定是錯。</strong>刻意改的算法（例如季Margin 改成固定 1%）也會被標出來；逐條確認「這是不是我要的改動」。</div>
+
+  <h3 id="excel-fix">發現錯誤怎麼辦</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>哪裡標紅</th><th>代表什麼</th><th>怎麼處理</th></tr></thead>
+    <tbody>
+      <tr><td>「驗算」不一致（沒改過輸入）</td><td>系統計算的問題，使用者改不了</td><td>把驗算檔和「匯出 ▾ → 匯出情境」的資料包交給系統維護人員；驗算檔已經標出是哪個科目、哪個車系、差多少</td></tr>
+      <tr><td>結構檢查、科目影響、跟預設比較、變動檢查</td><td>科目表的設定（公式、所屬小計）有問題</td><td>看旁邊的「怎麼修正」：到「科目與公式」改；或直接在驗算檔裡改好，用「從 Excel 匯入」寫回</td></tr>
+    </tbody>
+  </table></div>
+  <p>「怎麼修正」會寫到科目：科目影響列出是哪些科目重複算到它（例：「材料成本-LP 被『銷貨成本合計』『重複的材料』都算到，留一個就好」），變動檢查列出它上游哪些科目變了、哪個的公式改過，公式區寫出系統預設的算法。科目表通常有人負責維護：可以自己改了再「匯出車型」交回去，或把驗算檔交給負責的人，上面已經寫好哪裡錯、要怎麼改。</p>
+
+  <h3 id="excel-import">從 Excel 匯入</h3>
+  <p>在驗算檔裡直接修正：「損益試算」改公式，「輸入」「開發總投」改藍字（售價、銷量、參數、匯率、成本金額、投資金額、低減目標），存檔後匯入回系統。</p>
+  <ol class="steps">
+    <li>在 Excel 改好、存檔（檔案格式維持 .xlsx）。</li>
+    <li>系統裡按 <span class="ui">從 Excel 匯入…</span>（儀表板工具列、「科目與公式」頁右上 ⋯，或工具列「更多… → 從 Excel 驗算檔匯入…」），選這個檔案。</li>
+    <li>預覽列出「公式」「輸入數字」的 現在 → 匯入後，以及「無法匯入」的格子與原因。勾選要匯入的項目，按 <span class="ui">匯入勾選的項目</span>。</li>
+    <li>匯入前系統自動存一份快照「匯入 Excel 前」。匯入後再匯出一次驗算檔、選這個快照，確認四項檢查都通過。</li>
+  </ol>
+  <figure>
+    <img src="img/50-import-preview.png" alt="從 Excel 匯入的預覽對話框" loading="lazy">
+    <figcaption><b>圖 6-12</b>在驗算檔把生產毛利的公式改回 =收入 − 銷貨成本合計，也改了一個售價，匯入時的預覽。公式會存進科目表（整個車型共用），售價寫回這個情境。</figcaption>
+  </figure>
+  <ul>
+    <li><b>只匯入改過的格子</b>：跟匯出當時一樣的格子不會動；匯出之後系統裡同一個地方也改過時，標「匯出後系統也改過」，預設不勾。</li>
+    <li><b>只改了部分車系</b>：存成那幾個車系的個別公式。</li>
+    <li><b>無法匯入</b>：用了系統沒有的函式（只能用 SUM、ROUND、ROUNDUP、ROUNDDOWN、MIN、MAX、ABS、IF）、引用別的車系欄或三張表以外的格子、改了加權平均欄或跨情境引用的數字。</li>
+    <li><b>不能在 Excel 新增科目</b>：先在系統新增科目，再匯出、改公式、匯入。存檔時一樣會檢查循環引用、找不到的科目，擋下來的項目會列出原因。</li>
+  </ul>
+
+  <h3 id="excel-rules">翻譯規則</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>系統公式</th><th>Excel 裡變成</th><th>說明</th></tr></thead>
+    <tbody>
+      <tr><td>科目代碼、<code>[科目名稱]</code></td><td>損益試算同一個車系欄那個科目的格子</td><td>例：<code>P5 - P6 - P7</code> → <code>=D9-D10-D11</code></td></tr>
+      <tr><td><code>[系統變數]</code> <code>[參數]</code> <code>[CNY匯率]</code></td><td><code>'輸入'!</code> 的格子</td><td>% 參數存成小數，跟系統一樣</td></tr>
+      <tr><td><code>CHILDREN()</code></td><td><code>SUM(子科目的格子)</code></td><td></td></tr>
+      <tr><td><code>TAXDEDUCT()</code></td><td><code>SUM(可扣除科目的格子)</code></td><td></td></tr>
+      <tr><td><code>a / b</code></td><td><code>IF(b=0,0,a/b)</code></td><td>系統的除以 0 = 0；分母是固定數字時照寫</td></tr>
+      <tr><td><code>ROUND(x)</code></td><td><code>ROUND(x,0)</code></td><td>Excel 的 ROUND 一定要寫位數；兩邊都是「遠離 0」的四捨五入</td></tr>
+      <tr><td><code>IF(條件, a)</code></td><td><code>IF(條件,a,0)</code></td><td>系統不成立時是 0，Excel 預設是 FALSE</td></tr>
+      <tr><td>整格只有比較式 <code>a &gt; b</code></td><td><code>(a&gt;b)*1</code></td><td>系統成立 = 1、不成立 = 0</td></tr>
+      <tr><td><code>REF("情境","科目")</code></td><td>「輸入」表「跨情境引用」那一列</td><td>另一個情境的數字直接帶入；要驗那個情境，另外匯出它的驗算檔</td></tr>
+      <tr><td>手動輸入</td><td><code>'輸入'!</code> 的金額（外幣 × 匯率）</td><td></td></tr>
+      <tr><td>開發總投攤提</td><td><code>'開發總投'!</code> 彙總列</td><td>低減後 ÷ 攤提台數，依攤提落點 SUMIF</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ======================= 7 ======================= -->
+<section class="chapter" id="tips">
+  <h2><span class="no">7</span>小技巧與常見問題</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>操作</th><th>方法</th></tr></thead>
+    <tbody>
+      <tr><td>儲存目前頁面</td><td><kbd>Ctrl</kbd>+<kbd>S</kbd>，或畫面底部浮動列的「儲存」</td></tr>
+      <tr><td>表格裡移動</td><td>跟 Excel 一樣：<kbd>Enter</kbd>／<kbd>↓</kbd> 下一列、<kbd>Shift</kbd>+<kbd>Enter</kbd>／<kbd>↑</kbd> 上一列、<kbd>Tab</kbd> 往右</td></tr>
+      <tr><td>拖曳排序用鍵盤</td><td><kbd>Tab</kbd> 移到 ⠿，按 <kbd>Alt</kbd>+<kbd>↑</kbd>／<kbd>↓</kbd></td></tr>
+      <tr><td>從 Excel 貼一整塊數字</td><td>點起始格按 <kbd>Ctrl</kbd>+<kbd>V</kbd>，往右、往下依序填</td></tr>
+      <tr><td>改代號</td><td>車型、車系用「改代號」，引用它的資料一起改；科目代碼由系統配</td></tr>
+    </tbody>
+  </table></div>
+  <h3>常見問題</h3>
+  <ul>
+    <li><b>開發總投攤提是 0？</b>銷售構成只填了構成比，沒填月台數或 LC 年限，LC 總台數是 0。補上，或在開發總投頁填「攤提基準台數」。</li>
+    <li><b>參數旁標「未填 = 0」？</b>這個情境沒填，也沒有預設值。到「參數與匯率」補上，或編輯參數設預設值。</li>
+    <li><b>同事給的資料包要怎麼加進來？</b>工具列「匯入資料包…」選「合併匯入」：資料包裡有的車型（或情境）以資料包為準，其他不動。合併前建議先「匯出全部」備份。</li>
+    <li><b>另一個分頁說資料已經被修改？</b>同一份資料在兩個分頁同時開啟時，後開的那一頁會暫停存檔，按「重新整理」就好。</li>
+    <li><b>Excel 驗算檔有科目不一致？</b>如果沒有改過輸入，請把檔案與資料包一起交給維護的人；公式區的「對照說明」會寫出那個科目的翻譯方式。</li>
+    <li><b>改了公式，怎麼確定沒改壞？</b>改之前存快照，改完匯出驗算檔並選那個快照，看「說明」頁的四項檢查（見第 6 章「改公式之後的檢查」）。</li>
+    <li><b>驗算檔發現公式有錯，但我不負責維護科目表？</b>驗算檔上「怎麼修正」已經寫好哪裡錯、要怎麼改，交給負責的人；或在驗算檔裡改好，交給他用「從 Excel 匯入」（見第 6 章「發現錯誤怎麼辦」）。</li>
+  </ul>
+</section>
+
+<footer>畫面截圖由 <code>node tools/manual-screens.js</code> 實際操作系統產生，系統畫面調整後重新執行就會更新。</footer>
+</main>
+</div>
+</body>
+</html>

@@ -33,6 +33,49 @@ let checks = 0;
 const ERRS = [];
 function assert(cond, message) { checks++; if (!cond) failures.push(message); }
 
+/** 讀 zip(e2e 用：Node 的 zlib 解壓縮) */
+function unzipFiles(buf) {
+  const zlib = require('zlib');
+  const files = {};
+  let eocd = buf.length - 22;
+  while (eocd >= 0 && buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  let p = buf.readUInt32LE(eocd + 16);
+  for (let i = 0, n = buf.readUInt16LE(eocd + 10); i < n; i++) {
+    const method = buf.readUInt16LE(p + 10), size = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28), extraLen = buf.readUInt16LE(p + 30), commentLen = buf.readUInt16LE(p + 32);
+    const offset = buf.readUInt32LE(p + 42);
+    const name = buf.slice(p + 46, p + 46 + nameLen).toString('utf8');
+    const start = offset + 30 + buf.readUInt16LE(offset + 26) + buf.readUInt16LE(offset + 28);
+    const data = buf.slice(start, start + size);
+    files[name] = method === 8 ? zlib.inflateRawSync(data) : data;
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return files;
+}
+/** 寫 zip(壓縮)：模擬 Excel 存出來的檔案，測前端的解壓縮 */
+function zipDeflate(files) {
+  const zlib = require('zlib');
+  const parts = [], central = [];
+  let offset = 0;
+  Object.keys(files).forEach(name => {
+    const raw = files[name], data = zlib.deflateRawSync(raw), nameBuf = Buffer.from(name, 'utf8');
+    const crc = zlib.crc32(raw) >>> 0;
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0); head.writeUInt16LE(20, 4); head.writeUInt16LE(0x0800, 6); head.writeUInt16LE(8, 8);
+    head.writeUInt32LE(crc, 14); head.writeUInt32LE(data.length, 18); head.writeUInt32LE(raw.length, 22); head.writeUInt16LE(nameBuf.length, 26);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(0x0800, 8); cd.writeUInt16LE(8, 10);
+    cd.writeUInt32LE(crc, 16); cd.writeUInt32LE(data.length, 20); cd.writeUInt32LE(raw.length, 24); cd.writeUInt16LE(nameBuf.length, 28); cd.writeUInt32LE(offset, 42);
+    parts.push(head, nameBuf, data);
+    central.push(cd, nameBuf);
+    offset += 30 + nameBuf.length + data.length;
+  });
+  const cdBuf = Buffer.concat(central), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(Object.keys(files).length, 8); end.writeUInt16LE(Object.keys(files).length, 10);
+  end.writeUInt32LE(cdBuf.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat(parts.concat([cdBuf, end]));
+}
+
 async function main() {
   const pw = loadPlaywright();
   if (!pw) { console.log('找不到 Playwright，略過瀏覽器端對端測試（node tools/verify-local.js 已涵蓋後端邏輯）。'); return; }
@@ -423,6 +466,65 @@ async function main() {
   const at = c => dashOrder.indexOf(c);
   assert(at('d2') < at('d1') && at('d1') < at('E') && at('d5') < at('E') && at('C') < at('d2'), '儀表板：明細要在銷貨毛利上面：' + dashOrder.join(','));
   assert(at('h4') < at('I') && at('I') < at('J') && at('J') < at('K') && at('b13') < at('C'), '儀表板：I、J、K 跟 Excel 同順序：' + dashOrder.join(','));
+
+  // 匯出 Excel 驗算檔：儀表板按鈕(比較欄位有好幾個情境時先選情境)與工具列「匯出 ▾」
+  const xlsxOk = async dl => {
+    const buf = fs.readFileSync(await dl.path());
+    return buf.readUInt32LE(0) === 0x04034b50 && buf.includes(Buffer.from('xl/worksheets/sheet6.xml')) && /^驗算_.+\.xlsx$/.test(dl.suggestedFilename());
+  };
+  const withMix = await page.evaluate(t => new Promise(ok => google.script.run.withSuccessHandler(ok).getScenarios(t)), MAIN)
+    .then(async list => {
+      for (const sc of list) {
+        const mix = await page.evaluate(id => new Promise(ok => google.script.run.withSuccessHandler(ok).getSalesMix(id)), sc.ScenarioID);
+        if (mix.length) return sc.ScenarioID;
+      }
+      return '';
+    });
+  if ((await page.inputValue('#vehicletype-selector')) !== MAIN) {
+    await page.selectOption('#vehicletype-selector', MAIN);
+    await page.waitForFunction(id => Array.from(document.getElementById('scenario-selector').options).some(o => o.value === id), withMix);
+  }
+  await page.selectOption('#scenario-selector', withMix);
+  await page.waitForFunction(() => /營業淨利/.test(document.getElementById('dashboard-content').textContent || ''), null, { timeout: 15000 });
+  const verifyBtn = page.locator('#dashboard-content button:has-text("匯出 Excel 驗算檔")');
+  assert(await verifyBtn.count() === 1, '儀表板應該有「匯出 Excel 驗算檔」');
+  // 有快照時會先開對話框(要先跟後端拿快照清單，所以等一下)
+  const confirmIfAsked = async () => {
+    const dlg = await page.waitForSelector('dialog.modal[open]', { timeout: 3000 }).catch(() => null);
+    if (dlg) await page.click('dialog.modal button[value=ok]');
+  };
+  const [dlX] = await Promise.all([page.waitForEvent('download'), verifyBtn.click().then(confirmIfAsked)]);
+  assert(await xlsxOk(dlX), '儀表板匯出的驗算檔不是 xlsx：' + dlX.suggestedFilename());
+  // 工具列：有快照時先開對話框(可以選要比較的快照)，選第一個快照匯出 → 檔案多一頁「變動檢查」(sheet9)
+  const [dlX2] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar .fsl-menu summary').then(() => page.click('#fs-local-bar button:has-text("Excel 驗算檔")')).then(async () => {
+    if (await page.waitForSelector('dialog.modal[open]', { timeout: 3000 }).catch(() => null)) {
+      const snapOpts = await page.$$eval('dialog.modal select#mf-1 option', os => os.map(o => o.value).filter(Boolean));
+      if (snapOpts.length) await page.selectOption('dialog.modal select#mf-1', snapOpts[0]);
+      await page.click('dialog.modal button[value=ok]');
+    }
+  })]);
+  assert(await xlsxOk(dlX2), '工具列匯出的驗算檔不是 xlsx：' + dlX2.suggestedFilename());
+
+  // 從 Excel 匯入：把驗算檔「輸入」表第一個車系的建議零售價改掉，存成壓縮過的 xlsx(跟 Excel 存檔一樣)，在儀表板匯入
+  const vfiles = unzipFiles(fs.readFileSync(await dlX.path()));
+  const vsheets = /<sheet [^>]*name="輸入"[^>]*r:id="(rId\d+)"/.exec(vfiles['xl/workbook.xml'].toString('utf8'));
+  const vtarget = new RegExp('Id="' + vsheets[1] + '"[^>]*Target="([^"]+)"').exec(vfiles['xl/_rels/workbook.xml.rels'].toString('utf8'))[1];
+  const inPath = 'xl/' + vtarget;
+  let inXml = vfiles[inPath].toString('utf8');
+  const priceRow = /<row r="(\d+)">(?:(?!<\/row>)[\s\S])*?建議零售價/.exec(inXml)[1];
+  inXml = inXml.replace(new RegExp('<c r="D' + priceRow + '"([^>]*)><v>[^<]*</v></c>'), '<c r="D' + priceRow + '"$1><v>1234567</v></c>');
+  vfiles[inPath] = Buffer.from(inXml, 'utf8');
+  const edited = path.join(os.tmpdir(), 'fs-e2e-verify-edited.xlsx');
+  fs.writeFileSync(edited, zipDeflate(vfiles));
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#dashboard-content button:has-text("從 Excel 匯入")')]);
+  await chooser.setFiles(edited);
+  await page.waitForSelector('dialog.modal[open] .vi-table', { timeout: 15000 });
+  const picks = await page.$$eval('dialog.modal .vi-pick', xs => xs.map(x => x.value));
+  assert(picks.length === 1 && /建議零售價/.test(picks[0]), '匯入預覽應該只有建議零售價一項：' + picks.join());
+  await page.click('dialog.modal button[value=ok]');
+  await page.waitForFunction(() => /已匯入 1 項/.test(document.getElementById('toasts').textContent), null, { timeout: 15000 });
+  const prices = await page.evaluate(id => new Promise(ok => google.script.run.withSuccessHandler(ok).getSalesMix(id)), withMix).then(rows => rows.map(r => Number(r.ListPriceTaxIncl)));
+  assert(prices.indexOf(1234567) !== -1, '匯入後建議零售價應該是 1,234,567：' + prices.join());
 
   // 透過前端同一條路徑(google.script.run)改資料：新增車型 DQ
   await page.evaluate(() => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail)
