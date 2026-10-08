@@ -227,6 +227,17 @@ function migrateDataModel_(materializeCharts) {
       row.LineID = lineIdOf_(row.VehicleTypeID, row.LineCode);
       changed = true;
     }
+    // 以前存進去的 -a^b、a^b^c(現在要加括號)：照原本的算法補上括號，數字不變
+    var clear = clarifyPowerFormula_(row.Formula);
+    if (clear !== row.Formula) { row.Formula = clear; changed = true; }
+    if (row.VehicleFormulas && String(row.VehicleFormulas).indexOf('^') !== -1) {
+      var vf = parseVehicleFormulas_(row.VehicleFormulas), vfChanged = false;
+      Object.keys(vf).forEach(function (k) {
+        var c = clarifyPowerFormula_(vf[k]);
+        if (c !== vf[k]) { vf[k] = c; vfChanged = true; }
+      });
+      if (vfChanged) { row.VehicleFormulas = JSON.stringify(vf); changed = true; }
+    }
     if (!row.CalcType) {
       row.CalcType = lineCalcType_(r);
       if (row.CalcType === CALC_TYPES.FORMULA && !row.Formula) row.Formula = DEFAULT_FORMULAS[row.LineCode] || '';
@@ -257,6 +268,23 @@ function migrateDataModel_(materializeCharts) {
     getVehicleTypes().forEach(function (t) { ensureTypeChart_(t.VehicleTypeID); });
   }
   seedParamDefs_();
+}
+
+/**
+ * 舊公式裡的 -a^b、a^b^c：以前照「負號比次方晚算、次方由右往左」算，現在要加括號才能存。
+ * 照以前的算法補上括號(-(a^b)、a^(b^c))，算出來的數字跟以前一樣；其他公式原封不動。
+ */
+function clarifyPowerFormula_(formula) {
+  if (!formula || String(formula).indexOf('^') === -1 || inspectFormula_(formula).ok) return formula;
+  var ast;
+  try { ast = parseFormula_(formula, true); } catch (e) { return formula; }
+  var out = verifyPrintAst_(ast, {
+    codeName: function (c) { return c; },
+    refLabel: function (args) {
+      return 'REF(' + args.map(function (a) { return a.t === 'str' ? '"' + a.v + '"' : '?'; }).join(', ') + ')';
+    }
+  }, 'names');
+  return inspectFormula_(out).ok ? out : formula;
 }
 
 /** 整張表換成 rows(依 SCHEMA 欄序)。給一次性的資料升級用 */
