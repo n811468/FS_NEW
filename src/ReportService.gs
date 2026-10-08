@@ -101,15 +101,14 @@ function devByDepartment_(scenarioId) {
     var pct = isBaseline ? 0 : toNumber_(r.ChallengeReductionPct);
     var name = r.Department || '(未填部門)';
     if (!depts[name]) {
-      depts[name] = { Department: name, mold: 0, equip: 0, expense: 0, other: 0, total: 0, reduced: 0, notes: [] };
+      depts[name] = { Department: name, mold: 0, equip: 0, expense: 0, other: 0, total: 0, reduced: 0, red: { mold: 0, equip: 0, expense: 0, other: 0 }, notes: [] };
       order.push(name);
     }
     var d = depts[name];
     var cat = categoryOf[target] || '';
-    if (cat === '模具') d.mold += amount;
-    else if (cat === '設備') d.equip += amount;
-    else if (cat === '費用') d.expense += amount;
-    else d.other += amount;
+    var key = cat === '模具' ? 'mold' : cat === '設備' ? 'equip' : cat === '費用' ? 'expense' : 'other';
+    d[key] += amount;
+    d.red[key] += amount * (1 - pct / 100);
     d.total += amount;
     d.reduced += amount * (1 - pct / 100);
     if (r.Notes) d.notes.push(String(r.Notes));
@@ -123,11 +122,32 @@ function devByDepartment_(scenarioId) {
     return d;
   });
   var sum = function (f) { return rows.reduce(function (s, r) { return s + r[f]; }, 0); };
+  var sumRed = function (f) { return rows.reduce(function (s, r) { return s + r.red[f]; }, 0); };
   return {
     rows: rows,
-    total: { mold: sum('mold'), equip: sum('equip'), expense: sum('expense'), other: sum('other'), total: sum('total'), reduced: sum('reduced') },
+    total: {
+      mold: sum('mold'), equip: sum('equip'), expense: sum('expense'), other: sum('other'), total: sum('total'), reduced: sum('reduced'),
+      red: { mold: sumRed('mold'), equip: sumRed('equip'), expense: sumRed('expense'), other: sumRed('other') }
+    },
     lifeCycleUnits: getLifeCycleUnits(scenarioId)
   };
+}
+
+/**
+ * 開發總投比較：幾個情境(可以跨車型)的部門彙總並排，部門用名稱對應。
+ * 現況情境不套低減(低減後 = 原始)，跟損益表的算法一致。情境快照沒有開發總投明細，略過。
+ */
+function getDevComparison(scenarioIds) {
+  var scenarios = getScenarios();
+  return (scenarioIds || []).map(function (id) {
+    if (isSnapshotId_(id)) return null;
+    var s = scenarios.filter(function (r) { return r.ScenarioID === id; })[0];
+    if (!s) return null;
+    return {
+      ScenarioID: id, VehicleTypeID: s.VehicleTypeID, Gate: s.Gate || '', ScenarioName: s.ScenarioName || '',
+      ScenarioType: s.ScenarioType || '', isBaseline: isBaselineScenario_(id), dev: devByDepartment_(id)
+    };
+  }).filter(function (x) { return x; });
 }
 
 /**
