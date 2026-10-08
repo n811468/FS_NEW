@@ -891,6 +891,48 @@
   .dev-legend .sw.red { background: #f1f8f4; } .dev-legend .sw.dirty { background: #fff3c4; }
   .dev-legend .tri { width: 0; height: 0; border-style: solid; border-width: 0 9px 9px 0; border-color: transparent var(--primary) transparent transparent; display: inline-block; }
   .dev-list tbody tr:hover td { background: var(--primary-weak); }
+  /* 開發總投比較 */
+  .dcmp-cols { padding: 10px 14px; margin-bottom: 12px; }
+  .dcmp-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .dcmp-row .h { font-size: 13px; }
+  .dcmp-chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+  .dcmp-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); background: var(--surface); border-radius: 999px; padding: 3px 6px 3px 2px; font-size: 13px; }
+  .dcmp-chip.base { border-color: var(--primary); background: var(--primary-weak); }
+  .dcmp-chip .t { display: inline-flex; flex-direction: column; line-height: 1.15; padding: 0 2px; font-weight: 600; }
+  .dcmp-chip .t small { font-size: 10.5px; color: var(--muted); font-weight: 500; }
+  .dcmp-chip .star, .dcmp-chip .x { all: unset; cursor: pointer; padding: 0 4px; color: var(--muted); font-size: 14px; }
+  .dcmp-chip.base .star { color: #d69e2e; }
+  .dcmp-chip .star:hover { color: #d69e2e; } .dcmp-chip .x:hover { color: var(--danger); }
+  .dcmp-chip .tag { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); }
+  .dcmp-chip .tag.tgt { background: #f1f8f4; color: #17714a; }
+  .dcmp-chip .drag-handle { opacity: .45; }
+  .dcmp-add { display: inline-flex; gap: 6px; align-items: center; }
+  .dcmp-add select { width: auto; max-width: 180px; }
+  .dcmp-opts .lbl { font-size: 12px; color: var(--muted); margin-left: 4px; }
+  .dcmp-filter { position: relative; }
+  .dcmp-filter summary { list-style: none; }
+  .dcmp-filter summary::-webkit-details-marker { display: none; }
+  .dcmp-filter .pop { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-2, 0 8px 24px rgba(16,27,51,.18)); padding: 8px 12px; display: grid; gap: 6px; min-width: 180px; max-height: 320px; overflow: auto; }
+  .dcmp-filter .pop label { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--text); white-space: nowrap; cursor: pointer; }
+  .dcmp-wrap { max-height: none; }
+  .dcmp-table thead th { text-align: right; line-height: 1.25; height: auto; padding: 6px 10px; }
+  .dcmp-table thead th small { display: block; font-size: 10.5px; color: var(--muted); font-weight: 500; }
+  .dcmp-table thead th.base { background: var(--primary-weak); }
+  .dcmp-table thead th.c-dept { text-align: left; }
+  .dcmp-table td.c-dept { padding: 0 12px; font-weight: 600; white-space: nowrap; }
+  .dcmp-table td.num { padding: 0 10px; min-width: 110px; }
+  .dcmp-table td.base { background: #f7f9ff; }
+  .dcmp-table td.dlt, .dcmp-table th.dlt { min-width: 96px; border-right: 2px solid #dfe3ec; }
+  .dcmp-table td.dlt small { font-size: 10.5px; color: var(--muted); margin-right: 6px; font-weight: 500; }
+  .dcmp-table tr.sub td { height: 30px; font-size: 12.5px; color: var(--text-2); }
+  .dcmp-table tr.sub td.c-dept { padding-left: 30px; font-weight: 400; }
+  .dcmp-table tr.grp td { border-top: 1px solid #dfe3ec; }
+  .dcmp-table tfoot td { position: static; }
+  .dcmp-table tfoot tr.kpi td, .dcmp-table tfoot tr.part td { font-weight: 500; background: var(--surface-2); border-top: 0; height: 32px; }
+  .dcmp-table tfoot tr.split td { height: 28px; font-size: 12px; }
+  .dcmp-table tfoot tr.split td.c-dept { padding-left: 26px; color: var(--text-2); }
+  .dcmp-table tfoot tr.part td { font-weight: 600; border-top: 1px solid var(--border-strong); }
+  .dev-legend .sw.good { background: var(--success-weak); } .dev-legend .sw.bad { background: var(--danger-weak); }
   .dev-drawer-bg { position: fixed; inset: 0; background: rgba(16, 27, 51, .32); z-index: 55; }
   .dev-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100%); background: var(--surface); z-index: 56; display: flex; flex-direction: column; box-shadow: -10px 0 30px -12px rgba(16, 27, 51, .4); }
   @media (prefers-reduced-motion: no-preference) { .dev-drawer { animation: devSlide .16s ease-out; } @keyframes devSlide { from { transform: translateX(24px); } } }
@@ -5906,15 +5948,14 @@ function devByDepartment_(scenarioId) {
     var pct = isBaseline ? 0 : toNumber_(r.ChallengeReductionPct);
     var name = r.Department || '(未填部門)';
     if (!depts[name]) {
-      depts[name] = { Department: name, mold: 0, equip: 0, expense: 0, other: 0, total: 0, reduced: 0, notes: [] };
+      depts[name] = { Department: name, mold: 0, equip: 0, expense: 0, other: 0, total: 0, reduced: 0, red: { mold: 0, equip: 0, expense: 0, other: 0 }, notes: [] };
       order.push(name);
     }
     var d = depts[name];
     var cat = categoryOf[target] || '';
-    if (cat === '模具') d.mold += amount;
-    else if (cat === '設備') d.equip += amount;
-    else if (cat === '費用') d.expense += amount;
-    else d.other += amount;
+    var key = cat === '模具' ? 'mold' : cat === '設備' ? 'equip' : cat === '費用' ? 'expense' : 'other';
+    d[key] += amount;
+    d.red[key] += amount * (1 - pct / 100);
     d.total += amount;
     d.reduced += amount * (1 - pct / 100);
     if (r.Notes) d.notes.push(String(r.Notes));
@@ -5928,11 +5969,32 @@ function devByDepartment_(scenarioId) {
     return d;
   });
   var sum = function (f) { return rows.reduce(function (s, r) { return s + r[f]; }, 0); };
+  var sumRed = function (f) { return rows.reduce(function (s, r) { return s + r.red[f]; }, 0); };
   return {
     rows: rows,
-    total: { mold: sum('mold'), equip: sum('equip'), expense: sum('expense'), other: sum('other'), total: sum('total'), reduced: sum('reduced') },
+    total: {
+      mold: sum('mold'), equip: sum('equip'), expense: sum('expense'), other: sum('other'), total: sum('total'), reduced: sum('reduced'),
+      red: { mold: sumRed('mold'), equip: sumRed('equip'), expense: sumRed('expense'), other: sumRed('other') }
+    },
     lifeCycleUnits: getLifeCycleUnits(scenarioId)
   };
+}
+
+/**
+ * 開發總投比較：幾個情境(可以跨車型)的部門彙總並排，部門用名稱對應。
+ * 現況情境不套低減(低減後 = 原始)，跟損益表的算法一致。情境快照沒有開發總投明細，略過。
+ */
+function getDevComparison(scenarioIds) {
+  var scenarios = getScenarios();
+  return (scenarioIds || []).map(function (id) {
+    if (isSnapshotId_(id)) return null;
+    var s = scenarios.filter(function (r) { return r.ScenarioID === id; })[0];
+    if (!s) return null;
+    return {
+      ScenarioID: id, VehicleTypeID: s.VehicleTypeID, Gate: s.Gate || '', ScenarioName: s.ScenarioName || '',
+      ScenarioType: s.ScenarioType || '', isBaseline: isBaselineScenario_(id), dev: devByDepartment_(id)
+    };
+  }).filter(function (x) { return x; });
 }
 
 /**
@@ -6919,7 +6981,7 @@ function reportMaintenance_(message) {
 }
 
   return {
-    fns: { getSheet_: getSheet_, validateCode_: validateCode_, sheetExists_: sheetExists_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, deleteScenarioData_: deleteScenarioData_, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, updateSnapshots_: updateSnapshots_, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, assertUniqueScenarioNames_: assertUniqueScenarioNames_, codifyAllRefScenarios_: codifyAllRefScenarios_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, codifyRefScenarios_: codifyRefScenarios_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, validateLineName_: validateLineName_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, isDevDeptNote_: isDevDeptNote_, getDevDeptNotes: getDevDeptNotes, saveDevDeptNotes_: saveDevDeptNotes_, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, resolveRefScenario_: resolveRefScenario_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, snapshotReportBlock_: snapshotReportBlock_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, metricGoodDir_: metricGoodDir_, solveGoalPlan: solveGoalPlan, devCutTotals_: devCutTotals_, adjustedValue_: adjustedValue_, plSnapshot_: plSnapshot_, simulateAdjustments: simulateAdjustments, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
+    fns: { getSheet_: getSheet_, validateCode_: validateCode_, sheetExists_: sheetExists_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, deleteScenarioData_: deleteScenarioData_, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, updateSnapshots_: updateSnapshots_, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, assertUniqueScenarioNames_: assertUniqueScenarioNames_, codifyAllRefScenarios_: codifyAllRefScenarios_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, codifyRefScenarios_: codifyRefScenarios_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, validateLineName_: validateLineName_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, isDevDeptNote_: isDevDeptNote_, getDevDeptNotes: getDevDeptNotes, saveDevDeptNotes_: saveDevDeptNotes_, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, resolveRefScenario_: resolveRefScenario_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, snapshotReportBlock_: snapshotReportBlock_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getDevComparison: getDevComparison, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, metricGoodDir_: metricGoodDir_, solveGoalPlan: solveGoalPlan, devCutTotals_: devCutTotals_, adjustedValue_: adjustedValue_, plSnapshot_: plSnapshot_, simulateAdjustments: simulateAdjustments, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_ },
     consts: { SCHEMA: SCHEMA, TEXT_COLUMNS: TEXT_COLUMNS, PL_LINE_ITEMS: PL_LINE_ITEMS, LINE_CODE_PREFIX: LINE_CODE_PREFIX, DEFAULT_PARAMS: DEFAULT_PARAMS },
     // 模擬 Apps Script「每次 google.script.run 都是全新執行」：單次執行內的快取要清掉
     beginExecution: function () { SHEET_CACHE_ = {}; resetCalcMemo_(); LOCK_DEPTH_ = 0; }
@@ -9568,7 +9630,7 @@ function saveFxGrid() {
 let devRows = [];
 let devSummary = null;
 let devNotes = {};             // { 部門: 說明 }
-let devView_ = 'sum';          // sum = 部門彙總、list = 每一筆明細
+let devView_ = 'sum';          // sum = 部門彙總、list = 每一筆明細、cmp = 跟其他情境比較(23-devcompare.js)
 const devChanged_ = new Set(); // 改過還沒存的格子：部門|模具、部門|pct、部門|note…
 let devDrawer_ = null;         // 右側面板 { dept, split }
 const DEV_COLS_ = ['模具', '設備', '費用'];   // 跟 Excel 一樣的欄位順序
@@ -9577,6 +9639,7 @@ const DEV_ASSET_ = ['模具', '設備'];
 function renderDevInvestmentPanel() {
   if (!requireScope('devinvestment', true)) return;
   closeDevDrawer_(true);
+  devCmpOptions_ = null;   // 情境可能剛新增/刪除，比較欄位的選項重拿
   document.getElementById('panel-devinvestment').innerHTML = gridShell('devinvestment', '開發總投',
     '一個部門一列，跟 Excel 一樣左邊投資金額、右邊低減後。<b>點格子直接改</b>（Enter 往下一格）；' +
     '<b>點部門名稱</b>看每一筆、改攤提落點、分攤車系與說明。右上角有小三角的格子有好幾筆或外幣，也要點進去改。拖曳 ⠿ 調整部門順序。');
@@ -9677,8 +9740,16 @@ function drawDevGrid() {
     return k === undefined ? '' : k;
   })();
   const prevAll = val('dev-all-pct');
+  const seg = `<div class="seg">${[['sum', '部門彙總'], ['list', '每一筆明細'], ['cmp', '比較']].map(([k, label]) =>
+    `<button type="button" class="seg-btn${devView_ === k ? ' active' : ''}" onclick="devView_='${k}';drawDevGrid()">${label}</button>`).join('')}</div>`;
+  if (devView_ === 'cmp') {
+    closeDevDrawer_(true);
+    toolbar.innerHTML = `${seg}<span class="muted">現況 vs 目標、前回 vs 本回、跨車型：一個部門一列並排，每一欄跟 ★ 基準比。</span>`;
+    drawDevCompare_();
+    return;
+  }
   toolbar.innerHTML = `
-    <div class="seg"><button type="button" class="seg-btn${devView_ === 'sum' ? ' active' : ''}" onclick="devView_='sum';drawDevGrid()">部門彙總</button><button type="button" class="seg-btn${devView_ === 'list' ? ' active' : ''}" onclick="devView_='list';drawDevGrid()">每一筆明細</button></div>
+    ${seg}
     ${target ? `<span class="dev-allpct">統一低減目標 <input id="dev-all-pct" type="text" inputmode="decimal" value="${esc(prevAll !== '' ? prevAll : commonPct)}" placeholder="例 10"> % <button type="button" class="btn secondary sm" onclick="devApplyAll_()">套用到全部部門</button></span>` : ''}
     <span class="spacer"></span>
     <button type="button" class="btn secondary" onclick="openDevPaste_()">從 Excel 貼上…</button>
@@ -10280,6 +10351,347 @@ function devApplyPaste_() {
   drawDevGrid();
   toast('已套用，檢查一下標黃色的格子，再按儲存', 'ok', 3500);
   return true;
+}
+
+/* ===== src/ui/23-devcompare.js ===== */
+/* ================= 開發總投比較 =================
+ * 開發總投頁工具列的第三個檢視：幾個情境(現況 vs 目標、前回 vs 本回、跨車型)的開發總投並排，
+ * 一個部門一列，用部門名稱對應；每個比較欄位後面接一欄「與基準的差異」。
+ *   數值：原始投資 / 低減後 / 低減% / 單台攤提
+ *   列：部門 / 部門 × 大類 / 大類
+ * 單台攤提的差異拆成「投資金額影響」與「攤提台數影響」，下方瀑布圖看 基準 → 各部門增減 → 比較欄。
+ * 比較用的是已儲存的數字；比較欄位、顯示選項記在瀏覽器。
+ */
+const DEV_CMP_KEY_ = 'plApp.devCompare.v1';
+const DEV_CMP_CATS_ = [['mold', '模具'], ['equip', '設備'], ['expense', '費用'], ['other', '其他']];
+const DEV_CMP_VALUES_ = [['total', '原始投資'], ['reduced', '低減後'], ['pct', '低減 %'], ['unit', '單台攤提']];
+const DEV_CMP_ROWS_ = [['dept', '部門'], ['deptcat', '部門 × 大類'], ['cat', '大類']];
+let devCmp_ = null;            // { cols: [ScenarioID], base, value, rows, hide: [部門], wfCol }
+let devCmpData_ = null;        // getDevComparison 的結果
+let devCmpOptions_ = null;     // 車型 → 情境(不含快照)
+let devCmpDraft_ = { type: '', scenario: '' };
+
+function devCmpLoadPrefs_() {
+  if (devCmp_) return;
+  devCmp_ = { cols: [], base: '', value: 'reduced', rows: 'dept', hide: [], wfCol: '' };
+  try {
+    const p = JSON.parse(localStorage.getItem(DEV_CMP_KEY_) || 'null');
+    if (p && typeof p === 'object') {
+      if (Array.isArray(p.cols)) devCmp_.cols = p.cols.filter(x => typeof x === 'string');
+      if (DEV_CMP_VALUES_.some(v => v[0] === p.value)) devCmp_.value = p.value;
+      if (DEV_CMP_ROWS_.some(v => v[0] === p.rows)) devCmp_.rows = p.rows;
+      if (Array.isArray(p.hide)) devCmp_.hide = p.hide.map(String);
+      devCmp_.base = String(p.base || '');
+    }
+  } catch (e) { /* 讀不到就用預設 */ }
+}
+function devCmpSavePrefs_() {
+  try { localStorage.setItem(DEV_CMP_KEY_, JSON.stringify(devCmp_)); } catch (e) { /* 存不了就算了 */ }
+}
+
+/** 進比較檢視：先拿情境清單(整理預設欄位)，再跟後端要各欄的部門彙總 */
+function drawDevCompare_() {
+  devCmpLoadPrefs_();
+  amountUnit = loadAmountUnit_(amountUnit);
+  const grid = document.getElementById('grid-devinvestment');
+  if (!devCmpOptions_) {
+    grid.innerHTML = '<p class="muted">載入中…</p>';
+    google.script.run
+      .withSuccessHandler(safeHandler(options => {
+        devCmpOptions_ = (options || []).map(t => ({ VehicleTypeID: t.VehicleTypeID, scenarios: t.scenarios.filter(s => !s.isSnapshot) }));
+        devCmpFetch_();
+      }))
+      .withFailureHandler(showGlobalError)
+      .getComparisonOptions();
+    return;
+  }
+  devCmpFetch_();
+}
+function devCmpScenario_(id) {
+  for (const t of devCmpOptions_ || []) {
+    const s = t.scenarios.find(x => x.ScenarioID === id);
+    if (s) return Object.assign({ VehicleTypeID: t.VehicleTypeID }, s);
+  }
+  return null;
+}
+function devCmpIsBaseline_(s) { return !s.ScenarioType || s.ScenarioType === '現況'; }
+function devCmpFetch_() {
+  devCmp_.cols = devCmp_.cols.filter((id, i, a) => devCmpScenario_(id) && a.indexOf(id) === i);
+  // 目前的情境一定看得到；第一次用時順便放同車型的現況當基準(現況 vs 目標)
+  if (currentScenarioId && devCmp_.cols.indexOf(currentScenarioId) === -1) {
+    if (!devCmp_.cols.length) {
+      const cur = devCmpScenario_(currentScenarioId);
+      const type = cur && devCmpOptions_.find(t => t.VehicleTypeID === cur.VehicleTypeID);
+      const baseline = cur && !devCmpIsBaseline_(cur) && type ? type.scenarios.find(devCmpIsBaseline_) : null;
+      if (baseline) devCmp_.cols.push(baseline.ScenarioID);
+    }
+    devCmp_.cols.push(currentScenarioId);
+  }
+  if (devCmp_.cols.indexOf(devCmp_.base) === -1) devCmp_.base = devCmp_.cols[0] || '';
+  devCmpSavePrefs_();
+  google.script.run
+    .withSuccessHandler(safeHandler(data => {
+      devCmpData_ = data || [];
+      if (devView_ === 'cmp') devCmpRender_();
+    }))
+    .withFailureHandler(showGlobalError)
+    .getDevComparison(devCmp_.cols);
+}
+
+/* ---------- 數字 ---------- */
+function devCmpColLabel_(c) { return [c.Gate, c.ScenarioName].filter(x => x).join(' ') || c.ScenarioID; }
+/** 某一欄、某部門(null = 全部)、某大類(null = 全部)在目前「數值」下的值；這一欄沒有這個部門回傳 null */
+function devCmpValue_(col, dept, cat, mode) {
+  mode = mode || devCmp_.value;
+  const D = col.dev;
+  let rows;
+  if (dept === null) rows = D.rows;
+  else if (Array.isArray(dept)) rows = D.rows.filter(r => dept.indexOf(r.Department) !== -1);
+  else rows = D.rows.filter(r => r.Department === dept);
+  if (!rows.length) return null;
+  const amt = (r, reduced) => cat ? (reduced ? r.red[cat] : r[cat]) : (reduced ? r.reduced : r.total);
+  const total = rows.reduce((s, r) => s + amt(r, false), 0);
+  const reduced = rows.reduce((s, r) => s + amt(r, true), 0);
+  if (mode === 'total') return total;
+  if (mode === 'reduced') return reduced;
+  if (mode === 'pct') return total ? (1 - reduced / total) * 100 : null;
+  return num(D.lifeCycleUnits) ? reduced / num(D.lifeCycleUnits) : null;
+}
+/** 數值越小越好(金額、單台)；低減% 越大越好 */
+function devCmpLowerBetter_(mode) { return (mode || devCmp_.value) !== 'pct'; }
+function devCmpFmt_(v, mode) {
+  mode = mode || devCmp_.value;
+  if (v === null || v === undefined) return '<span class="muted">—</span>';
+  if (mode === 'pct') return devPctText_(v) + '%';
+  if (mode === 'unit') return fmt(v);
+  return fmt(v / amountUnit, amountUnitDigits_(amountUnit));
+}
+function devCmpDeltaHtml_(v, b, mode) {
+  mode = mode || devCmp_.value;
+  if (v === null && b === null) return '<td class="num dlt"></td>';
+  const d = (v || 0) - (b || 0);
+  const shown = mode === 'pct' ? Math.round(d * 100) / 100 : mode === 'unit' ? Math.round(d) : d / amountUnit;
+  if (Math.abs(shown) < (mode === 'pct' ? 0.005 : amountUnit === 1 || mode === 'unit' ? 0.5 : 0.05)) return '<td class="num dlt muted">0</td>';
+  const good = devCmpLowerBetter_(mode) ? d < 0 : d > 0;
+  const text = mode === 'pct' ? devPctText_(Math.abs(d)) + ' pt' : mode === 'unit' ? fmt(Math.abs(d)) : fmt(Math.abs(d) / amountUnit, amountUnitDigits_(amountUnit));
+  const rel = mode !== 'pct' && b ? `（${d > 0 ? '+' : '−'}${pct1_(Math.abs(d / b * 100))}%）` : '';
+  const tag = v === null ? '<small>沒有這個部門</small>' : b === null ? '<small>新增</small>' : '';
+  return `<td class="num dlt ${good ? 'good' : 'bad'}" data-tip="${esc((d > 0 ? '+' : '−') + text + rel)}">${tag}${d > 0 ? '+' : '−'}${text}</td>`;
+}
+
+/** 部門清單：各欄的部門依出現順序合起來(基準欄的順序優先) */
+function devCmpDepts_(cols, baseCol) {
+  const out = [];
+  [baseCol].concat(cols).forEach(c => { if (c) c.dev.rows.forEach(r => { if (out.indexOf(r.Department) === -1) out.push(r.Department); }); });
+  return out;
+}
+
+/* ---------- 畫面 ---------- */
+function devCmpRender_() {
+  const grid = document.getElementById('grid-devinvestment');
+  if (!grid) return;
+  const byId = {};
+  devCmpData_.forEach(c => { byId[c.ScenarioID] = c; });
+  const cols = devCmp_.cols.map(id => byId[id]).filter(x => x);
+  const baseCol = byId[devCmp_.base] || cols[0] || null;
+  const depts = devCmpDepts_(cols, baseCol);
+  const shown = depts.filter(d => devCmp_.hide.indexOf(d) === -1);
+  const types = cols.map(c => c.VehicleTypeID).filter((t, i, a) => a.indexOf(t) === i);
+
+  grid.innerHTML = `
+    ${isDirty_() ? '<div class="callout warn">這一頁還有沒儲存的修改；比較用的是已儲存的數字，儲存後再回來看。</div>' : ''}
+    ${devCmpColsCardHtml_(cols, baseCol)}
+    ${cols.length ? `
+    <div class="toolbar dcmp-opts">
+      <span class="lbl">數值</span>${devCmpSegHtml_(DEV_CMP_VALUES_, devCmp_.value, 'value')}
+      <span class="lbl">列</span>${devCmpSegHtml_(DEV_CMP_ROWS_, devCmp_.rows, 'rows')}
+      ${devCmp_.rows !== 'cat' ? devCmpDeptFilterHtml_(depts) : ''}
+      <span class="spacer"></span>
+      ${devCmp_.value === 'unit' ? '<span class="muted">單位：元/台</span>' : `<span class="lbl">單位</span>${devCmpSegHtml_(AMOUNT_UNITS_.map(u => [u[0], u[1]]), amountUnit, 'unit')}`}
+      <button type="button" class="btn secondary sm" onclick="copyReportTable('dcmp-table')">複製表格</button>
+    </div>
+    ${types.length > 1 ? `<p class="help">跨車型比較：部門用名稱對應，同一個部門在不同車型寫法不同（例：試驗部／試驗課）會分成兩列。</p>` : ''}
+    ${devCmpTableHtml_(cols, baseCol, depts, shown)}
+    ${devCmpWaterfallHtml_(cols, baseCol, depts, shown)}` : ''}`;
+  makeSortable(document.getElementById('dcmp-chips'), {
+    items: '.dcmp-chip',
+    onEnd: keys => { devCmp_.cols = keys; devCmpSavePrefs_(); devCmpRender_(); }
+  });
+}
+function devCmpSegHtml_(items, cur, field) {
+  return `<div class="seg">${items.map(([k, label]) =>
+    `<button type="button" class="seg-btn${String(k) === String(cur) ? ' active' : ''}" onclick="devCmpSet_('${field}', '${k}')">${label}</button>`).join('')}</div>`;
+}
+function devCmpSet_(field, v) {
+  if (field === 'unit') { amountUnit = normAmountUnit_(v); saveAmountUnit_(amountUnit); }
+  else devCmp_[field] = v;
+  devCmpSavePrefs_();
+  devCmpRender_();
+}
+
+/** 比較欄位：一個情境一個標籤，★ = 基準；下方選車型 + 情境加入 */
+function devCmpColsCardHtml_(cols, baseCol) {
+  if (!devCmpDraft_.type || !devCmpOptions_.some(t => t.VehicleTypeID === devCmpDraft_.type)) devCmpDraft_.type = currentVehicleTypeId || (devCmpOptions_[0] || {}).VehicleTypeID || '';
+  const type = devCmpOptions_.find(t => t.VehicleTypeID === devCmpDraft_.type);
+  const free = type ? type.scenarios.filter(s => devCmp_.cols.indexOf(s.ScenarioID) === -1) : [];
+  if (!free.some(s => s.ScenarioID === devCmpDraft_.scenario)) devCmpDraft_.scenario = free[0] ? free[0].ScenarioID : '';
+  const chips = cols.map(c => {
+    const isBase = baseCol && c.ScenarioID === baseCol.ScenarioID;
+    const js = devJs_(c.ScenarioID);
+    return `<span class="dcmp-chip${isBase ? ' base' : ''}" data-key="${esc(c.ScenarioID)}">
+      ${dragHandleHtml('拖曳調整欄位順序')}
+      <button type="button" class="star" onclick="devCmpSetBase_(${js})" data-tip="${isBase ? '這一欄是基準，差異都跟它比' : '設成基準'}">${isBase ? '★' : '☆'}</button>
+      <span class="t"><small>${esc(c.VehicleTypeID)}</small>${esc(devCmpColLabel_(c))}</span>
+      ${c.isBaseline ? '<em class="tag">現況</em>' : '<em class="tag tgt">目標</em>'}
+      <button type="button" class="x" onclick="devCmpRemove_(${js})" data-tip="移除這一欄">✕</button>
+    </span>`;
+  }).join('');
+  return `<div class="card dcmp-cols">
+    <div class="dcmp-row">
+      <b class="h">比較欄位</b>
+      <div class="dcmp-chips" id="dcmp-chips">${chips || '<span class="muted">還沒有比較欄位，從右邊加入。</span>'}</div>
+      <span class="dcmp-add">
+        <select onchange="devCmpDraft_.type=this.value;devCmpDraft_.scenario='';devCmpRender_()">${devCmpOptions_.map(t => `<option value="${esc(t.VehicleTypeID)}"${t.VehicleTypeID === devCmpDraft_.type ? ' selected' : ''}>${esc(t.VehicleTypeID)}</option>`).join('')}</select>
+        <select onchange="devCmpDraft_.scenario=this.value" ${free.length ? '' : 'disabled'}>${free.map(s => `<option value="${esc(s.ScenarioID)}"${s.ScenarioID === devCmpDraft_.scenario ? ' selected' : ''}>${esc(scenarioLabel(s))}</option>`).join('') || '<option>（都加入了）</option>'}</select>
+        <button type="button" class="btn sm" ${free.length ? '' : 'disabled'} onclick="devCmpAdd_()">＋ 加入</button>
+      </span>
+    </div>
+  </div>`;
+}
+function devCmpAdd_() {
+  if (!devCmpDraft_.scenario) return;
+  devCmp_.cols.push(devCmpDraft_.scenario);
+  devCmpDraft_.scenario = '';
+  devCmpFetch_();
+}
+function devCmpRemove_(id) {
+  devCmp_.cols = devCmp_.cols.filter(x => x !== id);
+  if (devCmp_.base === id) devCmp_.base = devCmp_.cols[0] || '';
+  devCmpSavePrefs_();
+  devCmpRender_();
+}
+function devCmpSetBase_(id) { devCmp_.base = id; devCmpSavePrefs_(); devCmpRender_(); }
+
+/** 只比某幾個部門：勾掉的部門不列出來，合計另外有「勾選部門小計」 */
+function devCmpDeptFilterHtml_(depts) {
+  const hidden = depts.filter(d => devCmp_.hide.indexOf(d) !== -1).length;
+  return `<details class="dcmp-filter"><summary class="btn secondary sm">部門：${hidden ? `${depts.length - hidden} / ${depts.length}` : '全部'} ▾</summary>
+    <div class="pop">
+      <label><input type="checkbox" ${hidden ? '' : 'checked'} onchange="devCmpHideAll_(!this.checked)"> <b>全部</b></label>
+      ${depts.map(d => `<label><input type="checkbox" ${devCmp_.hide.indexOf(d) === -1 ? 'checked' : ''} onchange="devCmpToggleDept_(${devJs_(d)}, this.checked)"> ${esc(devDeptLabel_(d))}</label>`).join('')}
+    </div></details>`;
+}
+function devCmpToggleDept_(d, on) {
+  devCmp_.hide = devCmp_.hide.filter(x => x !== d);
+  if (!on) devCmp_.hide.push(d);
+  devCmpSavePrefs_();
+  devCmpRender_();
+  const f = document.querySelector('.dcmp-filter');
+  if (f) f.open = true;
+}
+function devCmpHideAll_(hide) {
+  const byId = {};
+  devCmpData_.forEach(c => { byId[c.ScenarioID] = c; });
+  devCmp_.hide = hide ? devCmpDepts_(devCmp_.cols.map(id => byId[id]).filter(x => x), byId[devCmp_.base]) : [];
+  devCmpSavePrefs_();
+  devCmpRender_();
+  const f = document.querySelector('.dcmp-filter');
+  if (f) f.open = true;
+}
+
+function devCmpTableHtml_(cols, baseCol, depts, shown) {
+  const mode = devCmp_.value;
+  const others = cols.filter(c => c !== baseCol);
+  const ordered = [baseCol].concat(others);
+  const head = `<thead><tr><th class="c-dept">${devCmp_.rows === 'cat' ? '大類' : '部門'}</th>${ordered.map(c => {
+    const isBase = c === baseCol;
+    return `<th class="${isBase ? 'base' : ''}"><small>${esc(c.VehicleTypeID)}${isBase ? ' · 基準' : ''}</small>${esc(devCmpColLabel_(c))}</th>${isBase ? '' : '<th class="dlt">差異</th>'}`;
+  }).join('')}</tr></thead>`;
+  const cells = (dept, cat, m) => {
+    const b = devCmpValue_(baseCol, dept, cat, m);
+    return `<td class="num base">${devCmpFmt_(b, m)}</td>` + others.map(c => {
+      const v = devCmpValue_(c, dept, cat, m);
+      return `<td class="num">${devCmpFmt_(v, m)}</td>${devCmpDeltaHtml_(v, b, m)}`;
+    }).join('');
+  };
+  const usedCats = DEV_CMP_CATS_.filter(([k]) => ordered.some(c => c.dev.total[k]));
+  let body = '';
+  if (devCmp_.rows === 'cat') {
+    body = usedCats.map(([k, label]) => `<tr><td class="c-dept">${label}</td>${cells(null, k)}</tr>`).join('');
+  } else {
+    shown.forEach(d => {
+      const note = ordered.map(c => { const r = c.dev.rows.find(x => x.Department === d); return r && r.notes ? `${devCmpColLabel_(c)}：${r.notes}` : ''; }).filter(x => x).join('\n');
+      body += `<tr class="${devCmp_.rows === 'deptcat' ? 'grp' : ''}"><td class="c-dept"${note ? ` data-tip="${esc(note)}"` : ''}>${esc(devDeptLabel_(d))}</td>${cells(d, null)}</tr>`;
+      if (devCmp_.rows === 'deptcat') {
+        usedCats.forEach(([k, label]) => {
+          const any = ordered.some(c => { const r = c.dev.rows.find(x => x.Department === d); return r && r[k]; });
+          if (any) body += `<tr class="sub"><td class="c-dept">${label}</td>${cells(d, k)}</tr>`;
+        });
+      }
+    });
+  }
+  if (!body) body = `<tr><td class="c-dept muted" colspan="${1 + ordered.length * 2}">沒有開發總投資料</td></tr>`;
+
+  // 合計、整體低減、攤提台數、單台攤提(差異拆成投資金額 / 攤提台數影響)
+  const filtered = devCmp_.rows !== 'cat' && shown.length < depts.length;
+  let foot = '';
+  if (filtered) foot += `<tr class="part"><td class="c-dept">勾選部門小計</td>${cells(shown, null)}</tr>`;
+  foot += `<tr class="total"><td class="c-dept">合計</td>${cells(null, null)}</tr>`;
+  if (mode !== 'pct') foot += `<tr class="kpi"><td class="c-dept">整體低減 %</td>${cells(null, null, 'pct')}</tr>`;
+  const units = c => num(c.dev.lifeCycleUnits);
+  foot += `<tr class="kpi"><td class="c-dept">攤提台數</td><td class="num base">${fmt(units(baseCol))}</td>${others.map(c => {
+    const d = units(c) - units(baseCol);
+    return `<td class="num">${fmt(units(c))}</td><td class="num dlt ${d ? (d > 0 ? 'good' : 'bad') : 'muted'}">${d ? (d > 0 ? '+' : '−') + fmt(Math.abs(d)) : '0'}</td>`;
+  }).join('')}</tr>`;
+  if (mode !== 'unit') foot += `<tr class="kpi"><td class="c-dept">單台攤提（元/台）</td>${cells(null, null, 'unit')}</tr>`;
+  // 單台 = 低減後 ÷ 台數；差異 = (R1 − R0) ÷ U0【投資金額】 + R1 × (1/U1 − 1/U0)【攤提台數】
+  const split = c => {
+    const R0 = baseCol.dev.total.reduced, R1 = c.dev.total.reduced, U0 = units(baseCol), U1 = units(c);
+    if (!U0 || !U1) return null;
+    return { amount: (R1 - R0) / U0, volume: R1 * (1 / U1 - 1 / U0) };
+  };
+  if (others.some(c => { const s = split(c); return s && Math.abs(s.volume) >= 0.5; })) {
+    [['amount', '└ 投資金額影響'], ['volume', '└ 攤提台數影響']].forEach(([k, label]) => {
+      foot += `<tr class="kpi split"><td class="c-dept">${label}</td><td class="num base"></td>${others.map(c => {
+        const s = split(c);
+        return `<td class="num"></td>${s ? devCmpDeltaHtml_(s[k], 0, 'unit') : '<td class="num dlt"></td>'}`;
+      }).join('')}</tr>`;
+    });
+  }
+  return `<div class="dev-sheet-wrap dcmp-wrap"><table class="dev-sheet dcmp-table" id="dcmp-table">${head}<tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>
+    <div class="dev-legend"><span><i class="sw good"></i>對損益有利（投資、單台變少；低減% 變高）</span><span><i class="sw bad"></i>不利</span>
+      <span>— = 這一欄沒有這個部門</span>${devCmp_.rows !== 'cat' ? '<span>滑鼠移到部門名稱上看各欄的說明</span>' : ''}</div>`;
+}
+
+/** 基準合計 → 每個部門的增減 → 比較欄合計；勾掉的部門併成「其他部門」 */
+function devCmpWaterfallHtml_(cols, baseCol, depts, shown) {
+  const others = cols.filter(c => c !== baseCol);
+  if (!others.length || devCmp_.value === 'pct') return '';
+  const target = others.find(c => c.ScenarioID === devCmp_.wfCol) || others[others.length - 1];
+  const mode = devCmp_.value;
+  const unitMode = mode === 'unit';
+  const scale = v => unitMode ? v : v / amountUnit;
+  const steps = [{ label: devCmpColLabel_(baseCol), value: scale(devCmpValue_(baseCol, null, null) || 0), kind: 'total' }];
+  let rest = 0;
+  // 單台攤提：每個部門用自己欄的台數算，台數不同的部分另外一根
+  const pick = (c, d) => devCmpValue_(c, d, null, unitMode ? 'reduced' : mode) || 0;
+  const U0 = num(baseCol.dev.lifeCycleUnits), U1 = num(target.dev.lifeCycleUnits);
+  depts.forEach(d => {
+    const delta = unitMode ? (U0 ? (pick(target, d) - pick(baseCol, d)) / U0 : 0) : pick(target, d) - pick(baseCol, d);
+    if (shown.indexOf(d) === -1 || devCmp_.rows === 'cat') { rest += delta; return; }
+    if (Math.abs(delta) >= 0.5) steps.push({ label: devDeptLabel_(d), value: scale(delta), kind: 'delta' });
+  });
+  if (Math.abs(rest) >= 0.5) steps.push({ label: '其他部門', value: scale(rest), kind: 'delta' });
+  if (unitMode && U0 && U1 && U0 !== U1) steps.push({ label: '攤提台數', value: target.dev.total.reduced * (1 / U1 - 1 / U0), kind: 'delta' });
+  steps.push({ label: devCmpColLabel_(target), value: scale(devCmpValue_(target, null, null) || 0), kind: 'total' });
+  const unitText = unitMode ? '元/台' : amountUnitText_(amountUnit);
+  return `<div class="card" style="margin-top:14px;">
+    <div class="card-head"><h4>差在哪些部門</h4>
+      <span class="muted">${esc(devCmpColLabel_(baseCol))} →
+        <select onchange="devCmp_.wfCol=this.value;devCmpSavePrefs_();devCmpRender_()">${others.map(c => `<option value="${esc(c.ScenarioID)}"${c === target ? ' selected' : ''}>${esc(c.VehicleTypeID + ' ' + devCmpColLabel_(c))}</option>`).join('')}</select>
+        ，${DEV_CMP_VALUES_.find(v => v[0] === mode)[1]}（${unitText}）</span></div>
+    ${wfSvg_(steps, { width: 1100, height: 340, labels: true, lowerBetter: true, fmtV: v => unitMode ? fmt(v) : fmt(v, amountUnitDigits_(amountUnit)) })}
+  </div>`;
 }
 
 /* ===== src/ui/30-chart.js ===== */
@@ -11955,6 +12367,9 @@ function drawReport_() {
   loadWhatIfPrefs_();
   if (whatIfPrefs.sens.inReport) slides.push(slideHtml_(no(), '敏感度分析', `${esc(T.meta.label)}：兩項假設同時變動時的結果`, '<div id="rpt-sens"><p class="muted">計算中...</p></div>'));
   slides.push(slideHtml_(no(), '開發總投（by 部門）', `攤提台數 ${fmt(T.dev.lifeCycleUnits)} 台`, reportDevHtml_(), 'rpt-dev'));
+  if (B || (P && !P.isSnapshot)) slides.push(slideHtml_(no(), '開發總投比較（by 部門）',
+    [P && !P.isSnapshot ? `前回 ${esc(P.meta.label)}` : '', B ? `現況 ${esc(B.meta.label)}` : '', `本回 ${esc(T.meta.label)}`].filter(x => x).join(' → ') + '；金額 = 低減後，單位萬元',
+    reportDevCmpHtml_(), 'rpt-devcmp'));
   const errCodes = Object.keys(T.errors || {});
   body.innerHTML = (errCodes.length ? `<div class="callout err no-print">目標情境有公式錯誤（以 0 計）：${errCodes.map(c => esc(reportLineName_(c)) + '：' + esc(T.errors[c])).join('；')}</div>` : '') + slides.join('');
   const sensBox = document.getElementById('rpt-sens');
@@ -12317,6 +12732,51 @@ function reportDevHtml_() {
   <p class="help">總額 ${yi(T.total.total)} 億元（模具 ${yi(T.total.mold)}、設備 ${yi(T.total.equip)}、費用 ${yi(T.total.expense)}），低減後 ${yi(T.total.reduced)} 億元，
     以攤提台數 ${fmt(T.lifeCycleUnits)} 台分攤，單台 ${fmt(T.lifeCycleUnits ? T.total.reduced / T.lifeCycleUnits : 0)} 元/台。
     ${B ? `現況總額 ${yi(B.total.total)} 億元，差異 ${signed_((T.total.reduced - B.total.reduced) / 1e8, 2)} 億元。` : ''}</p>`;
+}
+
+/**
+ * 開發總投比較：部門用名稱對應，現況 / 前回 / 本回的低減後金額並排，本回另外列原始金額與挑戰低減%。
+ * 差異 = 本回 − 現況(或前回)，對損益來說負數 = 投資變少 = 有利(綠)。前回是情境快照時沒有開發總投明細，不列。
+ */
+function reportDevCmpHtml_() {
+  const R = reportData, T = R.target.dev, B = R.base ? R.base.dev : null;
+  const P = R.prev && !R.prev.isSnapshot ? R.prev.dev : null;
+  const depts = [];
+  [B, P, T].forEach(d => { if (d) d.rows.forEach(r => { if (depts.indexOf(r.Department) === -1) depts.push(r.Department); }); });
+  const row = (D, name) => D ? D.rows.find(r => r.Department === name) || null : null;
+  const w = v => v === null || v === undefined ? '—' : fmt(v / 1e4);
+  const dl = (a, b) => {
+    if (a === null && b === null) return '<td></td>';
+    const d = (a || 0) - (b || 0);
+    if (Math.abs(d) < 5000) return '<td class="muted">0</td>';
+    return `<td class="${d < 0 ? 'good' : 'bad'}">${signed_(d / 1e4, 0)}</td>`;
+  };
+  const cells = (get) => {
+    const p = P ? get(P) : null, b = B ? get(B) : null, t = get(T);
+    const tr = t ? t.reduced : null;
+    return (P ? `<td>${w(p && p.reduced)}</td>` : '') + (B ? `<td>${w(b && b.reduced)}</td>` : '') +
+      `<td>${w(t && t.total)}</td><td>${t && t.total ? devPctText_((1 - t.reduced / t.total) * 100) + '%' : ''}</td><td style="font-weight:700;">${w(tr)}</td>` +
+      (B ? dl(tr, b ? b.reduced : null) : '') + (P ? dl(tr, p ? p.reduced : null) : '');
+  };
+  const total = D => ({ total: D.total.total, reduced: D.total.reduced });
+  const unit = D => D && num(D.lifeCycleUnits) ? D.total.reduced / num(D.lifeCycleUnits) : null;
+  const unitRow = () => {
+    const p = unit(P), b = unit(B), t = unit(T);
+    const ud = (a, c) => a === null || c === null ? '<td></td>' : `<td class="${a - c < 0 ? 'good' : a - c > 0 ? 'bad' : 'muted'}">${Math.abs(a - c) < 0.5 ? '0' : signed_(a - c, 0)}</td>`;
+    return (P ? `<td>${p === null ? '—' : fmt(p)}</td>` : '') + (B ? `<td>${b === null ? '—' : fmt(b)}</td>` : '') +
+      `<td></td><td></td><td>${t === null ? '—' : fmt(t)}</td>` + (B ? ud(t, b) : '') + (P ? ud(t, p) : '');
+  };
+  const notes = name => { const r = row(T, name); return r && r.notes ? esc(r.notes) : ''; };
+  const R0 = R.target;
+  return `<div class="grid-scroll"><table class="rpt-table" id="rpt-devcmp">
+    <thead><tr><th style="text-align:left;">部門別</th>${P ? `<th>前回<br><small>${esc(R.prev.meta.label)}</small></th>` : ''}${B ? `<th>現況<br><small>${esc(R.base.meta.label)}</small></th>` : ''}
+      <th>本回 原始<br><small>${esc(R0.meta.label)}</small></th><th>挑戰低減%</th><th>本回 低減後</th>${B ? '<th>本回 − 現況</th>' : ''}${P ? '<th>本回 − 前回</th>' : ''}<th style="text-align:left;">說明（本回）</th></tr></thead>
+    <tbody>${depts.map(n => `<tr><td class="name">${esc(n)}</td>${cells(D => row(D, n))}<td class="note">${notes(n)}</td></tr>`).join('') ||
+      '<tr><td colspan="9" class="muted" style="text-align:center;">沒有開發總投資料</td></tr>'}</tbody>
+    <tfoot><tr class="subtotal"><td class="name">總計</td>${cells(total)}<td class="note"></td></tr>
+      <tr class="subtotal"><td class="name">單台攤提（元/台）</td>${unitRow()}<td class="note"></td></tr></tfoot>
+  </table></div>
+  ${R.prev && R.prev.isSnapshot ? '<p class="help">前回是情境快照，快照沒有開發總投明細，這張只比現況。</p>' : ''}`;
 }
 
 /* ---- 作法對帳：作法寫的效果，跟現況 → 目標的實際數字對得起來嗎？ ---- */

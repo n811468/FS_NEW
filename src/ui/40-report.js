@@ -210,6 +210,9 @@ function drawReport_() {
   loadWhatIfPrefs_();
   if (whatIfPrefs.sens.inReport) slides.push(slideHtml_(no(), '敏感度分析', `${esc(T.meta.label)}：兩項假設同時變動時的結果`, '<div id="rpt-sens"><p class="muted">計算中...</p></div>'));
   slides.push(slideHtml_(no(), '開發總投（by 部門）', `攤提台數 ${fmt(T.dev.lifeCycleUnits)} 台`, reportDevHtml_(), 'rpt-dev'));
+  if (B || (P && !P.isSnapshot)) slides.push(slideHtml_(no(), '開發總投比較（by 部門）',
+    [P && !P.isSnapshot ? `前回 ${esc(P.meta.label)}` : '', B ? `現況 ${esc(B.meta.label)}` : '', `本回 ${esc(T.meta.label)}`].filter(x => x).join(' → ') + '；金額 = 低減後，單位萬元',
+    reportDevCmpHtml_(), 'rpt-devcmp'));
   const errCodes = Object.keys(T.errors || {});
   body.innerHTML = (errCodes.length ? `<div class="callout err no-print">目標情境有公式錯誤（以 0 計）：${errCodes.map(c => esc(reportLineName_(c)) + '：' + esc(T.errors[c])).join('；')}</div>` : '') + slides.join('');
   const sensBox = document.getElementById('rpt-sens');
@@ -572,6 +575,51 @@ function reportDevHtml_() {
   <p class="help">總額 ${yi(T.total.total)} 億元（模具 ${yi(T.total.mold)}、設備 ${yi(T.total.equip)}、費用 ${yi(T.total.expense)}），低減後 ${yi(T.total.reduced)} 億元，
     以攤提台數 ${fmt(T.lifeCycleUnits)} 台分攤，單台 ${fmt(T.lifeCycleUnits ? T.total.reduced / T.lifeCycleUnits : 0)} 元/台。
     ${B ? `現況總額 ${yi(B.total.total)} 億元，差異 ${signed_((T.total.reduced - B.total.reduced) / 1e8, 2)} 億元。` : ''}</p>`;
+}
+
+/**
+ * 開發總投比較：部門用名稱對應，現況 / 前回 / 本回的低減後金額並排，本回另外列原始金額與挑戰低減%。
+ * 差異 = 本回 − 現況(或前回)，對損益來說負數 = 投資變少 = 有利(綠)。前回是情境快照時沒有開發總投明細，不列。
+ */
+function reportDevCmpHtml_() {
+  const R = reportData, T = R.target.dev, B = R.base ? R.base.dev : null;
+  const P = R.prev && !R.prev.isSnapshot ? R.prev.dev : null;
+  const depts = [];
+  [B, P, T].forEach(d => { if (d) d.rows.forEach(r => { if (depts.indexOf(r.Department) === -1) depts.push(r.Department); }); });
+  const row = (D, name) => D ? D.rows.find(r => r.Department === name) || null : null;
+  const w = v => v === null || v === undefined ? '—' : fmt(v / 1e4);
+  const dl = (a, b) => {
+    if (a === null && b === null) return '<td></td>';
+    const d = (a || 0) - (b || 0);
+    if (Math.abs(d) < 5000) return '<td class="muted">0</td>';
+    return `<td class="${d < 0 ? 'good' : 'bad'}">${signed_(d / 1e4, 0)}</td>`;
+  };
+  const cells = (get) => {
+    const p = P ? get(P) : null, b = B ? get(B) : null, t = get(T);
+    const tr = t ? t.reduced : null;
+    return (P ? `<td>${w(p && p.reduced)}</td>` : '') + (B ? `<td>${w(b && b.reduced)}</td>` : '') +
+      `<td>${w(t && t.total)}</td><td>${t && t.total ? devPctText_((1 - t.reduced / t.total) * 100) + '%' : ''}</td><td style="font-weight:700;">${w(tr)}</td>` +
+      (B ? dl(tr, b ? b.reduced : null) : '') + (P ? dl(tr, p ? p.reduced : null) : '');
+  };
+  const total = D => ({ total: D.total.total, reduced: D.total.reduced });
+  const unit = D => D && num(D.lifeCycleUnits) ? D.total.reduced / num(D.lifeCycleUnits) : null;
+  const unitRow = () => {
+    const p = unit(P), b = unit(B), t = unit(T);
+    const ud = (a, c) => a === null || c === null ? '<td></td>' : `<td class="${a - c < 0 ? 'good' : a - c > 0 ? 'bad' : 'muted'}">${Math.abs(a - c) < 0.5 ? '0' : signed_(a - c, 0)}</td>`;
+    return (P ? `<td>${p === null ? '—' : fmt(p)}</td>` : '') + (B ? `<td>${b === null ? '—' : fmt(b)}</td>` : '') +
+      `<td></td><td></td><td>${t === null ? '—' : fmt(t)}</td>` + (B ? ud(t, b) : '') + (P ? ud(t, p) : '');
+  };
+  const notes = name => { const r = row(T, name); return r && r.notes ? esc(r.notes) : ''; };
+  const R0 = R.target;
+  return `<div class="grid-scroll"><table class="rpt-table" id="rpt-devcmp">
+    <thead><tr><th style="text-align:left;">部門別</th>${P ? `<th>前回<br><small>${esc(R.prev.meta.label)}</small></th>` : ''}${B ? `<th>現況<br><small>${esc(R.base.meta.label)}</small></th>` : ''}
+      <th>本回 原始<br><small>${esc(R0.meta.label)}</small></th><th>挑戰低減%</th><th>本回 低減後</th>${B ? '<th>本回 − 現況</th>' : ''}${P ? '<th>本回 − 前回</th>' : ''}<th style="text-align:left;">說明（本回）</th></tr></thead>
+    <tbody>${depts.map(n => `<tr><td class="name">${esc(n)}</td>${cells(D => row(D, n))}<td class="note">${notes(n)}</td></tr>`).join('') ||
+      '<tr><td colspan="9" class="muted" style="text-align:center;">沒有開發總投資料</td></tr>'}</tbody>
+    <tfoot><tr class="subtotal"><td class="name">總計</td>${cells(total)}<td class="note"></td></tr>
+      <tr class="subtotal"><td class="name">單台攤提（元/台）</td>${unitRow()}<td class="note"></td></tr></tfoot>
+  </table></div>
+  ${R.prev && R.prev.isSnapshot ? '<p class="help">前回是情境快照，快照沒有開發總投明細，這張只比現況。</p>' : ''}`;
 }
 
 /* ---- 作法對帳：作法寫的效果，跟現況 → 目標的實際數字對得起來嗎？ ---- */

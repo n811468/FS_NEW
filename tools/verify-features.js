@@ -391,6 +391,30 @@ check('情境名稱在同一個車型、同一個 GATE 不能重複（新增、�
   gs.deleteScenario(other.ScenarioID);
 });
 
+check('開發總投比較：各情境的部門彙總並排，現況不套低減、低減後依大類拆開、快照略過', () => {
+  gs.createVehicleType('DCMP', '', '');
+  gs.saveVehicle({ VehicleID: 'DCMP_V', VehicleTypeID: 'DCMP', VehicleCode: 'V' });
+  const mk = (name, type) => gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE F', ScenarioName: name, ScenarioType: type, VehicleTypeID: 'DCMP' }, '', []).ScenarioID;
+  const base = mk('現況', '現況'), tgt = mk('目標', '目標');
+  [base, tgt].forEach(id => gs.saveSalesMixRow({ RowID: '', ScenarioID: id, VehicleID: 'DCMP_V', SalesMixPct: 100, MonthlyVolume: 100, LifeCycleYears: 10, ListPriceTaxIncl: 900000 }));
+  const rows = pct => [
+    { RowID: '', Department: '產專室', AssetType: '模具', Amount: 1000, Currency: 'TWD', ChallengeReductionPct: pct },
+    { RowID: '', Department: '產專室', AssetType: '設備', Amount: 500, Currency: 'TWD', ChallengeReductionPct: 0 },
+    { RowID: '', Department: '開發部', AssetType: '費用-CMC', Amount: 300, Currency: 'TWD', ChallengeReductionPct: pct }];
+  gs.saveDevInvestmentGrid(base, rows(20));
+  gs.saveDevInvestmentGrid(tgt, rows(20));
+  const out = gs.getDevComparison([base, 'snap:不存在', tgt]);
+  assertEqual(out.length, 2, '快照略過、情境照順序');
+  assertEqual(out[0].ScenarioID, base, '第一欄');
+  assert(out[0].isBaseline && out[0].dev.total.reduced === 1800, '現況不套低減：' + out[0].dev.total.reduced);
+  const d = out[1].dev.rows.find(r => r.Department === '產專室');
+  assertEqual(d.red.mold, 800, '目標的模具低減後');
+  assertEqual(d.red.equip, 500, '目標的設備低減後');
+  assertEqual(out[1].dev.total.red.expense, 240, '目標的費用低減後合計');
+  assertEqual(out[1].dev.lifeCycleUnits, 12000, '攤提台數');
+  gs.deleteVehicleType('DCMP');
+});
+
 const failed = results.filter(r => !r.ok);
 results.forEach(r => console.log((r.ok ? '  ✓ ' : '  ✗ ') + r.name + (r.ok ? '' : ' — ' + r.message)));
 console.log('');

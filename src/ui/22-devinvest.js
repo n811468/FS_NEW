@@ -9,7 +9,7 @@
 let devRows = [];
 let devSummary = null;
 let devNotes = {};             // { 部門: 說明 }
-let devView_ = 'sum';          // sum = 部門彙總、list = 每一筆明細
+let devView_ = 'sum';          // sum = 部門彙總、list = 每一筆明細、cmp = 跟其他情境比較(23-devcompare.js)
 const devChanged_ = new Set(); // 改過還沒存的格子：部門|模具、部門|pct、部門|note…
 let devDrawer_ = null;         // 右側面板 { dept, split }
 const DEV_COLS_ = ['模具', '設備', '費用'];   // 跟 Excel 一樣的欄位順序
@@ -18,6 +18,7 @@ const DEV_ASSET_ = ['模具', '設備'];
 function renderDevInvestmentPanel() {
   if (!requireScope('devinvestment', true)) return;
   closeDevDrawer_(true);
+  devCmpOptions_ = null;   // 情境可能剛新增/刪除，比較欄位的選項重拿
   document.getElementById('panel-devinvestment').innerHTML = gridShell('devinvestment', '開發總投',
     '一個部門一列，跟 Excel 一樣左邊投資金額、右邊低減後。<b>點格子直接改</b>（Enter 往下一格）；' +
     '<b>點部門名稱</b>看每一筆、改攤提落點、分攤車系與說明。右上角有小三角的格子有好幾筆或外幣，也要點進去改。拖曳 ⠿ 調整部門順序。');
@@ -118,8 +119,16 @@ function drawDevGrid() {
     return k === undefined ? '' : k;
   })();
   const prevAll = val('dev-all-pct');
+  const seg = `<div class="seg">${[['sum', '部門彙總'], ['list', '每一筆明細'], ['cmp', '比較']].map(([k, label]) =>
+    `<button type="button" class="seg-btn${devView_ === k ? ' active' : ''}" onclick="devView_='${k}';drawDevGrid()">${label}</button>`).join('')}</div>`;
+  if (devView_ === 'cmp') {
+    closeDevDrawer_(true);
+    toolbar.innerHTML = `${seg}<span class="muted">現況 vs 目標、前回 vs 本回、跨車型：一個部門一列並排，每一欄跟 ★ 基準比。</span>`;
+    drawDevCompare_();
+    return;
+  }
   toolbar.innerHTML = `
-    <div class="seg"><button type="button" class="seg-btn${devView_ === 'sum' ? ' active' : ''}" onclick="devView_='sum';drawDevGrid()">部門彙總</button><button type="button" class="seg-btn${devView_ === 'list' ? ' active' : ''}" onclick="devView_='list';drawDevGrid()">每一筆明細</button></div>
+    ${seg}
     ${target ? `<span class="dev-allpct">統一低減目標 <input id="dev-all-pct" type="text" inputmode="decimal" value="${esc(prevAll !== '' ? prevAll : commonPct)}" placeholder="例 10"> % <button type="button" class="btn secondary sm" onclick="devApplyAll_()">套用到全部部門</button></span>` : ''}
     <span class="spacer"></span>
     <button type="button" class="btn secondary" onclick="openDevPaste_()">從 Excel 貼上…</button>

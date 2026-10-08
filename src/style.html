@@ -841,6 +841,48 @@
   .dev-legend .sw.red { background: #f1f8f4; } .dev-legend .sw.dirty { background: #fff3c4; }
   .dev-legend .tri { width: 0; height: 0; border-style: solid; border-width: 0 9px 9px 0; border-color: transparent var(--primary) transparent transparent; display: inline-block; }
   .dev-list tbody tr:hover td { background: var(--primary-weak); }
+  /* 開發總投比較 */
+  .dcmp-cols { padding: 10px 14px; margin-bottom: 12px; }
+  .dcmp-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .dcmp-row .h { font-size: 13px; }
+  .dcmp-chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+  .dcmp-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); background: var(--surface); border-radius: 999px; padding: 3px 6px 3px 2px; font-size: 13px; }
+  .dcmp-chip.base { border-color: var(--primary); background: var(--primary-weak); }
+  .dcmp-chip .t { display: inline-flex; flex-direction: column; line-height: 1.15; padding: 0 2px; font-weight: 600; }
+  .dcmp-chip .t small { font-size: 10.5px; color: var(--muted); font-weight: 500; }
+  .dcmp-chip .star, .dcmp-chip .x { all: unset; cursor: pointer; padding: 0 4px; color: var(--muted); font-size: 14px; }
+  .dcmp-chip.base .star { color: #d69e2e; }
+  .dcmp-chip .star:hover { color: #d69e2e; } .dcmp-chip .x:hover { color: var(--danger); }
+  .dcmp-chip .tag { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); }
+  .dcmp-chip .tag.tgt { background: #f1f8f4; color: #17714a; }
+  .dcmp-chip .drag-handle { opacity: .45; }
+  .dcmp-add { display: inline-flex; gap: 6px; align-items: center; }
+  .dcmp-add select { width: auto; max-width: 180px; }
+  .dcmp-opts .lbl { font-size: 12px; color: var(--muted); margin-left: 4px; }
+  .dcmp-filter { position: relative; }
+  .dcmp-filter summary { list-style: none; }
+  .dcmp-filter summary::-webkit-details-marker { display: none; }
+  .dcmp-filter .pop { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-2, 0 8px 24px rgba(16,27,51,.18)); padding: 8px 12px; display: grid; gap: 6px; min-width: 180px; max-height: 320px; overflow: auto; }
+  .dcmp-filter .pop label { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--text); white-space: nowrap; cursor: pointer; }
+  .dcmp-wrap { max-height: none; }
+  .dcmp-table thead th { text-align: right; line-height: 1.25; height: auto; padding: 6px 10px; }
+  .dcmp-table thead th small { display: block; font-size: 10.5px; color: var(--muted); font-weight: 500; }
+  .dcmp-table thead th.base { background: var(--primary-weak); }
+  .dcmp-table thead th.c-dept { text-align: left; }
+  .dcmp-table td.c-dept { padding: 0 12px; font-weight: 600; white-space: nowrap; }
+  .dcmp-table td.num { padding: 0 10px; min-width: 110px; }
+  .dcmp-table td.base { background: #f7f9ff; }
+  .dcmp-table td.dlt, .dcmp-table th.dlt { min-width: 96px; border-right: 2px solid #dfe3ec; }
+  .dcmp-table td.dlt small { font-size: 10.5px; color: var(--muted); margin-right: 6px; font-weight: 500; }
+  .dcmp-table tr.sub td { height: 30px; font-size: 12.5px; color: var(--text-2); }
+  .dcmp-table tr.sub td.c-dept { padding-left: 30px; font-weight: 400; }
+  .dcmp-table tr.grp td { border-top: 1px solid #dfe3ec; }
+  .dcmp-table tfoot td { position: static; }
+  .dcmp-table tfoot tr.kpi td, .dcmp-table tfoot tr.part td { font-weight: 500; background: var(--surface-2); border-top: 0; height: 32px; }
+  .dcmp-table tfoot tr.split td { height: 28px; font-size: 12px; }
+  .dcmp-table tfoot tr.split td.c-dept { padding-left: 26px; color: var(--text-2); }
+  .dcmp-table tfoot tr.part td { font-weight: 600; border-top: 1px solid var(--border-strong); }
+  .dev-legend .sw.good { background: var(--success-weak); } .dev-legend .sw.bad { background: var(--danger-weak); }
   .dev-drawer-bg { position: fixed; inset: 0; background: rgba(16, 27, 51, .32); z-index: 55; }
   .dev-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100%); background: var(--surface); z-index: 56; display: flex; flex-direction: column; box-shadow: -10px 0 30px -12px rgba(16, 27, 51, .4); }
   @media (prefers-reduced-motion: no-preference) { .dev-drawer { animation: devSlide .16s ease-out; } @keyframes devSlide { from { transform: translateX(24px); } } }
