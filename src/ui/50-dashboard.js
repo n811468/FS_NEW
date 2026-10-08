@@ -625,6 +625,7 @@ function dashboardToolbarHtml(cols) {
         </div>
       </details>
       <button type="button" class="btn secondary" onclick="showComparisonCsv()">匯出 CSV</button>
+      <button type="button" class="btn secondary" onclick="exportVerifyWorkbookFromDashboard()" data-tip="一個情境一個 Excel 檔：輸入數字、每個科目的 Excel 公式(由科目與公式翻譯)、跟系統數字逐格比對的驗算頁、公式區">匯出 Excel 驗算檔</button>
     </div>`;
 }
 

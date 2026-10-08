@@ -14,6 +14,7 @@
  *   45-whatif      目標反推(單項 + 多項組合拳)與敏感度
  *   47-waterfall   瀑布圖工具(差異拆解、單一欄位、原因拆解、自訂；下載 PNG/SVG)
  *   50~52          損益儀表板(表格、SVG 圖表、hover 提示)
+ *   56-verify-export 匯出 Excel 驗算檔(後端 VerifyWorkbook.gs 產生檔案)
  *   99-init        開頁初始化
  */
 const fs = require('fs');

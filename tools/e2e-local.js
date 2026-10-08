@@ -424,6 +424,34 @@ async function main() {
   assert(at('d2') < at('d1') && at('d1') < at('E') && at('d5') < at('E') && at('C') < at('d2'), '儀表板：明細要在銷貨毛利上面：' + dashOrder.join(','));
   assert(at('h4') < at('I') && at('I') < at('J') && at('J') < at('K') && at('b13') < at('C'), '儀表板：I、J、K 跟 Excel 同順序：' + dashOrder.join(','));
 
+  // 匯出 Excel 驗算檔：儀表板按鈕(比較欄位有好幾個情境時先選情境)與工具列「匯出 ▾」
+  const xlsxOk = async dl => {
+    const buf = fs.readFileSync(await dl.path());
+    return buf.readUInt32LE(0) === 0x04034b50 && buf.includes(Buffer.from('xl/worksheets/sheet6.xml')) && /^驗算_.+\.xlsx$/.test(dl.suggestedFilename());
+  };
+  const withMix = await page.evaluate(t => new Promise(ok => google.script.run.withSuccessHandler(ok).getScenarios(t)), MAIN)
+    .then(async list => {
+      for (const sc of list) {
+        const mix = await page.evaluate(id => new Promise(ok => google.script.run.withSuccessHandler(ok).getSalesMix(id)), sc.ScenarioID);
+        if (mix.length) return sc.ScenarioID;
+      }
+      return '';
+    });
+  if ((await page.inputValue('#vehicletype-selector')) !== MAIN) {
+    await page.selectOption('#vehicletype-selector', MAIN);
+    await page.waitForFunction(id => Array.from(document.getElementById('scenario-selector').options).some(o => o.value === id), withMix);
+  }
+  await page.selectOption('#scenario-selector', withMix);
+  await page.waitForFunction(() => /營業淨利/.test(document.getElementById('dashboard-content').textContent || ''), null, { timeout: 15000 });
+  const verifyBtn = page.locator('#dashboard-content button:has-text("匯出 Excel 驗算檔")');
+  assert(await verifyBtn.count() === 1, '儀表板應該有「匯出 Excel 驗算檔」');
+  const [dlX] = await Promise.all([page.waitForEvent('download'), verifyBtn.click().then(async () => {
+    if (await page.locator('dialog.modal').count()) await page.click('dialog.modal button[value=ok]');
+  })]);
+  assert(await xlsxOk(dlX), '儀表板匯出的驗算檔不是 xlsx：' + dlX.suggestedFilename());
+  const [dlX2] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar .fsl-menu summary').then(() => page.click('#fs-local-bar button:has-text("Excel 驗算檔")'))]);
+  assert(await xlsxOk(dlX2), '工具列匯出的驗算檔不是 xlsx：' + dlX2.suggestedFilename());
+
   // 透過前端同一條路徑(google.script.run)改資料：新增車型 DQ
   await page.evaluate(() => new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail)
     .saveVehicleTypeGrid([{ VehicleTypeID: 'DQ', Notes: '端對端測試' }])));

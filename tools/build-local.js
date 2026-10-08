@@ -21,7 +21,7 @@ const LOCAL_DIR = path.join(REPO, 'local');
 const OUT_FILE = path.join(REPO, 'dist', 'FS-local.html');
 
 // 後端檔案(依載入順序)
-const BACKEND_FILES = ['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs'];
+const BACKEND_FILES = ['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs'];
 // .gs 用到的 Apps Script 全域物件，由 local/gas-shim.js 的 createGlobals() 提供
 const GAS_GLOBALS = ['SpreadsheetApp', 'LockService', 'CacheService', 'Utilities', 'Session', 'Logger'];
 const EXPORTED_CONSTS = ['SCHEMA', 'TEXT_COLUMNS', 'PL_LINE_ITEMS', 'LINE_CODE_PREFIX', 'DEFAULT_PARAMS'];
@@ -114,13 +114,14 @@ function buildHtml() {
     inlineScript(read(path.join(LOCAL_DIR, 'boot.js')))
   ].join('\n');
 
+  // 取代內容一律用函式傳入：字串形式的取代內容裡 $' $& 這類符號會被當成特殊樣式(程式碼裡的 '$C$' 就會壞掉)
+  const frontend = require('./frontend').frontendScript() + '\n' + inlineScript(read(path.join(LOCAL_DIR, 'local-ui.js')));
   html = html
     .replace('<base target="_top">', '')
     .replace('<html>', '<html lang="zh-Hant">')
-    .replace('<head>', '<head>\n' + head)
-    .replace('<body>', '<body>\n' + boot)
-    .replace('<!--FS-LOCAL-FRONTEND-->',
-      require('./frontend').frontendScript() + '\n' + inlineScript(read(path.join(LOCAL_DIR, 'local-ui.js'))));
+    .replace('<head>', () => '<head>\n' + head)
+    .replace('<body>', () => '<body>\n' + boot)
+    .replace('<!--FS-LOCAL-FRONTEND-->', () => frontend);
   return '<!DOCTYPE html>\n<!-- 由 tools/build-local.js 產生，請勿直接修改；原始檔在 src/ 與 local/ -->\n' +
     html.replace(/^<!DOCTYPE html>\s*/i, '');
 }

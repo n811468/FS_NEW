@@ -51,6 +51,8 @@ src/                        # 系統本體(後端 + 前端)，build 時原封不
 ├─ ReportService.gs        # v2：GATE 報告資料(現況/目標/前回、各車系 + 加權、說明、作法、開發總投 by 部門、損益兩平)
 ├─ WhatIfService.gs        # v2.1：目標反推(solveGoal)與敏感度表(sensitivityTable)，靠 CalcEngine 的記憶體覆寫重算
 ├─ SetupSheets.gs          # 建立分頁與科目表；重設科目排序、清除未使用參數等維護作業
+├─ VerifyWorkbook.gs       # Excel 驗算檔：系統公式逐一翻成 Excel 公式(輸入/開發總投/損益試算/驗算/公式區)
+├─ XlsxWriter.gs           # 不靠套件的 .xlsx 產生器(XML + 不壓縮的 zip)，離線也能匯出 Excel
 ├─ DataService.gs          # 各表 CRUD 與表格式整批存檔：getXxxGrid() / saveXxxGrid()
 ├─ CalcEngine.gs           # 損益計算引擎：依科目表逐科目取值(手動輸入/公式/開發攤提)；比較 API 與小計驗算
 ├─ index.html              # SPA 外殼（左側導覽 + 各 panel 容器）
@@ -64,6 +66,7 @@ src/                        # 系統本體(後端 + 前端)，build 時原封不
    ├─ 40-report.js         #   GATE 報告(含作法對帳)
    ├─ 45-whatif.js         #   目標反推與敏感度
    ├─ 50/51/52-*.js        #   損益儀表板(表格、SVG 圖表、hover 提示)
+   ├─ 56-verify-export.js  #   匯出 Excel 驗算檔(儀表板按鈕、工具列「匯出 ▾」)
    └─ 99-init.js           #   開頁初始化
 
 local/                      # 地端層：讓 src/ 在瀏覽器裡跑起來 + 資料包
@@ -85,6 +88,8 @@ tools/                      # 開發用，只在本機用 Node 執行
 ├─ verify-formula.js       # v2：公式語法、車型各自的科目表、車系個別公式、REF、分攤車系、作法、報告
 ├─ verify-write-batching.js # 整批寫入(batchWriteRows_)：跨情境隔離、新增/更新/刪除混合、呼叫次數量測
 ├─ verify-local.js         # 地端版：與 Node 驗算層逐格比對、暫存/資料包/合併、dist 為最新
+├─ verify-excel.js         # Excel 驗算檔：公式翻譯規則、檔案結構；有 LibreOffice 時拿掉快取值重算，逐格對系統數字
+├─ manual-screens.js       # 使用手冊的畫面截圖：用 Chromium 實際操作 dist/FS-local.html，輸出到 docs/manual/img
 ├─ e2e-local.js            # 用 Chromium 以 file:// 開啟的端對端測試(需要 Playwright)
 └─ dev-server.js           # 本機預覽伺服器：改前端時不必每次重新 build，存檔按 F5 就看得到
 ```

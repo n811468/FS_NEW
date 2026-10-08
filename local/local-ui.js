@@ -106,10 +106,14 @@
     catch (e) { say('無法匯出', e.message); return; }
     download(pack, id + '_' + sc.label);
   } });
+  var exportVerifyBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: 'Excel 驗算檔（目前情境）', title: '上方選的情境存成 Excel：輸入數字、每個科目的 Excel 公式、跟系統數字逐格比對的驗算頁、公式區', onclick: function () {
+    if (!currentScenario()) { say('還沒有選擇情境', '請先在右上角選擇要匯出的車型與情境。'); return; }
+    if (typeof window.exportVerifyWorkbook === 'function') window.exportVerifyWorkbook(currentScenario().id);
+  } });
   // 三種匯出收在同一顆「匯出 ▾」底下(以前是三顆並排的按鈕)；點了任何一項就把選單收起來
   var exportMenu = el('details', { class: 'fsl-menu' }, [
-    el('summary', { class: 'fsl-btn', text: '匯出 ▾', title: '把資料存成資料包（JSON）' }),
-    el('div', { class: 'fsl-menu-list' }, [exportAllBtn, exportTypeBtn, exportScenarioBtn])
+    el('summary', { class: 'fsl-btn', text: '匯出 ▾', title: '把資料存成資料包（JSON），或存成 Excel 驗算檔' }),
+    el('div', { class: 'fsl-menu-list' }, [exportAllBtn, exportTypeBtn, exportScenarioBtn, exportVerifyBtn])
   ]);
   exportMenu.addEventListener('click', function (e) { if (e.target.classList && e.target.classList.contains('fsl-menu-item')) exportMenu.open = false; });
   document.addEventListener('click', function (e) { if (exportMenu.open && !exportMenu.contains(e.target)) exportMenu.open = false; });
