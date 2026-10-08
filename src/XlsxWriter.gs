@@ -35,7 +35,7 @@ var XLSX_STYLES_ = [
   ['sys', 0, 5, 1, 164, ''],
   ['diff', 0, 0, 1, 167, ''],
   ['wrap', 0, 0, 1, 0, 'wrap'],
-  ['note', 6, 0, 0, 0, 'wrapNoBorder'],
+  ['note', 6, 0, 0, 0, ''],
   ['code', 7, 0, 1, 0, 'wrap'],
   ['calcBold', 1, 0, 1, 164, ''],
   ['linkText', 3, 0, 1, 0, 'wrap'],
@@ -92,7 +92,7 @@ function xlsxStylesXml_() {
   var numFmts = [[164, '#,##0.00;[Red]-#,##0.00'], [165, '0.00%'], [166, '#,##0;[Red]-#,##0'], [167, '0.000000;[Red]-0.000000']];
   var xfs = XLSX_STYLES_.map(function (s) {
     var align = s[5] === 'center' ? '<alignment horizontal="center" vertical="center" wrapText="1"/>'
-      : s[5] === 'wrap' || s[5] === 'wrapNoBorder' ? '<alignment vertical="top" wrapText="1"/>' : '';
+      : s[5] === 'wrap' ? '<alignment vertical="top" wrapText="1"/>' : '';
     return '<xf numFmtId="' + s[4] + '" fontId="' + s[1] + '" fillId="' + s[2] + '" borderId="' + s[3] + '" xfId="0"' +
       (s[4] ? ' applyNumberFormat="1"' : '') + ' applyFont="1"' + (s[2] ? ' applyFill="1"' : '') + (s[3] ? ' applyBorder="1"' : '') +
       (align ? ' applyAlignment="1">' + align + '</xf>' : '/>');
@@ -133,7 +133,9 @@ function xlsxCellXml_(cell, ref) {
 
 function xlsxSheetXml_(sheet) {
   var parts = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'];
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+    // 列印時寬度縮成一頁(長度不限)，表格不會被切成好幾頁
+    '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'];
   var fr = sheet.freeze || {};
   if (fr.row || fr.col) {
     var tl = xlsxRef_(fr.row || 0, fr.col || 0);
@@ -165,7 +167,7 @@ function xlsxSheetXml_(sheet) {
       '" priority="' + (i + 1) + '"><formula>' + xlsxEsc_(c.formula) + '</formula></cfRule></conditionalFormatting>');
   });
   parts.push('<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>');
-  parts.push('<pageSetup orientation="landscape" paperSize="9" fitToHeight="0"/>');
+  parts.push('<pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/>');
   parts.push('</worksheet>');
   return parts.join('');
 }

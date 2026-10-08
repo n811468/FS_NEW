@@ -68,3 +68,9 @@ node tools/dev-server.js               # 打開 http://localhost:8787
 改 `src/ui/*.js` / `src/style.html` 時，不必每次重新 build：存檔後按 F5 就看得到。
 資料只在記憶體、重啟就回到示範資料。適合調版面、看儀表板的圖表與 hover 提示。
 示範資料是用固定種子產生的合理亂數（見 `tools/demo-data.js`），不是真實車型的數字；想換一組數字可以加 `DEMO_SEED=123`。
+
+## 使用手冊截圖
+
+`docs/manual/index.html` 是圖文版使用手冊，圖片全部由 `node tools/manual-screens.js` 用 Chromium 實際操作
+`dist/FS-local.html`（示範資料）截下來；Excel 驗算檔的畫面是用系統匯出真正的 .xlsx，再由 LibreOffice 轉成圖片。
+畫面改了之後重新 build、再執行一次就會更新（`ONLY=dash` 只重截檔名含 dash 的圖）。

@@ -351,7 +351,7 @@ function buildVerifyWorkbookModel_(scenarioId) {
   }
 
   // 排列號
-  var INPUT_HEADER_ROWS = 5;
+  var INPUT_HEADER_ROWS = 4;
   inSpecs.forEach(function (s, i) { s.row = INPUT_HEADER_ROWS + i; if (s.key) input.at[s.key] = s.row; });
 
   /* ================= 開發總投 ================= */
@@ -635,12 +635,13 @@ function buildVerifyWorkbookModel_(scenarioId) {
     });
   });
   fr++;
-  fmRows[fr++] = [{ v: '名稱對照：公式裡的 [名稱] 在 Excel 裡引用哪一格', s: 'labelBold' }];
-  fmRows[fr++] = ['名稱', '種類', '「輸入」表的列', '第一個車系的格子', '說明'].map(function (h) { return { v: h, s: 'header' }; });
+  // 名稱對照表從 B 欄開始(A 欄是窄的代碼欄)
+  fmRows[fr++] = [null, { v: '名稱對照：公式裡的 [名稱] 在 Excel 裡引用哪一格', s: 'labelBold' }];
+  fmRows[fr++] = [null].concat(['名稱', '種類', '「輸入」表的列', '第一個車系的格子', '說明'].map(function (h) { return { v: h, s: 'header' }; }));
   var nameRow = function (name, kind, key, desc) {
     if (input.at[key] === undefined) return;
     var rn = input.at[key] + 1;
-    fmRows[fr++] = [{ v: '[' + name + ']', s: 'code' }, { v: kind, s: 'label' }, { v: rn, s: 'label' },
+    fmRows[fr++] = [null, { v: '[' + name + ']', s: 'code' }, { v: kind, s: 'label' }, { v: rn, s: 'label' },
       { v: verifySheetRef_(IN, vCol(0) + rn), s: 'code' }, { v: desc || '', s: 'wrap' }];
   };
   var smKey = { '建議零售價': 'sm:建議零售價', '強配件售價': 'sm:強配件售價', '廢車處理費': 'sm:廢車處理費', '水平配件調降': 'sm:水平配件調降', '月銷量': 'sm:月銷量', 'LC年限': 'sm:LC年限' };
@@ -724,7 +725,7 @@ function buildVerifyWorkbookModel_(scenarioId) {
     { name: CK, rows: ckRows, cols: [7, 26].concat(new Array(nCols * 2).join(',').split(',').map(function () { return 13; })).concat([12]), freeze: { row: PL_HEADER_ROW, col: 2 },
       cf: [{ ref: resultCol + PL_FIRST + ':' + resultCol + plLast, formula: 'LEFT($' + resultCol + PL_FIRST + ',1)="✗"', style: 'bad' },
         { ref: resultCol + PL_FIRST + ':' + resultCol + plLast, formula: 'LEFT($' + resultCol + PL_FIRST + ',1)="✓"', style: 'good' }] },
-    { name: FM, rows: fmRows, cols: [7, 22, 12, 14, 48, 40, 60, 46, 11], freeze: { row: 4, col: 2 },
+    { name: FM, rows: fmRows, cols: [7, 22, 12, 14, 48, 30, 60, 46, 11], freeze: { row: 4, col: 2 },
       cf: [{ ref: 'I5:I' + (4 + lines.length * 4), formula: 'LEFT($I5,1)="✗"', style: 'bad' }] }
   ];
   var fileName = '驗算_' + [typeId, scenarioLabel].filter(function (x) { return x; }).join('_').replace(/[\\\/:*?"<>|\s]+/g, '_') + '.xlsx';

@@ -7019,7 +7019,7 @@ var XLSX_STYLES_ = [
   ['sys', 0, 5, 1, 164, ''],
   ['diff', 0, 0, 1, 167, ''],
   ['wrap', 0, 0, 1, 0, 'wrap'],
-  ['note', 6, 0, 0, 0, 'wrapNoBorder'],
+  ['note', 6, 0, 0, 0, ''],
   ['code', 7, 0, 1, 0, 'wrap'],
   ['calcBold', 1, 0, 1, 164, ''],
   ['linkText', 3, 0, 1, 0, 'wrap'],
@@ -7076,7 +7076,7 @@ function xlsxStylesXml_() {
   var numFmts = [[164, '#,##0.00;[Red]-#,##0.00'], [165, '0.00%'], [166, '#,##0;[Red]-#,##0'], [167, '0.000000;[Red]-0.000000']];
   var xfs = XLSX_STYLES_.map(function (s) {
     var align = s[5] === 'center' ? '<alignment horizontal="center" vertical="center" wrapText="1"/>'
-      : s[5] === 'wrap' || s[5] === 'wrapNoBorder' ? '<alignment vertical="top" wrapText="1"/>' : '';
+      : s[5] === 'wrap' ? '<alignment vertical="top" wrapText="1"/>' : '';
     return '<xf numFmtId="' + s[4] + '" fontId="' + s[1] + '" fillId="' + s[2] + '" borderId="' + s[3] + '" xfId="0"' +
       (s[4] ? ' applyNumberFormat="1"' : '') + ' applyFont="1"' + (s[2] ? ' applyFill="1"' : '') + (s[3] ? ' applyBorder="1"' : '') +
       (align ? ' applyAlignment="1">' + align + '</xf>' : '/>');
@@ -7117,7 +7117,9 @@ function xlsxCellXml_(cell, ref) {
 
 function xlsxSheetXml_(sheet) {
   var parts = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'];
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+    // 列印時寬度縮成一頁(長度不限)，表格不會被切成好幾頁
+    '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'];
   var fr = sheet.freeze || {};
   if (fr.row || fr.col) {
     var tl = xlsxRef_(fr.row || 0, fr.col || 0);
@@ -7149,7 +7151,7 @@ function xlsxSheetXml_(sheet) {
       '" priority="' + (i + 1) + '"><formula>' + xlsxEsc_(c.formula) + '</formula></cfRule></conditionalFormatting>');
   });
   parts.push('<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>');
-  parts.push('<pageSetup orientation="landscape" paperSize="9" fitToHeight="0"/>');
+  parts.push('<pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/>');
   parts.push('</worksheet>');
   return parts.join('');
 }
@@ -7630,7 +7632,7 @@ function buildVerifyWorkbookModel_(scenarioId) {
   }
 
   // 排列號
-  var INPUT_HEADER_ROWS = 5;
+  var INPUT_HEADER_ROWS = 4;
   inSpecs.forEach(function (s, i) { s.row = INPUT_HEADER_ROWS + i; if (s.key) input.at[s.key] = s.row; });
 
   /* ================= 開發總投 ================= */
@@ -7914,12 +7916,13 @@ function buildVerifyWorkbookModel_(scenarioId) {
     });
   });
   fr++;
-  fmRows[fr++] = [{ v: '名稱對照：公式裡的 [名稱] 在 Excel 裡引用哪一格', s: 'labelBold' }];
-  fmRows[fr++] = ['名稱', '種類', '「輸入」表的列', '第一個車系的格子', '說明'].map(function (h) { return { v: h, s: 'header' }; });
+  // 名稱對照表從 B 欄開始(A 欄是窄的代碼欄)
+  fmRows[fr++] = [null, { v: '名稱對照：公式裡的 [名稱] 在 Excel 裡引用哪一格', s: 'labelBold' }];
+  fmRows[fr++] = [null].concat(['名稱', '種類', '「輸入」表的列', '第一個車系的格子', '說明'].map(function (h) { return { v: h, s: 'header' }; }));
   var nameRow = function (name, kind, key, desc) {
     if (input.at[key] === undefined) return;
     var rn = input.at[key] + 1;
-    fmRows[fr++] = [{ v: '[' + name + ']', s: 'code' }, { v: kind, s: 'label' }, { v: rn, s: 'label' },
+    fmRows[fr++] = [null, { v: '[' + name + ']', s: 'code' }, { v: kind, s: 'label' }, { v: rn, s: 'label' },
       { v: verifySheetRef_(IN, vCol(0) + rn), s: 'code' }, { v: desc || '', s: 'wrap' }];
   };
   var smKey = { '建議零售價': 'sm:建議零售價', '強配件售價': 'sm:強配件售價', '廢車處理費': 'sm:廢車處理費', '水平配件調降': 'sm:水平配件調降', '月銷量': 'sm:月銷量', 'LC年限': 'sm:LC年限' };
@@ -8003,7 +8006,7 @@ function buildVerifyWorkbookModel_(scenarioId) {
     { name: CK, rows: ckRows, cols: [7, 26].concat(new Array(nCols * 2).join(',').split(',').map(function () { return 13; })).concat([12]), freeze: { row: PL_HEADER_ROW, col: 2 },
       cf: [{ ref: resultCol + PL_FIRST + ':' + resultCol + plLast, formula: 'LEFT($' + resultCol + PL_FIRST + ',1)="✗"', style: 'bad' },
         { ref: resultCol + PL_FIRST + ':' + resultCol + plLast, formula: 'LEFT($' + resultCol + PL_FIRST + ',1)="✓"', style: 'good' }] },
-    { name: FM, rows: fmRows, cols: [7, 22, 12, 14, 48, 40, 60, 46, 11], freeze: { row: 4, col: 2 },
+    { name: FM, rows: fmRows, cols: [7, 22, 12, 14, 48, 30, 60, 46, 11], freeze: { row: 4, col: 2 },
       cf: [{ ref: 'I5:I' + (4 + lines.length * 4), formula: 'LEFT($I5,1)="✗"', style: 'bad' }] }
   ];
   var fileName = '驗算_' + [typeId, scenarioLabel].filter(function (x) { return x; }).join('_').replace(/[\\\/:*?"<>|\s]+/g, '_') + '.xlsx';
