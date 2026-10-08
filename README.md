@@ -18,7 +18,8 @@
 - **情境快照**：存下某個時間點的損益數字，之後跟現在比較差在哪。
 - **Excel 驗算檔**：一個情境存成一個 Excel，損益表每一格都是由「科目與公式」翻成的 Excel 公式，打開就逐格跟系統數字比對；
   公式區並排系統公式與 Excel 公式，改輸入的藍字可以在 Excel 裡試算。改公式、科目之後另有不依賴目前公式的檢查：
-  結構檢查（用預設算法重算各段小計）、科目影響（每個科目 +1 元營業淨利變多少，抓漏算與重複算）、跟系統預設比較、跟改之前的快照比較。
+  結構檢查（用預設算法重算各段小計）、科目影響（每個科目 +1 元營業淨利變多少，抓漏算與重複算）、跟系統預設比較、跟改之前的快照比較，標紅的項目旁邊寫出怎麼修正。
+  在驗算檔裡改的公式與藍字可以「從 Excel 匯入」回系統（先預覽、確認才存）。
 - 舊格式的資料（暫存或資料包）開啟時自動升級，數字不變。
 
 詳細操作見 [`docs/usage.md`](docs/usage.md)；圖文版的使用手冊（實際畫面截圖）見 [`docs/manual/index.html`](docs/manual/index.html)。
@@ -53,7 +54,7 @@ node tools/verify-formula.js           # 公式、車型各自的科目表、車
 node tools/verify-ui.js                # 損益表版面、% 基準、小計警示、CSV 欄數
 node tools/verify-write-batching.js    # 整批寫入：跨情境隔離、新增/更新/刪除混合、呼叫次數不隨格數線性成長
 node tools/verify-local.js             # 地端版：數字與驗算層逐格相同、暫存、資料包、合併匯入、dist 為最新
-node tools/verify-excel.js             # Excel 驗算檔：公式翻譯、檔案結構、改壞的科目表抓不抓得到；有 LibreOffice 時從頭重算、逐格對系統數字
+node tools/verify-excel.js             # Excel 驗算檔：公式翻譯、檔案結構、改壞的科目表抓不抓得到、從 Excel 匯入；有 LibreOffice 時從頭重算、逐格對系統數字
 node tools/e2e-local.js                # 地端版瀏覽器測試（需要 Playwright，找不到時略過）
 E2E_ONLY=dev node tools/e2e-local.js   # 只跑「開發總投從零開始」：全新的空資料庫、從空表開始用畫面操作
 ```

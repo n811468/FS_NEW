@@ -33,11 +33,50 @@ function have(cmd, args) {
 const shot = name => !ONLY || name.indexOf(ONLY) !== -1;
 // Excel 驗算檔的截圖：[檔名, 那張工作表第一行的標題]
 const XLSX_SHOTS = [['40-xlsx-info', '損益驗算檔'], ['41-xlsx-input', '輸入資料'], ['42-xlsx-dev', '開發總投攤提'], ['43-xlsx-pl', '損益試算'],
-  ['44-xlsx-check', '驗算：'], ['45-xlsx-formulas', '公式區：'], ['46-verify-dialog', ''], ['47-xlsx-structure', '結構檢查：'], ['48-xlsx-impact', '科目影響：'], ['49-xlsx-changes', '變動檢查：']];
+  ['44-xlsx-check', '驗算：'], ['45-xlsx-formulas', '公式區：'], ['46-verify-dialog', ''], ['47-xlsx-structure', '結構檢查：'], ['48-xlsx-impact', '科目影響：'], ['49-xlsx-changes', '變動檢查：'],
+  ['50-import-preview', '']];
 const done = [];
 const skipped = [];
 
 /** 在畫面上加編號圈圈與外框(截完圖再拿掉)：[{ sel, n, place: 'tl'|'tr'|'l' }] */
+/** 讀不壓縮的 zip(系統匯出的驗算檔)：{ 檔名: 文字 } */
+function readStoredZip(buf) {
+  const files = {};
+  let eocd = buf.length - 22;
+  while (eocd >= 0 && buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  let p = buf.readUInt32LE(eocd + 16);
+  for (let i = 0, n = buf.readUInt16LE(eocd + 10); i < n; i++) {
+    const size = buf.readUInt32LE(p + 20), nameLen = buf.readUInt16LE(p + 28), extraLen = buf.readUInt16LE(p + 30), commentLen = buf.readUInt16LE(p + 32);
+    const offset = buf.readUInt32LE(p + 42);
+    const name = buf.slice(p + 46, p + 46 + nameLen).toString('utf8');
+    const start = offset + 30 + buf.readUInt16LE(offset + 26) + buf.readUInt16LE(offset + 28);
+    files[name] = buf.slice(start, start + size).toString('utf8');
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return files;
+}
+
+/** { 檔名: 文字 } → 不壓縮的 zip */
+function writeStoredZip(files) {
+  const zlib = require('zlib');
+  const parts = [], central = [];
+  let offset = 0;
+  Object.keys(files).forEach(name => {
+    const data = Buffer.from(files[name], 'utf8'), nameBuf = Buffer.from(name, 'utf8'), crc = zlib.crc32(data) >>> 0;
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0); head.writeUInt16LE(20, 4); head.writeUInt16LE(0x0800, 6);
+    head.writeUInt32LE(crc, 14); head.writeUInt32LE(data.length, 18); head.writeUInt32LE(data.length, 22); head.writeUInt16LE(nameBuf.length, 26);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(0x0800, 8);
+    cd.writeUInt32LE(crc, 16); cd.writeUInt32LE(data.length, 20); cd.writeUInt32LE(data.length, 24); cd.writeUInt16LE(nameBuf.length, 28); cd.writeUInt32LE(offset, 42);
+    parts.push(head, nameBuf, data); central.push(cd, nameBuf);
+    offset += 30 + nameBuf.length + data.length;
+  });
+  const cdBuf = Buffer.concat(central), end = Buffer.alloc(22), n = Object.keys(files).length;
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(n, 8); end.writeUInt16LE(n, 10); end.writeUInt32LE(cdBuf.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat(parts.concat([cdBuf, end]));
+}
+
 async function annotate(page, marks) {
   await page.evaluate(list => {
     const layer = document.createElement('div');
@@ -350,7 +389,7 @@ async function main() {
   const soffice = ['soffice', 'libreoffice'].find(c => have(c));
   if (!soffice || !have('pdftoppm', ['-v'])) {
     skipped.push('Excel 驗算檔畫面：找不到 LibreOffice 或 pdftoppm');
-  } else if (XLSX_SHOTS.some(n => shot(n[0]))) {
+  } else if (XLSX_SHOTS.some(n => shot(n[0]))) {   // 50-import-preview 也在這一段(要用匯出的檔案)
     await step('40-xlsx', async () => {
       await page.selectOption('#scenario-selector', target.ScenarioID);
       await page.waitForTimeout(500);
@@ -389,6 +428,38 @@ async function main() {
         execFileSync('convert', [path.join(tmp, pages[idx]), '-trim', '+repage'].concat(crop).concat(['+repage', '-bordercolor', 'white', '-border', '16', path.join(OUT, name + '.png')]), { stdio: 'pipe' });
         done.push(name);
       });
+      // 在 Excel 修正：把生產毛利改回 A − B(每個車系)、改一個售價，存檔後用「從 Excel 匯入」→ 預覽畫面
+      if (shot('50-import-preview')) {
+        const zip = readStoredZip(fs.readFileSync(xlsx));
+        // 工作表順序與每一格的位置：讀檔案裡隱藏的「_對照」表(跟系統匯入時一樣)
+        const names = [];
+        zip['xl/workbook.xml'].replace(/<sheet [^>]*name="([^"]+)"/g, (m, n) => { names.push(n); return m; });
+        const sheetPath = n => 'xl/worksheets/sheet' + (names.indexOf(n) + 1) + '.xml';
+        const mapRows = [];
+        zip[sheetPath('_對照')].replace(/<row [^>]*>([\s\S]*?)<\/row>/g, (m, inner) => {
+          const vals = [];
+          inner.replace(/<c r="([A-Z]+)\d+"[^>]*>(?:<v>([^<]*)<\/v>|<is><t[^>]*>([^<]*)<\/t><\/is>)<\/c>/g, (m2, col, v, t) => { vals[col.charCodeAt(0) - 65] = v !== undefined ? v : t; return m2; });
+          mapRows.push(vals);
+          return m;
+        });
+        const pl = {}, vehicleCols = [];
+        let priceRow = 0;
+        mapRows.forEach(r => {
+          if (r[0] === 'pl') pl[r[1]] = Number(r[2]);
+          if (r[0] === 'vehicle') vehicleCols.push(r[2]);
+          if (r[0] === 'in' && r[1] === 'sm:建議零售價') priceRow = Number(r[2]);
+        });
+        const setCell = (n, ref, inner) => { zip[sheetPath(n)] = zip[sheetPath(n)].replace(new RegExp('<c r="' + ref + '"([^>]*?)(?:/>|>[\\s\\S]*?</c>)'), (m, a) => '<c r="' + ref + '"' + a.replace(/\st="[^"]*"/, '') + '>' + inner + '</c>'); };
+        vehicleCols.forEach(c => setCell('損益試算', c + pl.C, '<f>' + c + pl.A + '-' + c + pl.B + '</f>'));
+        setCell('輸入', vehicleCols[0] + priceRow, '<v>949000</v>');
+        const edited = path.join(tmp, '驗算_修正後.xlsx');
+        fs.writeFileSync(edited, writeStoredZip(zip));
+        const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#dashboard-content button:has-text("從 Excel 匯入")')]);
+        await chooser.setFiles(edited);
+        await page.waitForSelector('dialog.modal[open] .vi-table', { timeout: 20000 });
+        await save(page, '50-import-preview', { el: 'dialog.modal' });
+        await closeModal(page);
+      }
       fs.rmSync(tmp, { recursive: true, force: true });
     });
   }

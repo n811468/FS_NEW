@@ -77,6 +77,31 @@ function findSoffice() {
   return null;
 }
 
+/** xlsx → { 檔名: 文字 }(跟前端送給後端的一樣) */
+function textFiles(buf) {
+  const files = readZip(buf), out = {};
+  Object.keys(files).forEach(k => { if (/\.(xml|rels)$/.test(k)) out[k] = files[k].toString('utf8'); });
+  return out;
+}
+/** 直接改 xlsx 裡的格子(模擬使用者在 Excel 改)：f 改公式、v 改成數字 */
+function editor(files, built) {
+  const names = built.model.sheets.map(s => s.name);
+  const fileOf = sheet => 'xl/worksheets/sheet' + (names.indexOf(sheet) + 1) + '.xml';
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const put = (sheet, ref, inner) => {
+    const f = fileOf(sheet);
+    const re = new RegExp('<c r="' + ref + '"([^>]*?)(?:/>|>[\\s\\S]*?</c>)');
+    if (!re.test(files[f])) throw new Error('找不到格子 ' + sheet + '!' + ref);
+    files[f] = files[f].replace(re, (m, attrs) => '<c r="' + ref + '"' + attrs.replace(/\st="[^"]*"/, '') + '>' + inner + '</c>');
+  };
+  const input = built.model.sheets[names.indexOf('輸入')].rows;
+  return {
+    f: (sheet, ref, formula) => put(sheet, ref, '<f>' + esc(formula) + '</f>'),
+    v: (sheet, ref, value) => put(sheet, ref, '<v>' + value + '</v>'),
+    inRow: label => input.findIndex(r => r && r[0] && r[0].v === label) + 1
+  };
+}
+
 /** 拿掉公式格的快取值，強迫 LibreOffice 自己算 */
 function stripCache(model) {
   model.sheets.forEach(s => (s.rows || []).forEach(row => (row || []).forEach(c => { if (c && typeof c === 'object' && c.f) delete c.v; })));
@@ -84,7 +109,7 @@ function stripCache(model) {
 }
 
 /* ---------- 1. 翻譯規則 ---------- */
-const gsRules = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs']);
+const gsRules = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs', 'VerifyImport.gs']);
 check('系統公式 → Excel 公式：括號、除以 0、比較式、函式參數', () => {
   const ctx = {
     code: c => ({ P5: 'D10', P6: 'D11', B: 'D20', A: 'D19' })[c] || 'X1',
@@ -120,7 +145,7 @@ check('系統公式 → Excel 公式：括號、除以 0、比較式、函式參
 // (a) 示範資料
 const demo = seedDemoData();
 // (b) Gate F 驗算情境 + 各種特殊情況
-const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs']);
+const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs', 'VerifyImport.gs']);
 const sid = gatef.buildScenario(gs);
 gs.getBootstrap('DA');
 const reset = () => { gs.SHEET_CACHE_ = {}; gs.resetCalcMemo_(); };
@@ -181,7 +206,7 @@ cases.push({ gs, sid, label: 'Gate F 驗算情境(含特殊情況)' });
 if (targetSid) cases.push({ gs, sid: targetSid, label: 'Gate F 目標(低減、攤提基準台數)' });
 
 // (c) 改壞的科目表：先存快照，再把公式、科目改壞 —— 驗算照樣「一致」，但其他檢查要抓得到
-const bad = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs']);
+const bad = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs', 'VerifyImport.gs']);
 const badSid = gatef.buildScenario(bad);
 bad.getBootstrap('DA');
 let badSnap = '';
@@ -327,8 +352,118 @@ if (!soffice) {
     assert(excel - sys > 50000, `售價加 10 萬，營業淨利應該增加：Excel ${excel}，系統 ${sys}`);
     assert(nums['說明'].C9 > 0, '改過輸入之後，驗算頁應顯示有差異');
   });
+
+  /* ---------- 從 Excel 匯入：改過的檔案 → 系統，結果要跟 LibreOffice 重算改過的檔案一樣 ---------- */
+  check('匯入：在 Excel 改公式與藍字 → 套用後，系統算出來 = LibreOffice 重算改過的檔案', () => {
+    const g = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs', 'VerifyImport.gs']);
+    const s = gatef.buildScenario(g);
+    g.getBootstrap('DA');
+    const built = g.buildVerifyWorkbookModel_(s);
+    stripCache(built.model);
+    const files = textFiles(Buffer.from(g.buildXlsxBase64_(built.model), 'base64'));
+    const ed = editor(files, built);
+    const pl = built.meta.plAt;
+    ['D', 'E', 'F'].forEach(c => ed.f('損益試算', c + pl.d4, c + pl.P8 + '*1%'));            // 季Margin 改固定 1%(全部車系)
+    ed.f('損益試算', 'D' + pl.C, 'D' + pl.A + '-D' + pl.B + '-500');                          // 只有第一個車系：生產毛利再扣 500
+    ed.f('損益試算', 'E' + pl.b9, "ROUND('輸入'!E" + ed.inRow('月銷量') + '*10,0)');          // 手動輸入科目改成公式(只有一個車系)
+    ed.f('損益試算', 'F' + pl.b6, 'VLOOKUP(1,A1:B2,2)');                                     // 系統沒有的函式 → 無法匯入
+    ed.v('輸入', 'D' + ed.inRow('建議零售價'), 1500000);
+    ed.v('輸入', 'C' + ed.inRow('季Margin率'), 0.006);
+    ed.v('輸入', 'E' + ed.inRow('銷售佣金率'), 0.08);                                          // 原本引用共用欄 → 車系個別值
+    const plan = g.previewVerifyImport(files);
+    assert(plan.formulas.map(f => f.code).sort().join() === 'C,b9,d4', '公式變更：' + plan.formulas.map(f => f.code).join());
+    assert(plan.inputs.length === 3, '輸入變更應該 3 項：' + plan.inputs.map(i => i.label).join('、'));
+    assert(plan.problems.length === 1 && /VLOOKUP/.test(plan.problems[0].reason), '無法匯入：' + JSON.stringify(plan.problems));
+    // LibreOffice 重算改過的檔案
+    const src = path.join(dir, 'import.xlsx');
+    fs.writeFileSync(src, Buffer.from(g.zipStore_(files)));
+    execFileSync(soffice, ['-env:UserInstallation=' + profile, '--headless', '--calc', '--convert-to', 'xlsx', '--outdir', path.join(dir, 'outimp'), src], { stdio: 'pipe', timeout: 180000 });
+    const lo = fs.readFileSync(path.join(dir, 'outimp', 'import.xlsx'));
+    const nums = readNumbers(lo)['損益試算'];
+    // LibreOffice 存過的檔案(壓縮、LibreOffice 自己的寫法)也要讀得出同樣的變更
+    const plan2 = g.previewVerifyImport(textFiles(lo));
+    assert(plan2.formulas.map(f => f.code + ':' + f.after).sort().join() === plan.formulas.map(f => f.code + ':' + f.after).sort().join(), 'LibreOffice 存過的檔案，公式變更不同：' + JSON.stringify(plan2.formulas.map(f => f.after)));
+    assert(plan2.inputs.length === 3, 'LibreOffice 存過的檔案，輸入變更：' + plan2.inputs.length);
+    // VLOOKUP 那格不匯入：把它的 Excel 值換成系統原本的值再比
+    const res = g.applyVerifyImport(files, plan.formulas.map(f => f.id).concat(plan.inputs.map(i => i.id)));
+    assert(!res.failed.length, '套用失敗：' + JSON.stringify(res.failed));
+    assert(res.snapshot && /匯入 Excel 前/.test(res.snapshot.SnapshotName), '套用前要自動存快照');
+    g.SHEET_CACHE_ = {}; g.resetCalcMemo_();
+    let worst = 0, where = '';
+    built.meta.vehicles.forEach((v, i) => {
+      const vals = g.calculatePLCore_(s, v.id).lineValues;
+      built.meta.lines.forEach(code => {
+        if (code === 'b6' && i === 2) return;
+        if (i === 2 && ['B', 'C', 'b13', 'E', 'G', 'I', 'K', 'd4'].indexOf(code) !== -1) return;   // 受 VLOOKUP 那格影響
+        const x = nums[String.fromCharCode(68 + i) + built.meta.plAt[code]];
+        const d = Math.abs((vals[code] || 0) - x);
+        if (d > worst) { worst = d; where = v.id + ' ' + code + ' 系統 ' + vals[code] + ' / Excel ' + x; }
+      });
+    });
+    assert(worst <= 0.01, '匯入後系統跟 Excel 重算不一樣：' + where);
+    const again = g.previewVerifyImport(files);
+    assert(!again.formulas.length && !again.inputs.length, '套用後再預覽，應該沒有要匯入的了');
+  });
   fs.rmSync(dir, { recursive: true, force: true });
 }
+
+check('匯入：沒改過的檔案沒有任何變更(含 REF、外幣、車系個別公式、部分車系分攤、目標情境)', () => {
+  cases.filter(c => !c.broken).forEach(c => {
+    const built = c.gs.buildVerifyWorkbookModel_(c.sid);
+    const plan = c.gs.previewVerifyImport(textFiles(Buffer.from(c.gs.buildXlsxBase64_(built.model), 'base64')));
+    assert(!plan.formulas.length && !plan.inputs.length && !plan.problems.length,
+      c.label + '：' + JSON.stringify({ f: plan.formulas.map(f => f.code + ' ' + f.after), i: plan.inputs.map(i => i.label), p: plan.problems }));
+  });
+});
+
+check('匯入：開發總投金額與低減目標、匯率、成本金額、攤提基準台數寫回情境', () => {
+  const c = cases.filter(x => x.label === 'Gate F 目標(低減、攤提基準台數)')[0];
+  const g = c.gs;
+  const built = g.buildVerifyWorkbookModel_(c.sid);
+  const files = textFiles(Buffer.from(g.buildXlsxBase64_(built.model), 'base64'));
+  const ed = editor(files, built);
+  const devSheet = built.model.sheets.filter(s => s.name === '開發總投')[0];
+  const devRow = devSheet.rows.findIndex(r => r && r[0] && r[0].v === '上汽開發費') + 1;
+  ed.v('開發總投', 'G' + devRow, 3500000);
+  ed.v('開發總投', 'K' + devRow, 0.25);
+  ed.v('輸入', 'C' + ed.inRow('CNY匯率'), 4.5);
+  ed.v('輸入', 'E' + ed.inRow('b2 材料成本-KD'), 340000);
+  ed.v('輸入', 'C' + ed.inRow('攤提基準 月銷量'), 650);
+  const plan = g.previewVerifyImport(files);
+  assert(plan.inputs.length === 5 && !plan.formulas.length, '應該 5 項輸入變更：' + plan.inputs.map(i => i.label).join('、'));
+  const res = g.applyVerifyImport(files, plan.inputs.map(i => i.id));
+  assert(!res.failed.length, '套用失敗：' + JSON.stringify(res.failed));
+  reset();
+  const dev = g.getDevInvestment(c.sid).filter(r => r.Department === '上汽開發費')[0];
+  assert(Number(dev.Amount) === 3500000 && Math.abs(Number(dev.ChallengeReductionPct) - 25) < 1e-9, '開發總投：' + dev.Amount + ' / ' + dev.ChallengeReductionPct);
+  assert(g.getParameters(c.sid).some(p => p.Currency === 'CNY' && Number(p.Value) === 4.5), 'CNY 匯率應該是 4.5');
+  assert(g.getCostOfSales(c.sid, 'V2').filter(r => r.LineCode === 'b2')[0].Amount == 340000, '材料成本-KD(V2)');
+  assert(Number(g.getScenarios().filter(s => s.ScenarioID === c.sid)[0].AmortMonthlyVolume) === 650, '攤提基準月銷量');
+  assert(!g.previewVerifyImport(files).inputs.length, '套用後再預覽應該沒有變更');
+});
+
+check('匯入：匯出後系統也改了同一個科目 → 標「匯出後系統也改過」', () => {
+  const c = cases.filter(x => x.label === 'Gate F 驗算情境(含特殊情況)')[0];
+  const built = c.gs.buildVerifyWorkbookModel_(c.sid);
+  const files = textFiles(Buffer.from(c.gs.buildXlsxBase64_(built.model), 'base64'));
+  const ed = editor(files, built);
+  ['D', 'E', 'F'].forEach(col => ed.f('損益試算', col + built.meta.plAt.d4, col + built.meta.plAt.P8 + '*2%'));
+  c.gs.saveChartLine('DA', { LineCode: 'd4', LineName: '季Margin', ParentLine: 'E', CalcType: 'FORMULA', Formula: 'P8 * 3%' });
+  reset();
+  const plan = c.gs.previewVerifyImport(files);
+  const d4 = plan.formulas.filter(f => f.code === 'd4')[0];
+  assert(d4 && d4.conflict, '應該標出衝突：' + JSON.stringify(d4));
+  c.gs.saveChartLine('DA', { LineCode: 'd4', LineName: '季Margin', ParentLine: 'E', CalcType: 'FORMULA', Formula: 'P8 * [季Margin率]' });
+  reset();
+});
+
+check('匯入：Excel 往右拖曳複製的公式(共用公式)讀得出每一格', () => {
+  const xml = '<sheetData><row r="5"><c r="D5"><f t="shared" ref="D5:F5" si="0">D3*$C$1+SUM(D1:D2)</f><v>1</v></c><c r="E5"><f t="shared" si="0"/><v>2</v></c>' +
+    '<c r="F5"><f t="shared" si="0"/></c></row></sheetData>';
+  const cells = gs.readSheetCells_(xml, []);
+  assert(cells.E5.f === 'E3*$C$1+SUM(E1:E2)' && cells.F5.f === 'F3*$C$1+SUM(F1:F2)', '共用公式展開：' + cells.E5.f + ' / ' + cells.F5.f);
+  assert(gs.normalizeExcelText_("='輸入'!$D$18 * _xlfn.FORMULATEXT(a1)") === '輸入!D18*FORMULATEXT(A1)', '比對用的正規化');
+});
 
 const failed = results.filter(r => !r.ok);
 results.forEach(r => console.log((r.ok ? '  ✓ ' : '  ✗ ') + r.name + (r.ok ? '' : '\n      ' + r.err)));

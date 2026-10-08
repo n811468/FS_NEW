@@ -133,6 +133,8 @@ function drawChartEditor_() {
           <button type="button" ${others.length ? '' : 'disabled'} onclick="copyChartDialog()">從其他車型或範本複製…<span>整份換掉</span></button>
           <button type="button" onclick="saveChartAsTemplateUi()">存成標準範本<span>之後新建車型的預設</span></button>
           <button type="button" onclick="restoreChartDefaults()">恢復預設科目<span>預設科目回到系統預設（刪掉的會補回來），自訂科目不動</span></button>
+          <button type="button" onclick="exportVerifyWorkbookDialog(currentScenarioId)">匯出 Excel 驗算檔…<span>每個科目的公式翻成 Excel 公式，在 Excel 裡驗算或修改</span></button>
+          <button type="button" onclick="importVerifyWorkbookDialog()">從 Excel 驗算檔匯入…<span>在 Excel 改過的公式、數字寫回系統，先預覽再確認</span></button>
         </div>
       </details>
     </div>

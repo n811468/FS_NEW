@@ -24,7 +24,7 @@ const PORT = Number(process.env.PORT) || 8787;
 
 /* ---- 示範資料：亂數產生(固定種子)，內容見 tools/demo-data.js ---- */
 function seedDemoData() {
-  const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs']);
+  const gs = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs', 'VerifyImport.gs']);
   seedDemo(gs, process.env.DEMO_SEED ? Number(process.env.DEMO_SEED) : undefined);
   return gs;
 }

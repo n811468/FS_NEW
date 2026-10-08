@@ -52,7 +52,8 @@ src/                        # 系統本體(後端 + 前端)，build 時原封不
 ├─ WhatIfService.gs        # v2.1：目標反推(solveGoal)與敏感度表(sensitivityTable)，靠 CalcEngine 的記憶體覆寫重算
 ├─ SetupSheets.gs          # 建立分頁與科目表；重設科目排序、清除未使用參數等維護作業
 ├─ VerifyWorkbook.gs       # Excel 驗算檔：系統公式逐一翻成 Excel 公式(輸入/開發總投/損益試算/驗算/公式區)，
-│                          #     加上改公式之後的檢查(結構檢查/科目影響/跟預設比較/跟快照比較)
+│                          #     加上改公式之後的檢查(結構檢查/科目影響/跟預設比較/跟快照比較)與隱藏的對照表
+├─ VerifyImport.gs         # 從 Excel 驗算檔匯入：讀 xlsx 的 XML、Excel 公式反向翻成系統公式、預覽與套用
 ├─ XlsxWriter.gs           # 不靠套件的 .xlsx 產生器(XML + 不壓縮的 zip)，離線也能匯出 Excel
 ├─ DataService.gs          # 各表 CRUD 與表格式整批存檔：getXxxGrid() / saveXxxGrid()
 ├─ CalcEngine.gs           # 損益計算引擎：依科目表逐科目取值(手動輸入/公式/開發攤提)；比較 API 與小計驗算
@@ -67,7 +68,7 @@ src/                        # 系統本體(後端 + 前端)，build 時原封不
    ├─ 40-report.js         #   GATE 報告(含作法對帳)
    ├─ 45-whatif.js         #   目標反推與敏感度
    ├─ 50/51/52-*.js        #   損益儀表板(表格、SVG 圖表、hover 提示)
-   ├─ 56-verify-export.js  #   匯出 Excel 驗算檔(儀表板按鈕、工具列「匯出 ▾」)
+   ├─ 56-verify-export.js  #   匯出 Excel 驗算檔、從 Excel 驗算檔匯入(瀏覽器解壓縮 xlsx、預覽對話框)
    └─ 99-init.js           #   開頁初始化
 
 local/                      # 地端層：讓 src/ 在瀏覽器裡跑起來 + 資料包

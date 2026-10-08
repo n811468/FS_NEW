@@ -135,7 +135,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <li><a href="#results"><span class="no">5</span>看結果</a>
       <ol><li><a href="#dashboard">損益儀表板</a></li><li><a href="#whatif">目標反推與敏感度</a></li><li><a href="#waterfall">瀑布圖工具</a></li><li><a href="#report">GATE 報告</a></li></ol></li>
     <li><a href="#excel"><span class="no">6</span>Excel 驗算檔</a>
-      <ol><li><a href="#excel-export">匯出</a></li><li><a href="#excel-sheets">驗算的六張工作表</a></li><li><a href="#excel-verify">怎麼驗算</a></li><li><a href="#excel-change">改公式之後的檢查</a></li><li><a href="#excel-rules">翻譯規則</a></li></ol></li>
+      <ol><li><a href="#excel-export">匯出</a></li><li><a href="#excel-sheets">驗算的六張工作表</a></li><li><a href="#excel-verify">怎麼驗算</a></li><li><a href="#excel-change">改公式之後的檢查</a></li><li><a href="#excel-fix">發現錯誤怎麼辦</a></li><li><a href="#excel-import">從 Excel 匯入</a></li><li><a href="#excel-rules">翻譯規則</a></li></ol></li>
     <li><a href="#tips"><span class="no">7</span>小技巧與常見問題</a></li>
   </ol>
 </nav>
@@ -511,9 +511,38 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   </figure>
   <figure>
     <img src="img/49-xlsx-changes.png" alt="變動檢查工作表" loading="lazy">
-    <figcaption><b>圖 6-11</b>變動檢查：銷貨成本合計（B）的公式沒改，數字卻變了，因為季Margin 改了之後連動貨物稅；判讀欄標「⚠ 公式沒改，數字卻變了」。往下看會看到 C、d4「公式改過」。</figcaption>
+    <figcaption><b>圖 6-11</b>變動檢查（最右邊一欄是可能的原因）：銷貨成本合計（B）的公式沒改，數字卻變了，因為季Margin 改了之後連動貨物稅；判讀欄標「⚠ 公式沒改，數字卻變了」。往下看會看到 C、d4「公式改過」。</figcaption>
   </figure>
-  <div class="tip"><strong>標紅、標黃不一定是錯。</strong>刻意改的算法（例如季Margin 改成固定 1%）也會被標出來；逐條確認「這是不是我要的改動」，不是就回「科目與公式」頁修正，再匯出一次。</div>
+  <div class="tip"><strong>標紅、標黃不一定是錯。</strong>刻意改的算法（例如季Margin 改成固定 1%）也會被標出來；逐條確認「這是不是我要的改動」。</div>
+
+  <h3 id="excel-fix">發現錯誤怎麼辦</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>哪裡標紅</th><th>代表什麼</th><th>怎麼處理</th></tr></thead>
+    <tbody>
+      <tr><td>「驗算」不一致（沒改過輸入）</td><td>系統計算的問題，使用者改不了</td><td>把驗算檔和「匯出 ▾ → 匯出情境」的資料包交給系統維護人員；驗算檔已經標出是哪個科目、哪個車系、差多少</td></tr>
+      <tr><td>結構檢查、科目影響、跟預設比較、變動檢查</td><td>科目表的設定（公式、所屬小計）有問題</td><td>看旁邊的「怎麼修正」：到「科目與公式」改；或直接在驗算檔裡改好，用「從 Excel 匯入」寫回</td></tr>
+    </tbody>
+  </table></div>
+  <p>「怎麼修正」會寫到科目：科目影響列出是哪些科目重複算到它（例：「材料成本-LP 被『銷貨成本合計』『重複的材料』都算到，留一個就好」），變動檢查列出它上游哪些科目變了、哪個的公式改過，公式區寫出系統預設的算法。科目表通常有人負責維護：可以自己改了再「匯出車型」交回去，或把驗算檔交給負責的人，上面已經寫好哪裡錯、要怎麼改。</p>
+
+  <h3 id="excel-import">從 Excel 匯入</h3>
+  <p>在驗算檔裡直接修正：「損益試算」改公式，「輸入」「開發總投」改藍字（售價、銷量、參數、匯率、成本金額、投資金額、低減目標），存檔後匯入回系統。</p>
+  <ol class="steps">
+    <li>在 Excel 改好、存檔（檔案格式維持 .xlsx）。</li>
+    <li>系統裡按 <span class="ui">從 Excel 匯入…</span>（儀表板工具列、「科目與公式」頁右上 ⋯，或工具列「更多… → 從 Excel 驗算檔匯入…」），選這個檔案。</li>
+    <li>預覽列出「公式」「輸入數字」的 現在 → 匯入後，以及「無法匯入」的格子與原因。勾選要匯入的項目，按 <span class="ui">匯入勾選的項目</span>。</li>
+    <li>匯入前系統自動存一份快照「匯入 Excel 前」。匯入後再匯出一次驗算檔、選這個快照，確認四項檢查都通過。</li>
+  </ol>
+  <figure>
+    <img src="img/50-import-preview.png" alt="從 Excel 匯入的預覽對話框" loading="lazy">
+    <figcaption><b>圖 6-12</b>在驗算檔把生產毛利的公式改回 =收入 − 銷貨成本合計，也改了一個售價，匯入時的預覽。公式會存進科目表（整個車型共用），售價寫回這個情境。</figcaption>
+  </figure>
+  <ul>
+    <li><b>只匯入改過的格子</b>：跟匯出當時一樣的格子不會動；匯出之後系統裡同一個地方也改過時，標「匯出後系統也改過」，預設不勾。</li>
+    <li><b>只改了部分車系</b>：存成那幾個車系的個別公式。</li>
+    <li><b>無法匯入</b>：用了系統沒有的函式（只能用 SUM、ROUND、ROUNDUP、ROUNDDOWN、MIN、MAX、ABS、IF）、引用別的車系欄或三張表以外的格子、改了加權平均欄或跨情境引用的數字。</li>
+    <li><b>不能在 Excel 新增科目</b>：先在系統新增科目，再匯出、改公式、匯入。存檔時一樣會檢查循環引用、找不到的科目，擋下來的項目會列出原因。</li>
+  </ul>
 
   <h3 id="excel-rules">翻譯規則</h3>
   <div class="table-wrap"><table>
@@ -555,6 +584,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <li><b>另一個分頁說資料已經被修改？</b>同一份資料在兩個分頁同時開啟時，後開的那一頁會暫停存檔，按「重新整理」就好。</li>
     <li><b>Excel 驗算檔有科目不一致？</b>如果沒有改過輸入，請把檔案與資料包一起交給維護的人；公式區的「對照說明」會寫出那個科目的翻譯方式。</li>
     <li><b>改了公式，怎麼確定沒改壞？</b>改之前存快照，改完匯出驗算檔並選那個快照，看「說明」頁的四項檢查（見第 6 章「改公式之後的檢查」）。</li>
+    <li><b>驗算檔發現公式有錯，但我不負責維護科目表？</b>驗算檔上「怎麼修正」已經寫好哪裡錯、要怎麼改，交給負責的人；或在驗算檔裡改好，交給他用「從 Excel 匯入」（見第 6 章「發現錯誤怎麼辦」）。</li>
   </ul>
 </section>
 

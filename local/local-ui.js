@@ -120,12 +120,14 @@
   var importBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯入資料包…', onclick: function () { fileInput.click(); } });
   var moreSel = el('select', { class: 'fsl-more', title: '其他' }, [
     el('option', { value: '', text: '更多…' }),
+    el('option', { value: 'xlsx', text: '從 Excel 驗算檔匯入…' }),
     el('option', { value: 'demo', text: '載入示範資料…' }),
     el('option', { value: 'reset', text: '清空所有資料…' })
   ]);
   moreSel.addEventListener('change', function () {
     var v = moreSel.value;
     moreSel.value = '';
+    if (v === 'xlsx' && typeof window.importVerifyWorkbookDialog === 'function') window.importVerifyWorkbookDialog();
     if (v === 'demo') loadDemo();
     if (v === 'reset') resetAll();
   });

@@ -9,7 +9,8 @@
  *   sheets: [{
  *     name, cols: [欄寬...], freeze: { row: 4, col: 3 },   // 凍結前 4 列、前 3 欄
  *     rows: [[cell, ...], ...],                             // cell: null | 數字 | 字串 | { v, f, s }
- *     merges: ['A1:F1'], cf: [{ ref: 'F5:F40', formula: 'LEFT($F5,1)="✗"', style: 'bad' }]
+ *     merges: ['A1:F1'], cf: [{ ref: 'F5:F40', formula: 'LEFT($F5,1)="✗"', style: 'bad' }],
+ *     hidden: true                                          // 隱藏的工作表(對照表)
  *   }]
  * }
  * cell.f 是公式(不含開頭的 =)，cell.v 是快取值(Excel 打開時會全部重算，快取值只給不重算的檢視器看)；
@@ -197,7 +198,7 @@ function xlsxParts_(model) {
   files['xl/workbook.xml'] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
     '<bookViews><workbookView activeTab="0"/></bookViews><sheets>' +
-    sheets.map(function (s, i) { return '<sheet name="' + xlsxEsc_(s.name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>'; }).join('') +
+    sheets.map(function (s, i) { return '<sheet name="' + xlsxEsc_(s.name) + '" sheetId="' + (i + 1) + '"' + (s.hidden ? ' state="hidden"' : '') + ' r:id="rId' + (i + 1) + '"/>'; }).join('') +
     // fullCalcOnLoad：打開時一律重算全部公式，驗算看到的是 Excel 自己算的數字，不是檔案裡的快取值
     '</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>';
   files['xl/_rels/workbook.xml.rels'] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +

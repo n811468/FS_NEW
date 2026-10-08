@@ -289,6 +289,18 @@
   /* ---------------- Modal ---------------- */
   dialog.modal { border: none; border-radius: 14px; padding: 0; width: min(560px, calc(100% - 32px)); box-shadow: var(--shadow-2); color: var(--text); }
   dialog.modal.wide { width: min(860px, calc(100% - 32px)); }
+  .vi-h { margin: 16px 0 6px; font-size: 14px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .vi-h .muted { font-weight: 400; font-size: 12px; }
+  .vi-scroll { max-height: 240px; }
+  table.vi-table { width: 100%; table-layout: fixed; }
+  table.vi-table td { text-align: left; vertical-align: top; font-size: 12.5px; white-space: normal; overflow-wrap: anywhere; }
+  table.vi-table th:first-child { width: 34px; }
+  table.vi-table.vi-problems th:first-child { width: 30%; }
+  table.vi-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.vi-table td.vi-name { font-weight: 600; }
+  table.vi-table td.vi-name .muted { font-weight: 400; }
+  table.vi-table code { white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+  .vi-conflict { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #fff4dc; color: #7a5300; font-size: 11.5px; margin-bottom: 2px; }
   dialog.modal::backdrop { background: rgba(16, 27, 51, .42); backdrop-filter: blur(2px); }
   .modal-head { padding: 18px 22px 6px; }
   .modal-head h3 { margin: 0; font-size: 16px; }
@@ -7004,7 +7016,8 @@ function reportMaintenance_(message) {
  *   sheets: [{
  *     name, cols: [欄寬...], freeze: { row: 4, col: 3 },   // 凍結前 4 列、前 3 欄
  *     rows: [[cell, ...], ...],                             // cell: null | 數字 | 字串 | { v, f, s }
- *     merges: ['A1:F1'], cf: [{ ref: 'F5:F40', formula: 'LEFT($F5,1)="✗"', style: 'bad' }]
+ *     merges: ['A1:F1'], cf: [{ ref: 'F5:F40', formula: 'LEFT($F5,1)="✗"', style: 'bad' }],
+ *     hidden: true                                          // 隱藏的工作表(對照表)
  *   }]
  * }
  * cell.f 是公式(不含開頭的 =)，cell.v 是快取值(Excel 打開時會全部重算，快取值只給不重算的檢視器看)；
@@ -7192,7 +7205,7 @@ function xlsxParts_(model) {
   files['xl/workbook.xml'] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
     '<bookViews><workbookView activeTab="0"/></bookViews><sheets>' +
-    sheets.map(function (s, i) { return '<sheet name="' + xlsxEsc_(s.name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>'; }).join('') +
+    sheets.map(function (s, i) { return '<sheet name="' + xlsxEsc_(s.name) + '" sheetId="' + (i + 1) + '"' + (s.hidden ? ' state="hidden"' : '') + ' r:id="rId' + (i + 1) + '"/>'; }).join('') +
     // fullCalcOnLoad：打開時一律重算全部公式，驗算看到的是 Excel 自己算的數字，不是檔案裡的快取值
     '</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>';
   files['xl/_rels/workbook.xml.rels'] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -7312,7 +7325,8 @@ function buildXlsxBase64_(model) {
  *   開發總投攤提            → 「開發總投」表每一筆的單台攤提，依攤提落點 SUMIF
  */
 
-var VERIFY_SHEETS_ = { info: '說明', input: '輸入', dev: '開發總投', pl: '損益試算', check: '驗算', formulas: '公式區',
+// map：隱藏的對照表，記錄每一格是哪個科目/輸入/投資，以及匯出當時的值與公式(從 Excel 匯入回系統時用)
+var VERIFY_SHEETS_ = { map: '_對照', info: '說明', input: '輸入', dev: '開發總投', pl: '損益試算', check: '驗算', formulas: '公式區',
   structure: '結構檢查', impact: '科目影響', changes: '變動檢查' };
 // 輸入表與損益試算表的車系欄位從同一欄開始(D)，同一列的公式往右拉就是下一個車系
 var VERIFY_FIRST_VEHICLE_COL_ = 3;
@@ -7411,6 +7425,7 @@ function verifyReadableFormula_(formula, defsByCode) {
  */
 function buildVerifyWorkbookModel_(scenarioId, opts) {
   opts = opts || {};
+  var EDIT_HINT = '（或在本檔「損益試算」改好那一格，用系統的「從 Excel 匯入」寫回）';
   var scenario = getScenarios().filter(function (s) { return s.ScenarioID === scenarioId; })[0];
   if (!scenario) throw new Error('找不到情境：' + scenarioId);
   var typeId = scenario.VehicleTypeID || '';
@@ -7492,6 +7507,8 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
   });
   var devRows = sortByOrder_(getDevInvestment(scenarioId), 'SortOrder');
   devRows.forEach(function (r) { addCur(r.Currency); });
+
+  var mapRows = [];   // 隱藏對照表的內容：[種類, 鍵, 值1, 值2]
 
   /* ================= 輸入 ================= */
   var input = { rows: [], at: {} };   // at[key] = 列號(0 起算)
@@ -7672,6 +7689,9 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
       var target = devAmortTargetOf_(row);
       var cur = String(row.Currency || '').toUpperCase();
       var rn = r + 1;
+      mapRows.push(['dev', row.RowID, rn]);
+      mapRows.push(['inval', 'dev:' + row.RowID + ':amount', '', toNumber_(row.Amount)]);
+      if (!isBaseline) mapRows.push(['inval', 'dev:' + row.RowID + ':pct', '', toNumber_(row.ChallengeReductionPct) / 100]);
       var fxCell = cur && cur !== BASE_CURRENCY ? { f: inShared('fx:' + cur), v: fxRateFor_(params, cur, ''), s: 'link' } : { v: 1, s: 'calc' };
       var amount = toNumber_(row.Amount);
       var twd = amount * fxRateFor_(params, row.Currency, '');
@@ -7727,6 +7747,7 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
     devTargetCodes.forEach(function (code) {
       var rn = r + 1;
       devSummaryAt[code] = rn;
+      mapRows.push(['devsum', code, rn]);
       var cells = [{ v: code, s: 'label' }, { v: defsByCode[code].LineName, s: 'label' }];
       for (var k = 2; k < 11; k++) cells.push(null);
       cells.push({ f: devRows.length ? 'SUMIF(' + rng('D') + ',$A' + rn + ',' + rng('L') + ')' : '0', v: dev.totalsByLine[code] || 0, s: 'calc' });
@@ -7852,7 +7873,7 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
   var diffCol = function (k) { return xlsxCol_(2 + nCols + k); };
   var resultCol = xlsxCol_(2 + nCols * 2);
   ckRows[0] = [{ v: '驗算：Excel 重算結果 vs 系統數字', s: 'title' }];
-  ckRows[1] = [{ v: '左半部是匯出當下系統算出來的數字(固定值)；右半部 = 損益試算(Excel 重算) − 系統數字，超過「說明」頁的容差就標紅。', s: 'note' }];
+  ckRows[1] = [{ v: '左半部是匯出當下系統算出來的數字(固定值)；右半部 = 損益試算(Excel 重算) − 系統數字，超過「說明」頁的容差就標紅。沒改過輸入卻標紅 = 系統計算有問題，請把這個檔案和「匯出情境」的資料包交給系統維護人員。', s: 'note' }];
   var ckHeader = [{ v: '代碼', s: 'header' }, { v: '科目', s: 'header' }];
   vehicles.forEach(function (v) { ckHeader.push({ v: '系統\n' + v.label, s: 'header' }); });
   ckHeader.push({ v: '系統\n加權平均', s: 'header' });
@@ -7882,7 +7903,7 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
   fmRows[0] = [{ v: '公式區：系統公式 ⇄ Excel 公式', s: 'title' }];
   fmRows[1] = [{ v: '每個科目一列(車系有個別公式時，每一種公式各一列)。「Excel 公式」是損益試算表那一格的公式(FORMULATEXT，Excel 2013 以後才有)，改了損益試算表這裡會跟著變。', s: 'note' }];
   var fmHeader = ['代碼', '科目', '計算來源', '適用車系', '系統公式（科目名稱）', '系統公式（存檔的樣子）', 'Excel 公式（損益試算）', '對照說明', '驗算結果',
-    '系統預設的算法', '跟系統預設比較'];
+    '系統預設的算法', '跟系統預設比較', '不是刻意改的話怎麼修正'];
   fmRows[3] = fmHeader.map(function (h) { return { v: h, s: 'header' }; });
   var noteText = function (d, notes, kind) {
     var out = [];
@@ -7924,6 +7945,16 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
     }
     return out.length ? out.join('；') : '相同';
   };
+  var stdFix = function (d, g) {
+    var cmp = stdCompare(d, g);
+    if (cmp === '相同') return '';
+    if (/^新增的科目/.test(cmp)) return '確認它掛在正確的小計底下（看「科目影響」這個科目是不是 −1）';
+    var out = [];
+    if (/計算來源|公式跟預設/.test(cmp)) out.push('到「科目與公式」點「' + d.LineName + '」，改成「系統預設的算法」那一欄' + EDIT_HINT);
+    if (/個別公式/.test(cmp)) out.push('到「科目與公式」點「' + d.LineName + '」→ 進階設定 → 車系個別公式，清掉不需要的車系');
+    if (/所屬小計/.test(cmp)) out.push('到「科目與公式」點「' + d.LineName + '」，「計入」改回預設的小計');
+    return out.join('；');
+  };
   var stdDiffCount = 0;
   var fr = 4;
   lines.forEach(function (d) {
@@ -7951,7 +7982,8 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
         { v: noteText(d, notes, g.kind), s: 'wrap' },
         { f: verifySheetRef_(CK, checkResultAt[d.LineCode]), v: '✓ 一致', s: 'label' },
         { v: stdFormulaText(d), s: 'code' },
-        { v: stdCompare(d, g), s: 'wrap' }
+        { v: stdCompare(d, g), s: 'wrap' },
+        { v: stdFix(d, g), s: 'wrap' }
       ];
       if (stdCompare(d, g) !== '相同') stdDiffCount++;
     });
@@ -7971,6 +8003,25 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
   paramDefs.forEach(function (d) { nameRow(d.ParamName, '參數', 'param:' + d.ParamName, (d.Unit === '%' ? '% 參數，存成小數。' : '') + (d.Description || '')); });
   currencies.forEach(function (c) { nameRow(c + '匯率', '匯率', 'fx:' + c, '1 ' + c + ' = ? 台幣'); });
 
+  // 「怎麼修正」用：科目之間的引用關係(看所有車系的公式)
+  var refsOf = function (d) {
+    var out = {};
+    var fs = [d.CalcType === CALC_TYPES.FORMULA ? d.Formula : ''];
+    var vf = parseVehicleFormulas_(d.VehicleFormulas);
+    Object.keys(vf).forEach(function (k) { fs.push(vf[k]); });
+    fs.forEach(function (f) {
+      if (!f) return;
+      var info = inspectFormula_(f);
+      if (!info.ok) return;
+      info.refs.codes.forEach(function (c) { out[c] = true; });
+      info.refs.names.forEach(function (n) { if (byName[n]) out[byName[n].LineCode] = true; });
+      if (info.refs.calls.indexOf('CHILDREN') !== -1) (children[d.LineCode] || []).forEach(function (c) { out[c] = true; });
+      if (info.refs.calls.indexOf('TAXDEDUCT') !== -1) taxDeductCodes.forEach(function (c) { out[c] = true; });
+    });
+    delete out[d.LineCode];
+    return Object.keys(out);
+  };
+  var nameList = function (codes) { return codes.map(function (c) { return '「' + (defsByCode[c] ? defsByCode[c].LineName : c) + '」'; }).join('、'); };
   var anyBad = function (range) { return 'SUMPRODUCT(--(ABS(' + range + ')>' + tolRef + '))'; };
   var plCell = function (code, k) { return verifySheetRef_(PL, (k < nV ? vCol(k) : wCol) + plAt[code]); };
 
@@ -7982,7 +8033,7 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
   stRows[0] = [{ v: '結構檢查：用系統預設的算法重算各段小計', s: 'title' }];
   stRows[1] = [{ v: '每一列 = 損益試算的實際數字 − 用預設算法算出來的數字(Excel 公式)。標紅代表那一段小計跟預設算法不同：可能是公式改壞、明細掛錯小計，也可能是刻意改的算法(對照公式區最右邊「跟系統預設比較」)。', s: 'note' }];
   stRows[3] = [{ v: '代碼', s: 'header' }, { v: '檢查', s: 'header' }, { v: '預設算法', s: 'header' }]
-    .concat(vehicles.map(function (v) { return { v: '差異\n' + v.label, s: 'header' }; })).concat([{ v: '差異\n加權平均', s: 'header' }, { v: '結果', s: 'header' }]);
+    .concat(vehicles.map(function (v) { return { v: '差異\n' + v.label, s: 'header' }; })).concat([{ v: '差異\n加權平均', s: 'header' }, { v: '結果', s: 'header' }, { v: '標紅時怎麼修正', s: 'header' }]);
   var stChecks = [];
   ['A', 'B', 'C', 'E', 'G', 'I', 'K'].forEach(function (code) {
     if (plAt[code] === undefined || !DEFAULT_FORMULAS[code]) return;
@@ -8006,6 +8057,7 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
     stChecks.push({ label: d.LineCode + ' ' + d.LineName, formula: 'CHILDREN()', code: d.LineCode });
   });
   var stFirst = 5;
+  var stResultCol = xlsxCol_(VC + nV + 1);
   var valsFor = function (k) { return k < nV ? results[vehicles[k].id].lineValues : weighted; };
   // 快取值(Excel 打開時會重算；不重算的檢視器看到的也要是對的)：用同一個預設算法在這裡先算一次
   var expectedValue = function (chk, vals) {
@@ -8042,10 +8094,15 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
     if (rowBad) stBad++;
     var range = vCol(0) + rn + ':' + wCol + rn;
     row.push({ f: 'IF(' + anyBad(range) + '=0,"✓ 符合","✗ 跟預設算法不同")', v: rowBad ? '✗ 跟預設算法不同' : '✓ 符合', s: 'label' });
+    // 只在標紅時顯示(Excel 裡改了數字、重算後也跟著變)
+    var fixText = chk.custom
+      ? '先看上面哪一段小計標紅；都沒有標紅時，看「科目影響」有沒有沒算進去或重複算的科目'
+      : '到「科目與公式」點「' + defsByCode[chk.code].LineName + '」：不是刻意改的算法，就把公式改回「預設算法」那一欄' + EDIT_HINT +
+        (/CHILDREN/.test(chk.formula) ? '；也確認底下的明細科目「計入」選對了小計' : '');
+    row.push({ f: 'IF(LEFT(' + stResultCol + rn + ',1)="✗","' + fixText.replace(/"/g, '""') + '","")', v: rowBad ? fixText : '', s: 'wrap' });
     stRows[rn - 1] = row;
   });
   var stLast = stFirst + Math.max(stChecks.length, 1) - 1;
-  var stResultCol = xlsxCol_(VC + nV + 1);
 
   /* ================= 科目影響 =================
    * 系統把每個明細科目逐一 +1,000 元重算，看營業淨利變多少：成本/費用應該 −1、收入 +1。
@@ -8055,7 +8112,7 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
   imRows[0] = [{ v: '科目影響：每個明細科目多 1 元，營業淨利變多少', s: 'title' }];
   imRows[1] = [{ v: '系統把每個科目逐一加 1,000 元重新計算整張損益表，(營業淨利的變化) ÷ 1,000。成本、費用應該是 −1，收入 +1；0 = 沒有算進營業淨利，−2 = 重複計算。這一頁是系統算的固定值，用來抓「科目掛錯小計、漏算、重複算」。', s: 'note' }];
   imRows[3] = [{ v: '代碼', s: 'header' }, { v: '科目', s: 'header' }, { v: '所屬小計', s: 'header' }]
-    .concat(vehicles.map(function (v) { return { v: v.label, s: 'header' }; })).concat([{ v: '預期', s: 'header' }, { v: '結果', s: 'header' }]);
+    .concat(vehicles.map(function (v) { return { v: v.label, s: 'header' }; })).concat([{ v: '預期', s: 'header' }, { v: '結果', s: 'header' }, { v: '怎麼修正', s: 'header' }]);
   var isRevenueLine = function (d) {
     var cur = d, guard = 0;
     while (cur && guard++ < 20) {
@@ -8096,9 +8153,20 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
     });
     if (worst.charAt(0) === '✗') impactBad++;
     var parent = d.ParentLine && defsByCode[d.ParentLine] ? defsByCode[d.ParentLine].LineName : '（最上層）';
+    var users = lines.filter(function (x) { return refsOf(x).indexOf(d.LineCode) !== -1; }).map(function (x) { return x.LineCode; });
+    var fix = '';
+    if (/沒有算進/.test(worst)) {
+      fix = d.ParentLine
+        ? '「' + parent + '」有把它算進去，但被別的公式抵銷了：檢查引用它的科目' + (users.length ? nameList(users) : '') + '有沒有多加回去'
+        : '它沒有掛在任何小計底下：到「科目與公式」點「' + d.LineName + '」，「計入」選它該在的小計（成本選銷貨成本合計，費用選銷貨毛利／產品貢獻／營業淨利(未扣前瞻)）';
+    } else if (/重複/.test(worst)) {
+      fix = '有好幾個地方都算到它：' + nameList(users) + '，留一個就好（到「科目與公式」改掉多算的那個公式）';
+    } else if (/正負號/.test(worst)) {
+      fix = '確認它是收入還是成本：成本、費用要掛在成本或費用的小計底下；如果金額本來就要用負數(例如沖減)，也可能是登打的正負號';
+    }
     imRows[4 + i] = [{ v: d.LineCode, s: 'label' }, { v: d.LineName, s: 'label' }, { v: parent, s: 'label' }]
       .concat(cs.map(function (c) { return { v: c, s: 'sys' }; }))
-      .concat([{ v: expected, s: 'label' }, { v: worst, s: 'label' }]);
+      .concat([{ v: expected, s: 'label' }, { v: worst, s: 'label' }, { v: fix, s: 'wrap' }]);
   });
   var imResultCol = xlsxCol_(VC + nV + 1);
   var imLast = 4 + Math.max(impactLines.length, 1);
@@ -8107,7 +8175,7 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
    * 改公式/科目前先存情境快照，匯出時選它：逐科目列出 快照 → 現在 的差異與公式有沒有改，
    * 「公式沒改、數字卻變了」的科目特別標出來(通常是上游被改到)。 */
   var CH = VERIFY_SHEETS_.changes;
-  var chRows = null, chLast = 0, chJudgeCol = '', snapLabel = '', chWarn = 0;
+  var chRows = null, chLast = 0, chJudgeCol = '', snapLabel = '', chWarn = 0, chInfo = {};
   var snap = opts.snapshotId ? snapshotData_(opts.snapshotId) : null;
   if (opts.snapshotId && !snap) throw new Error('找不到快照：' + opts.snapshotId);
   if (snap) {
@@ -8131,7 +8199,7 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
     var dCols = ['加權平均'].concat(vehicles.map(function (v) { return v.label; }));
     chRows[3] = ['代碼', '科目', '公式', '快照\n加權平均', '現在\n加權平均'].map(function (h) { return { v: h, s: 'header' }; })
       .concat(dCols.map(function (l) { return { v: '差異\n' + l, s: 'header' }; }))
-      .concat(['判讀', '快照時的公式', '現在的公式'].map(function (h) { return { v: h, s: 'header' }; }));
+      .concat(['判讀', '快照時的公式', '現在的公式', '公式沒改、數字卻變了：可能的原因'].map(function (h) { return { v: h, s: 'header' }; }));
     var dFirst = 5;   // F 欄開始是差異
     var dLastCol = xlsxCol_(dFirst + dCols.length - 1);
     chJudgeCol = xlsxCol_(dFirst + dCols.length);
@@ -8168,9 +8236,20 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
       row.push(judge);
       row.push({ v: sl ? shownFormula(sl.CalcType, sl.Formula) : '', s: 'code' });
       row.push({ v: d ? shownFormula(d.CalcType, lineFormulaFor_(d, '')) : '', s: 'code' });
+      chInfo[code] = { fState: fState, numChanged: numChanged, row: row };
       chRows[rn - 1] = row;
     });
     chLast = 4 + order.length;
+    // 公式沒改、數字卻變了：列出它引用的科目裡，公式改過或數字也變了的(往上游追)
+    order.forEach(function (code) {
+      var info = chInfo[code], d = defsByCode[code];
+      if (!info || !d || info.fState !== '相同' || !info.numChanged) return;
+      var ups = refsOf(d).filter(function (c) { return chInfo[c] && (chInfo[c].fState !== '相同' || chInfo[c].numChanged); });
+      var formulaChanged = ups.filter(function (c) { return chInfo[c].fState !== '相同'; });
+      info.row.push({ v: ups.length
+        ? '它引用的' + nameList(ups) + '變了' + (formulaChanged.length ? '，其中' + nameList(formulaChanged) + '的公式改過' : '') + '：先確認那些科目'
+        : (d.CalcType === CALC_TYPES.FORMULA ? '它引用的參數、售價或匯率改過（看「輸入」）' : '快照之後這個科目的輸入金額改過'), s: 'wrap' });
+    });
   }
 
   /* ================= 輸入表實際內容 ================= */
@@ -8183,12 +8262,35 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
     if (s.section) { inRows[s.row] = [{ v: s.section, s: 'section' }]; for (var k = 1; k <= noteCol; k++) inRows[s.row].push({ v: '', s: 'section' }); return; }
     var cells = s.build();
     var row = [{ v: s.label, s: 'label' }, { v: s.unit, s: 'label' }];
-    if (cells.length && cells[0].shared) { row.push(cells[0]); cells = cells.slice(1); }
+    var record = function (cell, vid) {
+      if (!cell || !/^(sm|param|fx|amt|ref):/.test(s.key)) return;
+      if (cell.f) { mapRows.push(['infml', s.key, vid]); return; }
+      if (/^input/.test(cell.s || '')) mapRows.push(['inval', s.key, vid, cell.v]);
+    };
+    if (cells.length && cells[0].shared) { record(cells[0], ''); row.push(cells[0]); cells = cells.slice(1); }
     else row.push({ v: '', s: 'label' });
-    vehicles.forEach(function (v, i) { row.push(cells[i] || { v: '', s: 'label' }); });
+    vehicles.forEach(function (v, i) { record(cells[i], v.id); row.push(cells[i] || { v: '', s: 'label' }); });
     row.push({ v: s.note, s: 'note' });
     inRows[s.row] = row;
   });
+
+  /* ================= 隱藏對照表 ================= */
+  mapRows.unshift(['meta', 'version', 1], ['meta', 'scenarioId', scenarioId], ['meta', 'vehicleTypeId', typeId], ['meta', 'exportedAt', new Date().toISOString()],
+    ['meta', 'weightedCol', wCol]);
+  vehicles.forEach(function (v, i) { mapRows.push(['vehicle', v.id, vCol(i), devVCol(i)]); });
+  lines.forEach(function (d) { mapRows.push(['pl', d.LineCode, plAt[d.LineCode]]); });
+  Object.keys(input.at).forEach(function (k) { mapRows.push(['in', k, input.at[k] + 1]); });
+  lines.forEach(function (d) {
+    vehicles.forEach(function (v) {
+      var key = d.LineCode + '|' + v.id;
+      var f = formulaOf(d, v.id);
+      mapRows.push(['plf', key, ((plFormulaText[d.LineCode] || {})[v.id]) || '', f || '']);
+      var info = (inputCellInfo[d.LineCode] || {})[v.id];
+      if (info && info.mixed) mapRows.push(['amtmixed', key, 1]);
+      if (info && info.currency) mapRows.push(['amtcur', key, info.currency]);
+    });
+  });
+  var mapSheetRows = mapRows.map(function (r) { return r.map(function (x) { return x === undefined || x === null ? '' : x; }); });
 
   /* ================= 說明 ================= */
   var scenarioLabel = [scenario.Gate, scenario.ScenarioName].filter(function (x) { return x; }).join(' ');
@@ -8201,7 +8303,7 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
   infoRows[4] = [{ v: '車系', s: 'labelBold' }, null, { v: vehicles.map(function (v) { return v.label; }).join('、'), s: 'label' }];
   infoRows[5] = [{ v: '匯出時間', s: 'labelBold' }, null, { v: formatDateTime_(new Date()), s: 'label' }];
   infoRows[7] = [{ v: '驗算結果', s: 'labelBold' }, null,
-    { f: 'IF(' + mismatchFormula + '=0,"✓ Excel 重算的 ' + lines.length + ' 個科目全部跟系統一致","✗ 有 "&' + mismatchFormula + '&" 個科目跟系統不一致，見「驗算」頁")', v: '✓ Excel 重算的 ' + lines.length + ' 個科目全部跟系統一致', s: 'big' }];
+    { f: 'IF(' + mismatchFormula + '=0,"✓ Excel 重算的 ' + lines.length + ' 個科目全部跟系統一致","✗ 有 "&' + mismatchFormula + '&" 個科目跟系統不一致，見「驗算」頁：這是系統計算的問題，請把這個檔案和「匯出情境」的資料包交給系統維護人員")', v: '✓ Excel 重算的 ' + lines.length + ' 個科目全部跟系統一致', s: 'big' }];
   infoRows[8] = [{ v: '不一致的科目數', s: 'labelBold' }, null, { f: mismatchFormula, v: 0, s: 'int' }];
   if (profitRow) {
     infoRows[9] = [{ v: (defsByCode[profitCode] || {}).LineName + '（加權平均，元/台）', s: 'labelBold' }, null,
@@ -8226,6 +8328,7 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
     ['2', '想知道某個科目怎麼算：到「公式區」找那一列，左邊是系統公式(科目名稱)，右邊是 Excel 公式；點「損益試算」那一格也看得到公式。'],
     ['3', '想試算：改「輸入」或「開發總投」的藍字，損益試算跟著變；「驗算」頁會顯示跟匯出當時的差異(那是你改的影響，不是錯誤)。'],
     ['4', '改了公式或科目之後：看上面「改公式、改科目之後的檢查」四項。驗算一致只代表系統照公式算對了；公式本身改得對不對，要看這四項。'],
+    ['修正', '標紅的項目旁邊有「怎麼修正」：到系統「科目與公式」改；或直接在本檔「損益試算」改公式、在「輸入」「開發總投」改藍字，再用系統的「從 Excel 匯入」寫回(先預覽、確認才存)。'],
     ['5', '顏色：藍字黃底 = 輸入值；黑字 = 公式；綠字 = 引用其他工作表；灰底 = 系統數字(固定值)。'],
     ['', ''],
     ['翻譯規則', ''],
@@ -8272,18 +8375,19 @@ function buildVerifyWorkbookModel_(scenarioId, opts) {
     { name: CK, rows: ckRows, cols: [7, 26].concat(new Array(nCols * 2).join(',').split(',').map(function () { return 13; })).concat([12]), freeze: { row: PL_HEADER_ROW, col: 2 },
       cf: [{ ref: resultCol + PL_FIRST + ':' + resultCol + plLast, formula: 'LEFT($' + resultCol + PL_FIRST + ',1)="✗"', style: 'bad' },
         { ref: resultCol + PL_FIRST + ':' + resultCol + plLast, formula: 'LEFT($' + resultCol + PL_FIRST + ',1)="✓"', style: 'good' }] },
-    { name: FM, rows: fmRows, cols: [7, 22, 12, 14, 48, 30, 60, 46, 11, 40, 30], freeze: { row: 4, col: 2 },
+    { name: FM, rows: fmRows, cols: [7, 22, 12, 14, 48, 30, 60, 46, 11, 40, 30, 50], freeze: { row: 4, col: 2 },
       cf: [{ ref: 'I5:I' + (4 + lines.length * 4), formula: 'LEFT($I5,1)="✗"', style: 'bad' },
         { ref: 'K5:K' + (4 + lines.length * 4), formula: 'AND($K5<>"",$K5<>"相同")', style: 'warn' }] },
-    { name: ST, rows: stRows, cols: [7, 30, 56].concat(vehicles.map(function () { return 13; })).concat([13, 18]), freeze: { row: 4, col: 1 },
+    { name: ST, rows: stRows, cols: [7, 30, 56].concat(vehicles.map(function () { return 13; })).concat([13, 18, 60]), freeze: { row: 4, col: 1 },
       cf: [{ ref: stResultCol + stFirst + ':' + stResultCol + stLast, formula: 'LEFT($' + stResultCol + stFirst + ',1)="✗"', style: 'bad' },
         { ref: stResultCol + stFirst + ':' + stResultCol + stLast, formula: 'LEFT($' + stResultCol + stFirst + ',1)="✓"', style: 'good' }] },
-    { name: IM, rows: imRows, cols: [7, 26, 18].concat(vehicles.map(function () { return 12; })).concat([7, 40]), freeze: { row: 4, col: 2 },
+    { name: IM, rows: imRows, cols: [7, 26, 18].concat(vehicles.map(function () { return 12; })).concat([7, 40, 60]), freeze: { row: 4, col: 2 },
       cf: [{ ref: imResultCol + '5:' + imResultCol + imLast, formula: 'LEFT($' + imResultCol + '5,1)="✗"', style: 'bad' },
         { ref: imResultCol + '5:' + imResultCol + imLast, formula: 'LEFT($' + imResultCol + '5,1)="✓"', style: 'good' }] }
   ];
+  sheets.push({ name: VERIFY_SHEETS_.map, rows: mapSheetRows, cols: [10, 36, 30, 30], hidden: true });
   if (chRows) {
-    sheets.push({ name: CH, rows: chRows, cols: [7, 24, 12, 14, 14].concat(vehicles.map(function () { return 12; })).concat([12, 36, 40, 40]), freeze: { row: 4, col: 2 },
+    sheets.splice(sheets.length - 1, 0, { name: CH, rows: chRows, cols: [7, 24, 12, 14, 14].concat(vehicles.map(function () { return 12; })).concat([12, 36, 40, 40, 50]), freeze: { row: 4, col: 2 },
       cf: [{ ref: chJudgeCol + '5:' + chJudgeCol + chLast, formula: 'LEFT($' + chJudgeCol + '5,1)="⚠"', style: 'bad' },
         { ref: chJudgeCol + '5:' + chJudgeCol + chLast, formula: 'LEFT($' + chJudgeCol + '5,1)="✓"', style: 'good' },
         { ref: 'C5:C' + chLast, formula: 'AND($C5<>"",$C5<>"相同")', style: 'warn' }] });
@@ -8325,8 +8429,814 @@ function exportVerifyWorkbook(scenarioId, snapshotId) {
   };
 }
 
+
+// ===== src/VerifyImport.gs =====
+/**
+ * 從 Excel 驗算檔匯入：使用者在驗算檔裡改了公式(損益試算)或輸入數字(輸入、開發總投的藍字)，
+ * 匯入回系統。流程是「先預覽、確認才存」：
+ *   previewVerifyImport(files)        → 列出會更新的公式、輸入數字，以及無法匯入的格子與原因
+ *   applyVerifyImport(files, ids)     → 只套用勾選的項目(先自動存一份快照)，一律走原本的存檔函式，驗證規則跟畫面上改一樣
+ *
+ * files = { 'xl/workbook.xml': 文字, 'xl/worksheets/sheet1.xml': 文字, ... }：前端把 xlsx 解壓縮後只送文字檔過來。
+ *
+ * 怎麼知道哪一格是什麼：驗算檔裡有一張隱藏的「_對照」表(VerifyWorkbook.gs)，記錄每個科目在哪一列、每個車系在哪一欄、
+ * 每個輸入在哪一列，以及匯出當時的公式與數字。只有跟匯出當時不一樣的格子才算「使用者改過」；
+ * 系統在匯出之後也改過同一個地方時，預覽會標「匯出後系統也改過」，預設不勾。
+ *
+ * Excel 公式 → 系統公式(VerifyWorkbook.gs 翻譯規則的反方向)：
+ *   損益試算同一欄的格子 → 科目代碼；「輸入」的格子 → [系統變數]/[參數]/[XXX匯率]；「開發總投」彙總列 → 那個開發攤提科目；
+ *   SUM(子科目) → CHILDREN()、SUM(可扣除貨物稅科目) → TAXDEDUCT()；IF(b=0,0,a/b) → a/b；(比較式)*1 → 比較式；x% → x/100。
+ *   系統沒有的函式(VLOOKUP…)、引用別的車系欄、引用對照表以外的格子 → 列在「無法匯入」，不會存。
+ */
+
+var VERIFY_IMPORT_FUNCTIONS_ = ['SUM', 'ROUND', 'ROUNDUP', 'ROUNDDOWN', 'MIN', 'MAX', 'ABS', 'IF'];
+
+/* ======================= 讀 xlsx 的 XML ======================= */
+
+function xmlUnescape_(s) {
+  return String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, function (m, h) { return String.fromCharCode(parseInt(h, 16)); })
+    .replace(/&#(\d+);/g, function (m, d) { return String.fromCharCode(Number(d)); })
+    .replace(/&amp;/g, '&');
+}
+function xmlAttr_(attrs, name) {
+  var m = new RegExp('(?:^|\\s)' + name + '="([^"]*)"').exec(attrs);
+  return m ? xmlUnescape_(m[1]) : null;
+}
+function cellPos_(ref) {
+  var m = /^\$?([A-Z]{1,3})\$?(\d+)$/.exec(ref);
+  if (!m) return null;
+  var col = 0;
+  for (var i = 0; i < m[1].length; i++) col = col * 26 + (m[1].charCodeAt(i) - 64);
+  return { col: col - 1, row: Number(m[2]) - 1 };
+}
+
+/** 公式裡的相對參照整段平移(Excel 的共用公式：只存第一格的公式，其他格依位移推算) */
+function shiftFormulaRefs_(text, dr, dc) {
+  var out = '', i = 0;
+  while (i < text.length) {
+    var ch = text.charAt(i);
+    if (ch === '"') {
+      var j = i + 1;
+      while (j < text.length && !(text.charAt(j) === '"' && text.charAt(j + 1) !== '"')) j += text.charAt(j) === '"' ? 2 : 1;
+      out += text.slice(i, j + 1); i = j + 1; continue;
+    }
+    if (ch === "'") {
+      var k = text.indexOf("'!", i + 1);
+      if (k !== -1) { out += text.slice(i, k + 2); i = k + 2; continue; }
+    }
+    var m = /^(\$?)([A-Z]{1,3})(\$?)(\d+)/.exec(text.slice(i));
+    var prev = i ? text.charAt(i - 1) : '';
+    if (m && !/[A-Za-z0-9_.]/.test(prev) && !/^[A-Za-z0-9_(]/.test(text.charAt(i + m[0].length))) {
+      var pos = cellPos_(m[2] + m[4]);
+      var col = m[1] ? pos.col : pos.col + dc, row = m[3] ? pos.row : pos.row + dr;
+      out += m[1] + xlsxCol_(col) + m[3] + (row + 1);
+      i += m[0].length; continue;
+    }
+    out += ch; i++;
+  }
+  return out;
+}
+
+/** files → { 工作表名稱: { A1: { f: 公式(不含 =) 或 null, v: 值 } } } */
+function readXlsxSheets_(files) {
+  var wb = files['xl/workbook.xml'];
+  if (!wb) throw new Error('這不是 Excel 檔(xlsx)，或檔案已損壞');
+  var rels = files['xl/_rels/workbook.xml.rels'] || '';
+  var relTarget = {};
+  rels.replace(/<Relationship\b([^>]*)\/?>/g, function (m, attrs) { relTarget[xmlAttr_(attrs, 'Id')] = xmlAttr_(attrs, 'Target'); return m; });
+  var shared = [];
+  var sst = files['xl/sharedStrings.xml'];
+  if (sst) {
+    sst.replace(/<si>([\s\S]*?)<\/si>/g, function (m, inner) {
+      var t = '';
+      inner.replace(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g, function (m2, x) { t += xmlUnescape_(x); return m2; });
+      shared.push(t);
+      return m;
+    });
+  }
+  var out = {};
+  wb.replace(/<sheet\b([^>]*)\/?>/g, function (m, attrs) {
+    var name = xmlAttr_(attrs, 'name');
+    var target = relTarget[xmlAttr_(attrs, 'r:id')] || '';
+    var path = target.charAt(0) === '/' ? target.slice(1) : 'xl/' + target.replace(/^\.\//, '');
+    var xml = files[path];
+    if (name && xml) out[name] = readSheetCells_(xml, shared);
+    return m;
+  });
+  return out;
+}
+
+function readSheetCells_(xml, shared) {
+  var cells = {}, masters = {};
+  var re = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g, m;
+  while ((m = re.exec(xml))) {
+    var attrs = m[1], inner = m[2] || '';
+    var ref = xmlAttr_(attrs, 'r');
+    if (!ref) continue;
+    var t = xmlAttr_(attrs, 't') || 'n';
+    var fm = /<f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/f>)/.exec(inner);
+    var f = null;
+    if (fm) {
+      var fAttrs = fm[1], fText = fm[2] !== undefined ? xmlUnescape_(fm[2]) : '';
+      if (xmlAttr_(fAttrs, 't') === 'shared') {
+        var si = xmlAttr_(fAttrs, 'si');
+        if (fText) { masters[si] = { text: fText, pos: cellPos_(ref) }; f = fText; }
+        else if (masters[si]) {
+          var p = cellPos_(ref), mp = masters[si].pos;
+          f = shiftFormulaRefs_(masters[si].text, p.row - mp.row, p.col - mp.col);
+        }
+      } else if (fText) f = fText;
+    }
+    var vm = /<v>([\s\S]*?)<\/v>/.exec(inner);
+    var v = vm ? xmlUnescape_(vm[1]) : '';
+    if (t === 's') v = shared[Number(v)] !== undefined ? shared[Number(v)] : '';
+    else if (t === 'inlineStr') {
+      v = '';
+      inner.replace(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g, function (m2, x) { v += xmlUnescape_(x); return m2; });
+    } else if (t === 'b') v = v === '1' ? 1 : 0;
+    else if (t === 'n' && v !== '') v = Number(v);
+    else if (t === 'e') v = { error: v };
+    cells[ref.replace(/\$/g, '')] = { f: f, v: v };
+  }
+  return cells;
+}
+
+/* ======================= Excel 公式解析 ======================= */
+
+function excelFormulaError_(msg) { var e = new Error(msg); e.isImportError = true; return e; }
+
+function tokenizeExcel_(src) {
+  var s = String(src || '').replace(/^\s*=/, '');
+  var tokens = [], i = 0;
+  var readRef = function (sheet) {
+    var m = /^(\$?[A-Za-z]{1,3}\$?\d+)(?::(\$?[A-Za-z]{1,3}\$?\d+))?/.exec(s.slice(i));
+    if (!m) throw excelFormulaError_('看不懂「' + s.slice(i, i + 12) + '」');
+    i += m[0].length;
+    var a = cellPos_(m[1].toUpperCase()), b = m[2] ? cellPos_(m[2].toUpperCase()) : a;
+    tokens.push({ t: 'ref', sheet: sheet, c1: a.col, r1: a.row, c2: b.col, r2: b.row, range: !!m[2] });
+  };
+  while (i < s.length) {
+    var ch = s.charAt(i);
+    if (/\s/.test(ch)) { i++; continue; }
+    if (ch === '"') {
+      var j = i + 1, str = '';
+      while (j < s.length) {
+        if (s.charAt(j) === '"') { if (s.charAt(j + 1) === '"') { str += '"'; j += 2; continue; } break; }
+        str += s.charAt(j++);
+      }
+      tokens.push({ t: 'str', v: str }); i = j + 1; continue;
+    }
+    if (ch === "'") {
+      var end = s.indexOf("'!", i + 1);
+      if (end === -1) throw excelFormulaError_('工作表名稱的引號沒有結尾');
+      var sheetName = s.slice(i + 1, end).replace(/''/g, "'");
+      i = end + 2; readRef(sheetName); continue;
+    }
+    if (/[0-9.]/.test(ch)) {
+      var nm = /^(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/.exec(s.slice(i));
+      tokens.push({ t: 'num', v: Number(nm[0]) }); i += nm[0].length; continue;
+    }
+    if (/[A-Za-z_$\u0080-￿]/.test(ch)) {
+      var idm = /^[A-Za-z_$\u0080-￿][A-Za-z0-9_.$\u0080-￿]*/.exec(s.slice(i));
+      var word = idm[0];
+      if (s.charAt(i + word.length) === '!') { i += word.length + 1; readRef(word); continue; }
+      if (/^\$?[A-Za-z]{1,3}\$?\d+$/.test(word) && s.charAt(i + word.length) !== '(') { readRef(''); continue; }
+      i += word.length;
+      if (s.charAt(i) === '(') { tokens.push({ t: 'fn', v: word.replace(/^_xl(fn|ws)\./i, '').toUpperCase() }); continue; }
+      if (/^(TRUE|FALSE)$/i.test(word)) { tokens.push({ t: 'num', v: /^TRUE$/i.test(word) ? 1 : 0 }); continue; }
+      throw excelFormulaError_('看不懂「' + word + '」(Excel 的名稱或別的檔案的參照不能匯入)');
+    }
+    var two = s.substr(i, 2);
+    if (two === '<=' || two === '>=' || two === '<>') { tokens.push({ t: 'op', v: two }); i += 2; continue; }
+    if ('+-*/^&=<>%(),'.indexOf(ch) !== -1) { tokens.push({ t: 'op', v: ch }); i++; continue; }
+    throw excelFormulaError_('看不懂的字元「' + ch + '」');
+  }
+  tokens.push({ t: 'end' });
+  return tokens;
+}
+
+/** Excel 的運算優先順序：比較 < & < 加減 < 乘除 < ^ < % < 負號 */
+function parseExcelFormula_(src) {
+  var tokens = tokenizeExcel_(src), p = 0;
+  var peek = function () { return tokens[p]; };
+  var isOp = function (v) { return tokens[p].t === 'op' && tokens[p].v === v; };
+  function compare() {
+    var left = concat();
+    while (peek().t === 'op' && ['=', '<>', '<', '>', '<=', '>='].indexOf(peek().v) !== -1) {
+      var op = tokens[p++].v;
+      left = { t: 'bin', op: op, a: left, b: concat() };
+    }
+    return left;
+  }
+  function concat() {
+    var left = add();
+    if (isOp('&')) throw excelFormulaError_('系統的公式不能用 & 接文字');
+    return left;
+  }
+  function add() {
+    var left = mul();
+    while (isOp('+') || isOp('-')) { var op = tokens[p++].v; left = { t: 'bin', op: op, a: left, b: mul() }; }
+    return left;
+  }
+  function mul() {
+    var left = pow();
+    while (isOp('*') || isOp('/')) { var op = tokens[p++].v; left = { t: 'bin', op: op, a: left, b: pow() }; }
+    return left;
+  }
+  function pow() {
+    var left = pct();
+    while (isOp('^')) { p++; left = { t: 'bin', op: '^', a: left, b: pct() }; }
+    return left;
+  }
+  function pct() {
+    var node = neg();
+    while (isOp('%')) { p++; node = { t: 'bin', op: '/', a: node, b: { t: 'num', v: 100 } }; }
+    return node;
+  }
+  function neg() {
+    if (isOp('-')) { p++; return { t: 'neg', a: neg() }; }
+    if (isOp('+')) { p++; return neg(); }
+    return primary();
+  }
+  function primary() {
+    var tok = tokens[p];
+    if (tok.t === 'num') { p++; return { t: 'num', v: tok.v }; }
+    if (tok.t === 'str') { p++; return { t: 'str', v: tok.v }; }
+    if (tok.t === 'ref') { p++; return tok; }
+    if (tok.t === 'fn') {
+      p++; p++;   // 函式名稱、(
+      var args = [];
+      if (!isOp(')')) {
+        args.push(compare());
+        while (isOp(',')) { p++; args.push(compare()); }
+      }
+      if (!isOp(')')) throw excelFormulaError_(tok.v + '( 少了 )');
+      p++;
+      return { t: 'call', name: tok.v, args: args };
+    }
+    if (isOp('(')) { p++; var inner = compare(); if (!isOp(')')) throw excelFormulaError_('括號沒有對上'); p++; return inner; }
+    if (tok.t === 'end') throw excelFormulaError_('公式不完整');
+    throw excelFormulaError_('這裡不應該出現「' + tok.v + '」');
+  }
+  var ast = compare();
+  if (peek().t !== 'end') throw excelFormulaError_('多出了「' + (peek().v || '') + '」');
+  return ast;
+}
+
+/** 比對用：去掉 = 空白 $ 與工作表名稱的引號、_xlfn.，英文大寫(字串內容不動) */
+function normalizeExcelText_(f) {
+  var s = String(f || '').replace(/^\s*=/, ''), out = '', i = 0;
+  while (i < s.length) {
+    var ch = s.charAt(i);
+    if (ch === '"') {
+      var j = i + 1;
+      while (j < s.length && !(s.charAt(j) === '"' && s.charAt(j + 1) !== '"')) j += s.charAt(j) === '"' ? 2 : 1;
+      out += s.slice(i, j + 1); i = j + 1; continue;
+    }
+    if (ch === "'") {
+      var k = s.indexOf("'!", i + 1);
+      if (k !== -1) { out += s.slice(i + 1, k) + '!'; i = k + 2; continue; }
+    }
+    if (!/[\s$]/.test(ch)) out += ch.toUpperCase();
+    i++;
+  }
+  return out.replace(/_XL(FN|WS)\./g, '');
+}
+
+/* ======================= 匯入的對照與目前資料 ======================= */
+
+function verifyImportContext_(files) {
+  var sheets = readXlsxSheets_(files);
+  var S = VERIFY_SHEETS_;
+  var map = sheets[S.map];
+  if (!map) throw new Error('找不到驗算檔的對照表：請用系統「匯出 Excel 驗算檔」產生的檔案（舊版匯出的檔案請重新匯出一次）');
+  // 對照表：A 種類、B 鍵、C 值1、D 值2
+  var rows = [];
+  Object.keys(map).forEach(function (ref) {
+    var pos = cellPos_(ref);
+    (rows[pos.row] = rows[pos.row] || [])[pos.col] = map[ref].v;
+  });
+  var ctx = { meta: {}, vehicles: [], pl: {}, plRow: {}, input: {}, inputRow: {}, dev: {}, devRow: {}, devsum: {}, devsumRow: {},
+    plf: {}, inval: [], infml: [], amtcur: {}, amtmixed: {}, sheets: sheets };
+  rows.forEach(function (r) {
+    if (!r) return;
+    var kind = r[0], key = r[1] === undefined ? '' : String(r[1]), a = r[2], b = r[3];
+    if (kind === 'meta') ctx.meta[key] = a;
+    else if (kind === 'vehicle') ctx.vehicles.push({ id: key, col: String(a), devCol: String(b) });
+    else if (kind === 'pl') { ctx.pl[key] = Number(a); ctx.plRow[Number(a)] = key; }
+    else if (kind === 'in') { ctx.input[key] = Number(a); ctx.inputRow[Number(a)] = key; }
+    else if (kind === 'dev') { ctx.dev[key] = Number(a); ctx.devRow[Number(a)] = key; }
+    else if (kind === 'devsum') { ctx.devsum[key] = Number(a); ctx.devsumRow[Number(a)] = key; }
+    else if (kind === 'plf') ctx.plf[key] = { excel: a === undefined ? '' : String(a), sys: b === undefined ? '' : String(b) };
+    else if (kind === 'inval') ctx.inval.push({ key: key, vid: a === undefined ? '' : String(a), value: b });
+    else if (kind === 'infml') ctx.infml.push({ key: key, vid: a === undefined ? '' : String(a) });
+    else if (kind === 'amtcur') ctx.amtcur[key] = String(a);
+    else if (kind === 'amtmixed') ctx.amtmixed[key] = true;
+  });
+  var sid = String(ctx.meta.scenarioId || '');
+  var scenario = getScenarios().filter(function (s) { return s.ScenarioID === sid; })[0];
+  if (!scenario) throw new Error('驗算檔的情境（' + sid + '）在這個系統裡找不到：請在匯出這個檔案的那份資料裡匯入');
+  ctx.scenario = scenario;
+  ctx.scenarioId = sid;
+  ctx.typeId = scenario.VehicleTypeID || '';
+  ctx.defs = lineDefsForScenario_(sid);
+  ctx.defsByCode = {}; ctx.byName = {}; ctx.children = {};
+  ctx.defs.forEach(function (d) {
+    ctx.defsByCode[d.LineCode] = d;
+    if (!ctx.byName[d.LineName]) ctx.byName[d.LineName] = d;
+    if (d.ParentLine) (ctx.children[d.ParentLine] = ctx.children[d.ParentLine] || []).push(d.LineCode);
+  });
+  ctx.taxDeduct = ctx.defs.filter(function (d) { return String(d.CommodityTaxDeduct || '').toUpperCase() === 'Y'; }).map(function (d) { return d.LineCode; });
+  ctx.vehicleLabel = {};
+  getVehicles(ctx.typeId).forEach(function (v) { ctx.vehicleLabel[v.VehicleID] = v.VehicleCode || v.VehicleID; });
+  ctx.vehicles.forEach(function (v) { if (!ctx.vehicleLabel[v.id]) ctx.vehicleLabel[v.id] = v.id; });
+  ctx.params = getParameters(sid);
+  ctx.paramDefs = {};
+  getParamDefs().forEach(function (d) { ctx.paramDefs[d.ParamName] = d; });
+  return ctx;
+}
+
+/** 這一格的值(對照表以外的工作表) */
+function importCell_(ctx, sheet, col, row) {
+  var s = ctx.sheets[sheet];
+  return s ? s[col + row] || null : null;
+}
+
+/* ======================= Excel 公式 → 系統公式 ======================= */
+
+var VERIFY_SM_VARS_ = { 'sm:建議零售價': '建議零售價', 'sm:強配件售價': '強配件售價', 'sm:廢車處理費': '廢車處理費', 'sm:水平配件調降': '水平配件調降',
+  'sm:月銷量': '月銷量', 'sm:LC年限': 'LC年限' };
+
+function excelToSystemAst_(ast, ctx, code, vehicle) {
+  var S = VERIFY_SHEETS_;
+  var colOf = function (c) { return xlsxCol_(c); };
+  var refToNode = function (ref) {
+    var sheet = ref.sheet || S.pl;
+    var col = colOf(ref.c1), row = ref.r1 + 1;
+    var where = (ref.sheet ? ref.sheet + '!' : '') + col + row;
+    if (sheet === S.pl) {
+      var c = ctx.plRow[row];
+      if (!c) throw excelFormulaError_(where + ' 不是科目的格子');
+      if (col !== vehicle.col) throw excelFormulaError_(where + ' 是別的車系欄（系統的公式只能引用同一個車系的科目）');
+      return { t: 'code', v: c };
+    }
+    if (sheet === S.input) {
+      var key = ctx.inputRow[row];
+      if (!key) throw excelFormulaError_(where + ' 不是輸入的項目');
+      if (col !== vehicle.col && col !== 'C') throw excelFormulaError_(where + ' 是別的車系欄');
+      if (VERIFY_SM_VARS_[key]) return { t: 'name', v: VERIFY_SM_VARS_[key] };
+      if (/^var:/.test(key)) return { t: 'name', v: key.slice(4) };
+      if (/^param:/.test(key)) return { t: 'name', v: key.slice(6) };
+      if (/^fx:/.test(key)) return { t: 'name', v: key.slice(3) + '匯率' };
+      if (/^amt:/.test(key)) {
+        var lc = key.slice(4);
+        if (ctx.amtcur[lc + '|' + vehicle.id]) throw excelFormulaError_(where + ' 是外幣原幣金額，請改引用損益試算表的科目');
+        return { t: 'code', v: lc };
+      }
+      if (/^ref:/.test(key)) {
+        var args = key.slice(4).split('|').filter(function (x, i) { return i < 2 || x; });
+        return { t: 'call', name: 'REF', args: args.map(function (x) { return { t: 'str', v: x }; }) };
+      }
+      throw excelFormulaError_(where + '（' + key.replace(/^\w+:/, '') + '）不能用在公式裡');
+    }
+    if (sheet === S.dev) {
+      var dc = ctx.devsumRow[row];
+      if (!dc || col !== vehicle.devCol) throw excelFormulaError_(where + ' 請引用「開發總投」下方依攤提落點彙總、同一個車系的格子');
+      return { t: 'code', v: dc };
+    }
+    throw excelFormulaError_(where + '：只能引用損益試算、輸入、開發總投三張表');
+  };
+  var expand = function (ref) {
+    if (!ref.range) return [refToNode(ref)];
+    if (ref.c1 !== ref.c2) throw excelFormulaError_('範圍只能是同一欄');
+    var out = [];
+    for (var r = Math.min(ref.r1, ref.r2); r <= Math.max(ref.r1, ref.r2); r++) {
+      out.push(refToNode({ sheet: ref.sheet, c1: ref.c1, r1: r, c2: ref.c1, r2: r }));
+    }
+    return out;
+  };
+  var sameText = function (a, b) { return JSON.stringify(a) === JSON.stringify(b); };
+  var sameSet = function (list, set) {
+    var a = list.slice().sort(), b = set.filter(function (c) { return ctx.pl[c] !== undefined; }).sort();
+    return a.length === b.length && a.every(function (x, i) { return x === b[i]; });
+  };
+  return (function conv(n) {
+    switch (n.t) {
+      case 'num': return { t: 'num', v: n.v };
+      case 'str': return { t: 'str', v: n.v };
+      case 'ref':
+        if (n.range) throw excelFormulaError_('範圍(例：D5:D9)只能放在 SUM、MIN、MAX 裡');
+        return refToNode(n);
+      case 'neg': return { t: 'neg', a: conv(n.a) };
+      case 'bin': {
+        var a = conv(n.a), b = conv(n.b);
+        // (比較式)*1 → 比較式(驗算檔為了讓整格顯示 1/0 才乘 1)
+        if (n.op === '*' && b.t === 'num' && b.v === 1 && a.t === 'bin' && ['=', '<>', '<', '>', '<=', '>='].indexOf(a.op) !== -1) return a;
+        return { t: 'bin', op: n.op, a: a, b: b };
+      }
+      case 'call': {
+        var name = n.name;
+        if (VERIFY_IMPORT_FUNCTIONS_.indexOf(name) === -1) {
+          throw excelFormulaError_('系統沒有 ' + name + '()，可以用的函式：' + VERIFY_IMPORT_FUNCTIONS_.join('、'));
+        }
+        var args = [];
+        n.args.forEach(function (x) {
+          if (x.t === 'ref' && x.range && (name === 'SUM' || name === 'MIN' || name === 'MAX')) args = args.concat(expand(x));
+          else args.push(conv(x));
+        });
+        if (name === 'SUM' && args.length && args.every(function (x) { return x.t === 'code'; })) {
+          var codes = args.map(function (x) { return x.v; });
+          if (sameSet(codes, ctx.children[code] || [])) return { t: 'call', name: 'CHILDREN', args: [] };
+          if (ctx.taxDeduct.length && sameSet(codes, ctx.taxDeduct)) return { t: 'call', name: 'TAXDEDUCT', args: [] };
+        }
+        // IF(b=0,0,a/b) → a/b：系統的除以 0 本來就是 0
+        if (name === 'IF' && args.length === 3 && args[0].t === 'bin' && args[0].op === '=' && args[0].b.t === 'num' && args[0].b.v === 0 &&
+          args[1].t === 'num' && args[1].v === 0 && args[2].t === 'bin' && args[2].op === '/' && sameText(args[2].b, args[0].a)) {
+          return args[2];
+        }
+        return { t: 'call', name: name, args: args };
+      }
+    }
+    throw excelFormulaError_('無法轉換的公式片段');
+  })(ast);
+}
+
+/** 系統公式的標準寫法(比對用)：[科目名稱] 一律換成代碼，ROUND 補位數、IF 補第三個參數 */
+function canonicalSystemFormula_(formula, ctx) {
+  if (formula === null || formula === undefined) return null;
+  var ast;
+  try { ast = typeof formula === 'string' ? parseFormula_(formula) : formula; } catch (e) { return 'ERR:' + String(formula); }
+  var reserved = {};
+  SYSTEM_VARIABLES.forEach(function (v) { reserved[v.name] = true; });
+  Object.keys(ctx.paramDefs).forEach(function (n) { reserved[n] = true; });
+  var norm = function (n) {
+    if (n.t === 'name' && !reserved[n.v] && !/^[A-Za-z]{3}匯率$/.test(n.v) && ctx.byName[n.v]) return { t: 'code', v: ctx.byName[n.v].LineCode };
+    if (n.t === 'bin') return { t: 'bin', op: n.op, a: norm(n.a), b: norm(n.b) };
+    if (n.t === 'neg') return { t: 'neg', a: norm(n.a) };
+    if (n.t === 'call') {
+      var args = n.args.map(norm);
+      if (/^ROUND/.test(n.name) && args.length === 1) args.push({ t: 'num', v: 0 });
+      if (n.name === 'IF' && args.length === 2) args.push({ t: 'num', v: 0 });
+      return { t: 'call', name: n.name, args: args };
+    }
+    return n;
+  };
+  return systemFormulaText_(norm(ast), ctx, false);
+}
+
+/** 系統公式 AST → 文字。readable：科目代碼顯示成 [科目名稱]、REF 的情境顯示名稱 */
+function systemFormulaText_(ast, ctx, readable) {
+  return verifyPrintAst_(ast, {
+    codeName: function (c) { return readable && ctx.defsByCode[c] ? '[' + ctx.defsByCode[c].LineName + ']' : c; },
+    refLabel: function (args) {
+      var parts = args.map(function (a) { return a.t === 'str' ? a.v : '?'; });
+      if (readable) {
+        var sc = null;
+        try { sc = resolveRefScenario_(parts[0]); } catch (e) { sc = null; }
+        if (sc) parts[0] = [sc.VehicleTypeID, sc.Gate, sc.ScenarioName].filter(function (x) { return x; }).join(' ');
+      }
+      return 'REF(' + parts.map(function (x) { return '"' + x + '"'; }).join(', ') + ')';
+    }
+  }, 'names');
+}
+
+/* ======================= 預覽 ======================= */
+
+function verifyCurrentFormula_(d, vid) {
+  if (!d) return null;
+  var f = lineFormulaFor_(d, vid);
+  var useFormula = d.CalcType === CALC_TYPES.FORMULA || f !== '' && parseVehicleFormulas_(d.VehicleFormulas)[vid];
+  return useFormula ? f : null;
+}
+
+/** 輸入項目目前在系統裡的值(跟匯出時同一種口徑：% 參數是小數、外幣是原幣) */
+function verifyCurrentInput_(ctx, key, vid) {
+  var sid = ctx.scenarioId;
+  var mix = getSalesMix(sid).filter(function (r) { return r.VehicleID === vid; })[0] || {};
+  var smField = { 'sm:建議零售價': 'ListPriceTaxIncl', 'sm:強配件售價': 'MandatoryAccessoryPrice', 'sm:廢車處理費': 'ScrapFee',
+    'sm:水平配件調降': 'HorizontalPartsPriceAdj', 'sm:月銷量': 'MonthlyVolume', 'sm:LC年限': 'LifeCycleYears', 'sm:構成比原值': 'SalesMixPct' };
+  if (smField[key]) return toNumber_(mix[smField[key]]);
+  if (key === 'sm:廢車稅別') return mix.ScrapFeeTaxStatus === '未稅' ? '未稅' : '含稅';
+  if (key === 'sm:攤提基準月銷量') return toNumber_(ctx.scenario.AmortMonthlyVolume);
+  if (key === 'sm:攤提基準LC年限') return toNumber_(ctx.scenario.AmortLifeCycleYears);
+  if (/^param:/.test(key)) {
+    var def = ctx.paramDefs[key.slice(6)];
+    return def ? paramValueForFormula_(ctx.params, def, vid) : 0;
+  }
+  if (/^fx:/.test(key)) return fxRateFor_(ctx.params, key.slice(3), vid);
+  if (/^amt:/.test(key)) {
+    var list = verifyAmountRows_(ctx, key.slice(4), vid);
+    return list.length ? toNumber_(list[0].row.Amount) : 0;
+  }
+  if (/^dev:/.test(key)) {
+    var parts = key.split(':');
+    var row = getDevInvestment(sid).filter(function (r) { return r.RowID === parts[1]; })[0];
+    if (!row) return null;
+    return parts[2] === 'pct' ? toNumber_(row.ChallengeReductionPct) / 100 : toNumber_(row.Amount);
+  }
+  if (/^ref:/.test(key)) {
+    var a = key.slice(4).split('|');
+    try { return referenceValue_(a[0], a[1], a[2] || '', vid); } catch (e) { return 0; }
+  }
+  return null;
+}
+function verifyAmountRows_(ctx, code, vid) {
+  var out = [];
+  getCostOfSales(ctx.scenarioId, vid).forEach(function (r) { if (r.LineCode === code) out.push({ sheet: SHEETS.COST_OF_SALES, row: r }); });
+  getOperatingExpense(ctx.scenarioId, vid).forEach(function (r) { if (r.LineCode === code) out.push({ sheet: SHEETS.OPERATING_EXPENSE, row: r }); });
+  return out;
+}
+
+function sameValue_(a, b) {
+  if (typeof a === 'number' || typeof b === 'number') {
+    var x = toNumber_(a), y = toNumber_(b);
+    return Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(x), Math.abs(y));
+  }
+  return String(a === undefined || a === null ? '' : a) === String(b === undefined || b === null ? '' : b);
+}
+
+function verifyInputLabel_(ctx, key) {
+  if (/^sm:/.test(key)) return { 'sm:廢車稅別': '廢車處理費登打方式', 'sm:構成比原值': '構成比（登打值）', 'sm:攤提基準月銷量': '攤提基準 月銷量', 'sm:攤提基準LC年限': '攤提基準 LC年限' }[key] || key.slice(3);
+  if (/^param:/.test(key)) return '參數：' + key.slice(6);
+  if (/^fx:/.test(key)) return '匯率：' + key.slice(3);
+  if (/^amt:/.test(key)) { var d = ctx.defsByCode[key.slice(4)]; return '金額：' + (d ? d.LineName : key.slice(4)); }
+  if (/^dev:/.test(key)) {
+    var parts = key.split(':');
+    var row = getDevInvestment(ctx.scenarioId).filter(function (r) { return r.RowID === parts[1]; })[0] || {};
+    return '開發總投：' + (row.Department || '') + (row.Notes ? '（' + row.Notes + '）' : '') + (parts[2] === 'pct' ? ' 低減目標' : ' 金額');
+  }
+  return key;
+}
+
+/**
+ * 預覽：回傳 { scenario, formulas: [...], inputs: [...], problems: [...] }。
+ * formulas/inputs 的每一項有 id(套用時用)、conflict(匯出後系統也改過，預設不勾)。
+ */
+function previewVerifyImport(files) {
+  return buildVerifyImportPlan_(verifyImportContext_(files));
+}
+
+function buildVerifyImportPlan_(ctx) {
+  var S = VERIFY_SHEETS_;
+  var problems = [], formulas = [], inputs = [];
+  var plSheet = ctx.sheets[S.pl] || {};
+
+  /* ---- 公式：每個科目 × 車系 ---- */
+  var perLine = {}, amountFromPl = [];
+  Object.keys(ctx.pl).forEach(function (code) {
+    var row = ctx.pl[code];
+    ctx.vehicles.forEach(function (v) {
+      var key = code + '|' + v.id;
+      var exp = ctx.plf[key] || { excel: '', sys: '' };
+      var cell = plSheet[v.col + row] || { f: null, v: '' };
+      var fileText = cell.f ? cell.f : (cell.v === '' || cell.v === null ? '' : String(cell.v));
+      if (exp.excel && cell.f && normalizeExcelText_(cell.f) === normalizeExcelText_(exp.excel)) return;   // 沒改
+      if (!exp.excel && !cell.f) return;                                                             // 匯出時就是固定值(翻不過去的科目)，沒改成公式
+      var d = ctx.defsByCode[code];
+      var label = (d ? d.LineName : code) + '（' + ctx.vehicleLabel[v.id] + '）';
+      if (!d) { problems.push({ where: S.pl + '!' + v.col + row, label: label, reason: '這個科目在系統裡已經刪除了' }); return; }
+      // 手動輸入的科目，在損益試算直接打數字 = 改這個車系的金額(不是把科目改成固定數字的公式)
+      if (d.CalcType === CALC_TYPES.INPUT && verifyCurrentFormula_(d, v.id) === null && !cell.f && typeof cell.v === 'number') {
+        if (ctx.amtcur[key]) problems.push({ where: S.pl + '!' + v.col + row, label: label, reason: '這個科目用外幣登打，請到「輸入」表改原幣金額' });
+        else amountFromPl.push({ code: code, vid: v.id, v: cell.v, where: S.pl + '!' + v.col + row });
+        return;
+      }
+      var sysAst;
+      try {
+        if (cell.f) sysAst = excelToSystemAst_(parseExcelFormula_(cell.f), ctx, code, v);
+        else if (typeof cell.v === 'number') sysAst = { t: 'num', v: cell.v };
+        else throw excelFormulaError_('這一格是空白或文字');
+      } catch (e) {
+        if (!e.isImportError && !e.isFormulaError) throw e;
+        problems.push({ where: S.pl + '!' + v.col + row, label: label, reason: e.message, excel: fileText });
+        return;
+      }
+      var newFormula = systemFormulaText_(sysAst, ctx, false);
+      // 引用自己 = 照原本的來源(手動輸入/開發攤提的格子被改成指回同一筆金額)，不算改公式
+      if (sysAst.t === 'code' && sysAst.v === code) return;
+      var now = verifyCurrentFormula_(d, v.id);
+      var canonNew = canonicalSystemFormula_(newFormula, ctx);
+      if (now !== null && canonicalSystemFormula_(now, ctx) === canonNew) return;   // 寫法不同、意思一樣
+      var exportSys = exp.sys || null;
+      var conflict = canonicalSystemFormula_(now, ctx) !== canonicalSystemFormula_(exportSys, ctx);
+      (perLine[code] = perLine[code] || []).push({ vid: v.id, formula: newFormula, ast: sysAst, conflict: conflict, constant: !cell.f, excel: fileText });
+    });
+  });
+  Object.keys(perLine).forEach(function (code) {
+    var d = ctx.defsByCode[code];
+    var changes = perLine[code];
+    var groups = {};
+    changes.forEach(function (c) { (groups[c.formula] = groups[c.formula] || []).push(c); });
+    var allVehicles = ctx.vehicles.length === changes.length && Object.keys(groups).length === 1;
+    var notes = [];
+    if (changes.some(function (c) { return c.constant; })) notes.push('改成固定數字（不是公式），之後輸入的數字改了它也不會跟著變');
+    if (d.CalcType !== CALC_TYPES.FORMULA && allVehicles) notes.push('計算來源從「' + (d.CalcType === CALC_TYPES.DEV_AMORT ? '開發總投攤提' : '手動輸入') + '」改成公式，原本的金額不再使用');
+    if (!allVehicles) notes.push('只有部分車系改了：存成這幾個車系的個別公式');
+    notes.push('科目表是整個車型共用：會影響車型 ' + ctx.typeId + ' 的所有情境');
+    var before = ctx.vehicles.map(function (v) {
+      var f = verifyCurrentFormula_(d, v.id);
+      return f === null ? (d.CalcType === CALC_TYPES.DEV_AMORT ? '（開發總投攤提）' : '（手動輸入）') : verifyReadableFormula_(f, ctx.defsByCode);
+    }).filter(function (x, i, a) { return a.indexOf(x) === i; });
+    formulas.push({
+      id: 'f:' + code, code: code, name: d.LineName,
+      vehicles: changes.map(function (c) { return ctx.vehicleLabel[c.vid]; }),
+      before: before.join(' ／ '),
+      after: Object.keys(groups).map(function (f) { return '=' + systemFormulaText_(groups[f][0].ast, ctx, true); }).join(' ／ '),
+      notes: notes, conflict: changes.some(function (c) { return c.conflict; }),
+      _changes: changes, _all: allVehicles
+    });
+  });
+  // 加權平均欄是算出來的
+  var wCol = String(ctx.meta.weightedCol || '');
+  Object.keys(ctx.pl).forEach(function (code) {
+    var cell = plSheet[wCol + ctx.pl[code]];
+    if (cell && cell.f && !/^SUMPRODUCT\(/i.test(normalizeExcelText_(cell.f))) {
+      problems.push({ where: S.pl + '!' + wCol + ctx.pl[code], label: code + ' 加權平均', reason: '加權平均欄是各車系 × 構成比算出來的，不會匯入' });
+    }
+  });
+
+  /* ---- 輸入數字 ---- */
+  var cellOfInput = function (key, vid) {
+    if (/^dev:/.test(key)) {
+      var parts = key.split(':');
+      var r = ctx.dev[parts[1]];
+      return r ? { sheet: S.dev, ref: (parts[2] === 'pct' ? 'K' : 'G') + r } : null;
+    }
+    var row = ctx.input[key];
+    if (!row) return null;
+    var v = vid ? ctx.vehicles.filter(function (x) { return x.id === vid; })[0] : null;
+    return { sheet: S.input, ref: (v ? v.col : 'C') + row };
+  };
+  var addInput = function (key, vid, exportValue, cell, fromFormula) {
+    var fileValue = cell.v;
+    if (fileValue && typeof fileValue === 'object') { problems.push({ where: cell.where, label: verifyInputLabel_(ctx, key), reason: 'Excel 算出錯誤值 ' + fileValue.error }); return; }
+    if (exportValue !== undefined && sameValue_(fileValue, exportValue)) return;
+    var label = verifyInputLabel_(ctx, key);
+    var vlabel = vid ? ctx.vehicleLabel[vid] : (/^(dev|sm:攤提)/.test(key) ? '' : '全車系（共用）');
+    if (/^ref:/.test(key)) { problems.push({ where: cell.where, label: label, reason: '跨情境引用是另一個情境的數字，要改請到那個情境改' }); return; }
+    if (key === 'sm:廢車稅別' && ['含稅', '未稅'].indexOf(String(fileValue)) === -1) { problems.push({ where: cell.where, label: label, reason: '只能填「含稅」或「未稅」' }); return; }
+    if (key !== 'sm:廢車稅別' && (fileValue === '' || typeof fileValue !== 'number')) { problems.push({ where: cell.where, label: label, reason: '不是數字' }); return; }
+    if (/^amt:/.test(key) && ctx.amtmixed[key.slice(4) + '|' + vid]) { problems.push({ where: cell.where, label: label, reason: '這一格在系統裡是好幾筆合計，請到成本與費用頁改' }); return; }
+    var now = verifyCurrentInput_(ctx, key, vid);
+    if (sameValue_(now, fileValue)) return;
+    var notes = [];
+    if (fromFormula) notes.push('這一格原本引用「共用」欄，改成數字後存成這個車系的個別值');
+    if (/^dev:.*:pct$/.test(key) && isBaselineScenario_(ctx.scenarioId)) notes.push('現況情境不套用低減目標');
+    if (cell.formula) notes.push('這一格是公式，匯入的是它算出來的值');
+    var isPct = /^dev:.*:pct$/.test(key) || /^param:/.test(key) && (ctx.paramDefs[key.slice(6)] || {}).Unit === '%';
+    inputs.push({ id: 'i:' + key + '|' + vid, key: key, vid: vid, label: label, vehicle: vlabel,
+      before: now, after: fileValue, isPct: isPct, notes: notes,
+      conflict: exportValue !== undefined && !sameValue_(now, exportValue) });
+  };
+  var getCell = function (key, vid) {
+    var loc = cellOfInput(key, vid);
+    if (!loc) return null;
+    var c = importCell_(ctx, loc.sheet, loc.ref.replace(/\d+$/, ''), loc.ref.replace(/^[A-Z]+/, ''));
+    var where = loc.sheet + '!' + loc.ref;
+    if (!c) return { v: '', formula: false, where: where };
+    return { v: c.v, formula: !!c.f, where: where, f: c.f };
+  };
+  ctx.inval.forEach(function (x) {
+    var c = getCell(x.key, x.vid);
+    if (c) addInput(x.key, x.vid, x.value, c, false);
+  });
+  amountFromPl.forEach(function (x) {
+    var key = 'amt:' + x.code;
+    if (inputs.some(function (it) { return it.id === 'i:' + key + '|' + x.vid; })) return;   // 「輸入」表也改了，以輸入表為準
+    addInput(key, x.vid, undefined, { v: x.v, where: x.where, formula: false }, false);
+    var last = inputs[inputs.length - 1];
+    if (last && last.id === 'i:' + key + '|' + x.vid) last.notes.push('在「損益試算」直接改了這個手動輸入科目的金額');
+  });
+  ctx.infml.forEach(function (x) {
+    if (!/^(param|fx):/.test(x.key) || !x.vid) return;
+    var c = getCell(x.key, x.vid);
+    if (c && !c.formula && c.v !== '') addInput(x.key, x.vid, undefined, c, true);
+  });
+
   return {
-    fns: { getSheet_: getSheet_, validateCode_: validateCode_, sheetExists_: sheetExists_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, deleteScenarioData_: deleteScenarioData_, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, updateSnapshots_: updateSnapshots_, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, assertUniqueScenarioNames_: assertUniqueScenarioNames_, codifyAllRefScenarios_: codifyAllRefScenarios_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, codifyRefScenarios_: codifyRefScenarios_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, validateLineName_: validateLineName_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, isDevDeptNote_: isDevDeptNote_, getDevDeptNotes: getDevDeptNotes, saveDevDeptNotes_: saveDevDeptNotes_, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideLineAdd_: overrideLineAdd_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, resolveRefScenario_: resolveRefScenario_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, snapshotReportBlock_: snapshotReportBlock_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getDevComparison: getDevComparison, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, metricGoodDir_: metricGoodDir_, solveGoalPlan: solveGoalPlan, devCutTotals_: devCutTotals_, adjustedValue_: adjustedValue_, plSnapshot_: plSnapshot_, simulateAdjustments: simulateAdjustments, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_, xlsxEsc_: xlsxEsc_, xlsxCol_: xlsxCol_, xlsxRef_: xlsxRef_, xlsxStylesXml_: xlsxStylesXml_, xlsxCellXml_: xlsxCellXml_, xlsxSheetXml_: xlsxSheetXml_, xlsxParts_: xlsxParts_, utf8Bytes_: utf8Bytes_, crc32_: crc32_, zipStore_: zipStore_, base64Bytes_: base64Bytes_, buildXlsxBase64_: buildXlsxBase64_, verifySheetRef_: verifySheetRef_, verifyNumText_: verifyNumText_, verifyPrintAst_: verifyPrintAst_, verifyReadableFormula_: verifyReadableFormula_, buildVerifyWorkbookModel_: buildVerifyWorkbookModel_, formatDateTime_: formatDateTime_, exportVerifyWorkbook: exportVerifyWorkbook },
+    scenario: { id: ctx.scenarioId, label: [ctx.typeId, ctx.scenario.Gate, ctx.scenario.ScenarioName].filter(function (x) { return x; }).join(' '), typeId: ctx.typeId },
+    exportedAt: String(ctx.meta.exportedAt || ''),
+    formulas: formulas.map(function (f) { var c = {}; Object.keys(f).forEach(function (k) { if (k.charAt(0) !== '_') c[k] = f[k]; }); return c; }),
+    inputs: inputs, problems: problems,
+    _formulas: formulas
+  };
+}
+
+/* ======================= 套用 ======================= */
+
+/**
+ * 套用勾選的項目。先自動存一份快照(匯入前的數字，之後可以在驗算檔「跟快照比」)。
+ * 回傳 { applied, failed: [{ label, error }], snapshot }。
+ */
+function applyVerifyImport(files, ids) {
+  var ctx = verifyImportContext_(files);
+  var plan = buildVerifyImportPlan_(ctx);
+  var want = {};
+  (ids || []).forEach(function (id) { want[id] = true; });
+  var formulaItems = plan._formulas.filter(function (f) { return want[f.id]; });
+  var inputItems = plan.inputs.filter(function (x) { return want[x.id]; });
+  if (!formulaItems.length && !inputItems.length) return { applied: 0, failed: [], snapshot: null };
+
+  var snapshot = createSnapshot(ctx.scenarioId, '匯入 Excel 前 ' + formatDateTime_(new Date()), '從 Excel 驗算檔匯入前自動存的');
+  var failed = [], applied = 0;
+  var sid = ctx.scenarioId;
+
+  /* ---- 輸入數字 ---- */
+  var mixRows = {}, devChanged = false, devRows = sortByOrder_(getDevInvestment(sid), 'SortOrder').map(function (r) { var c = {}; Object.keys(r).forEach(function (k) { c[k] = r[k]; }); return c; });
+  var scenarioRow = null, paramWrites = [], amountWrites = {};
+  var copy = function (r) { var c = {}; Object.keys(r).forEach(function (k) { c[k] = r[k]; }); return c; };
+  var round = function (x) { return Math.round(x * 1e10) / 1e10; };
+  inputItems.forEach(function (it) {
+    try {
+      var key = it.key, vid = it.vid, val = it.after;
+      var smField = { 'sm:建議零售價': 'ListPriceTaxIncl', 'sm:強配件售價': 'MandatoryAccessoryPrice', 'sm:廢車處理費': 'ScrapFee', 'sm:廢車稅別': 'ScrapFeeTaxStatus',
+        'sm:水平配件調降': 'HorizontalPartsPriceAdj', 'sm:月銷量': 'MonthlyVolume', 'sm:LC年限': 'LifeCycleYears', 'sm:構成比原值': 'SalesMixPct' };
+      if (smField[key]) {
+        var mr = mixRows[vid] || copy(getSalesMix(sid).filter(function (r) { return r.VehicleID === vid; })[0] || null);
+        if (!mr.RowID) throw new Error('找不到這個車系的銷售構成');
+        mr[smField[key]] = val;
+        mixRows[vid] = mr;
+      } else if (key === 'sm:攤提基準月銷量' || key === 'sm:攤提基準LC年限') {
+        scenarioRow = scenarioRow || copy(ctx.scenario);
+        scenarioRow[key === 'sm:攤提基準月銷量' ? 'AmortMonthlyVolume' : 'AmortLifeCycleYears'] = val;
+      } else if (/^param:/.test(key)) {
+        var name = key.slice(6), def = ctx.paramDefs[name];
+        if (!def) throw new Error('參數「' + name + '」已經不存在');
+        var raw = def.Unit === '%' ? round(val * 100) : val;
+        var existing = ctx.params.filter(function (p) { return p.ParamName === name && (p.VehicleID || '') === (vid || '') && !p.Currency; })[0];
+        paramWrites.push({ kind: 'param', ParamID: existing ? existing.ParamID : '', ParamName: name, VehicleID: vid || '', Value: raw });
+      } else if (/^fx:/.test(key)) {
+        var cur = key.slice(3);
+        var ex = ctx.params.filter(function (p) { return p.ParamName === COST_FX_PARAM_NAME && String(p.Currency).toUpperCase() === cur && (p.VehicleID || '') === (vid || ''); })[0];
+        paramWrites.push({ kind: 'fx', ParamID: ex ? ex.ParamID : '', ParamName: COST_FX_PARAM_NAME, Currency: cur, VehicleID: vid || '', Value: val });
+      } else if (/^amt:/.test(key)) {
+        var code = key.slice(4);
+        var list = verifyAmountRows_(ctx, code, vid);
+        if (list.length > 1) throw new Error('這一格在系統裡是好幾筆合計');
+        var target = list[0] ? { sheet: list[0].sheet, row: copy(list[0].row) }
+          : { sheet: isCostSectionLine_(ctx.defsByCode[code], ctx.defs) ? SHEETS.COST_OF_SALES : SHEETS.OPERATING_EXPENSE,
+            row: { RowID: '', ScenarioID: sid, VehicleID: vid, LineCode: code, Currency: BASE_CURRENCY } };
+        target.row.Amount = val;
+        (amountWrites[target.sheet] = amountWrites[target.sheet] || []).push(target.row);
+      } else if (/^dev:/.test(key)) {
+        var parts = key.split(':');
+        var dr = devRows.filter(function (r) { return r.RowID === parts[1]; })[0];
+        if (!dr) throw new Error('這一筆開發投資已經刪除了');
+        if (parts[2] === 'pct') dr.ChallengeReductionPct = round(val * 100); else dr.Amount = val;
+        devChanged = true;
+      } else throw new Error('不支援的項目');
+      applied++;
+    } catch (e) { failed.push({ label: it.label + (it.vehicle ? '（' + it.vehicle + '）' : ''), error: e.message }); }
+  });
+  var tryWrite = function (label, fn) { try { fn(); } catch (e) { failed.push({ label: label, error: e.message }); } };
+  var mixList = Object.keys(mixRows).map(function (k) { return mixRows[k]; });
+  if (mixList.length) tryWrite('銷售構成與售價', function () { saveSalesMixGrid(sid, ctx.typeId, mixList); });
+  if (scenarioRow) tryWrite('攤提基準台數', function () { saveScenarioGrid(ctx.typeId, [scenarioRow]); });
+  if (paramWrites.length) {
+    tryWrite('參數與匯率', function () {
+      withLock_(function () {
+        batchWriteRows_(SHEETS.PARAMETERS, 'ParamID', paramWrites.map(function (w) {
+          return { ParamID: w.ParamID, ScenarioID: sid, VehicleID: w.VehicleID, ParamName: w.ParamName, Currency: w.kind === 'fx' ? w.Currency : '', Value: w.Value, EffectiveDate: '' };
+        }), []);
+      });
+    });
+  }
+  Object.keys(amountWrites).forEach(function (sheet) {
+    tryWrite(sheet === SHEETS.COST_OF_SALES ? '銷貨成本' : '營業費用', function () {
+      if (sheet === SHEETS.COST_OF_SALES) saveCostOfSalesMatrix(sid, amountWrites[sheet]);
+      else saveOperatingExpenseMatrix(sid, amountWrites[sheet]);
+    });
+  });
+  if (devChanged) tryWrite('開發總投', function () { saveDevInvestmentGrid(sid, devRows); });
+
+  /* ---- 公式 ---- */
+  formulaItems.forEach(function (f) {
+    try {
+      var d = getPLLineItems(ctx.typeId).filter(function (x) { return x.LineCode === f.code; })[0];
+      if (!d) throw new Error('科目已經刪除了');
+      var vf = parseVehicleFormulas_(d.VehicleFormulas);
+      var line = { LineCode: d.LineCode, LineName: d.LineName };
+      if (f._all) {
+        line.CalcType = CALC_TYPES.FORMULA;
+        line.Formula = f._changes[0].formula;
+        f._changes.forEach(function (c) { delete vf[c.vid]; });
+      } else {
+        f._changes.forEach(function (c) {
+          if (d.CalcType === CALC_TYPES.FORMULA && canonicalSystemFormula_(c.formula, ctx) === canonicalSystemFormula_(d.Formula, ctx)) delete vf[c.vid];
+          else vf[c.vid] = c.formula;
+        });
+      }
+      line.VehicleFormulas = vf;
+      saveChartLine(ctx.typeId, line);
+      applied++;
+    } catch (e) { failed.push({ label: f.name, error: e.message }); }
+  });
+  return { applied: applied, failed: failed, snapshot: snapshot };
+}
+
+  return {
+    fns: { getSheet_: getSheet_, validateCode_: validateCode_, sheetExists_: sheetExists_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, deleteScenarioData_: deleteScenarioData_, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, updateSnapshots_: updateSnapshots_, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, assertUniqueScenarioNames_: assertUniqueScenarioNames_, codifyAllRefScenarios_: codifyAllRefScenarios_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, codifyRefScenarios_: codifyRefScenarios_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, validateLineName_: validateLineName_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, isDevDeptNote_: isDevDeptNote_, getDevDeptNotes: getDevDeptNotes, saveDevDeptNotes_: saveDevDeptNotes_, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideLineAdd_: overrideLineAdd_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, resolveRefScenario_: resolveRefScenario_, referenceValue_: referenceValue_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, snapshotReportBlock_: snapshotReportBlock_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getDevComparison: getDevComparison, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, metricGoodDir_: metricGoodDir_, solveGoalPlan: solveGoalPlan, devCutTotals_: devCutTotals_, adjustedValue_: adjustedValue_, plSnapshot_: plSnapshot_, simulateAdjustments: simulateAdjustments, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_, xlsxEsc_: xlsxEsc_, xlsxCol_: xlsxCol_, xlsxRef_: xlsxRef_, xlsxStylesXml_: xlsxStylesXml_, xlsxCellXml_: xlsxCellXml_, xlsxSheetXml_: xlsxSheetXml_, xlsxParts_: xlsxParts_, utf8Bytes_: utf8Bytes_, crc32_: crc32_, zipStore_: zipStore_, base64Bytes_: base64Bytes_, buildXlsxBase64_: buildXlsxBase64_, verifySheetRef_: verifySheetRef_, verifyNumText_: verifyNumText_, verifyPrintAst_: verifyPrintAst_, verifyReadableFormula_: verifyReadableFormula_, buildVerifyWorkbookModel_: buildVerifyWorkbookModel_, formatDateTime_: formatDateTime_, exportVerifyWorkbook: exportVerifyWorkbook, xmlUnescape_: xmlUnescape_, xmlAttr_: xmlAttr_, cellPos_: cellPos_, shiftFormulaRefs_: shiftFormulaRefs_, readXlsxSheets_: readXlsxSheets_, readSheetCells_: readSheetCells_, excelFormulaError_: excelFormulaError_, tokenizeExcel_: tokenizeExcel_, parseExcelFormula_: parseExcelFormula_, normalizeExcelText_: normalizeExcelText_, verifyImportContext_: verifyImportContext_, importCell_: importCell_, excelToSystemAst_: excelToSystemAst_, canonicalSystemFormula_: canonicalSystemFormula_, systemFormulaText_: systemFormulaText_, verifyCurrentFormula_: verifyCurrentFormula_, verifyCurrentInput_: verifyCurrentInput_, verifyAmountRows_: verifyAmountRows_, sameValue_: sameValue_, verifyInputLabel_: verifyInputLabel_, previewVerifyImport: previewVerifyImport, buildVerifyImportPlan_: buildVerifyImportPlan_, applyVerifyImport: applyVerifyImport },
     consts: { SCHEMA: SCHEMA, TEXT_COLUMNS: TEXT_COLUMNS, PL_LINE_ITEMS: PL_LINE_ITEMS, LINE_CODE_PREFIX: LINE_CODE_PREFIX, DEFAULT_PARAMS: DEFAULT_PARAMS },
     // 模擬 Apps Script「每次 google.script.run 都是全新執行」：單次執行內的快取要清掉
     beginExecution: function () { SHEET_CACHE_ = {}; resetCalcMemo_(); LOCK_DEPTH_ = 0; }
@@ -12175,6 +13085,8 @@ function drawChartEditor_() {
           <button type="button" ${others.length ? '' : 'disabled'} onclick="copyChartDialog()">從其他車型或範本複製…<span>整份換掉</span></button>
           <button type="button" onclick="saveChartAsTemplateUi()">存成標準範本<span>之後新建車型的預設</span></button>
           <button type="button" onclick="restoreChartDefaults()">恢復預設科目<span>預設科目回到系統預設（刪掉的會補回來），自訂科目不動</span></button>
+          <button type="button" onclick="exportVerifyWorkbookDialog(currentScenarioId)">匯出 Excel 驗算檔…<span>每個科目的公式翻成 Excel 公式，在 Excel 裡驗算或修改</span></button>
+          <button type="button" onclick="importVerifyWorkbookDialog()">從 Excel 驗算檔匯入…<span>在 Excel 改過的公式、數字寫回系統，先預覽再確認</span></button>
         </div>
       </details>
     </div>
@@ -16245,6 +17157,7 @@ function dashboardToolbarHtml(cols) {
         </div>
       </details>
       <button type="button" class="btn secondary" onclick="showComparisonCsv()">匯出 CSV</button>
+      <button type="button" class="btn secondary" onclick="importVerifyWorkbookDialog()" data-tip="在 Excel 驗算檔裡改了公式或藍字之後，匯入回系統(先預覽、確認才存)">從 Excel 匯入…</button>
       <button type="button" class="btn secondary" onclick="exportVerifyWorkbookFromDashboard()" data-tip="一個情境一個 Excel 檔：輸入數字、每個科目的 Excel 公式(由科目與公式翻譯)、跟系統數字逐格比對的驗算頁、公式區">匯出 Excel 驗算檔</button>
     </div>`;
 }
@@ -17281,6 +18194,102 @@ function exportVerifyWorkbook(scenarioId, snapshotId) {
     .exportVerifyWorkbook(sid, snapshotId || '');
 }
 
+/* ================= 從 Excel 驗算檔匯入 =================
+ * 選檔 → 瀏覽器解壓縮(xlsx 是 zip) → 後端 previewVerifyImport 列出會改什麼 → 勾選確認 → applyVerifyImport。
+ * 後端會先自動存一份快照；公式一律走「科目與公式」同一個存檔函式，擋得下來的錯誤(循環引用…)照樣擋。
+ */
+function importVerifyWorkbookDialog() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  input.onchange = () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    toast('讀取 ' + file.name + '…');
+    file.arrayBuffer().then(unzipXlsxTexts_).then(files => {
+      google.script.run
+        .withSuccessHandler(safeHandler(plan => showVerifyImportPreview_(file.name, files, plan)))
+        .withFailureHandler(showGlobalError)
+        .previewVerifyImport(files);
+    }).catch(e => toast('無法讀取「' + file.name + '」：' + e.message, 'err'));
+  };
+  input.click();
+}
+
+/** xlsx(zip) → { 檔名: 文字 }：只取 XML；壓縮過的用瀏覽器內建的 DecompressionStream 解開 */
+async function unzipXlsxTexts_(buf) {
+  const view = new DataView(buf), bytes = new Uint8Array(buf);
+  let eocd = bytes.length - 22;
+  while (eocd >= 0 && view.getUint32(eocd, true) !== 0x06054b50) eocd--;
+  if (eocd < 0) throw new Error('這不是 Excel 檔(xlsx)');
+  const count = view.getUint16(eocd + 10, true);
+  let p = view.getUint32(eocd + 16, true);
+  const dec = new TextDecoder('utf-8');
+  const files = {};
+  for (let i = 0; i < count; i++) {
+    const method = view.getUint16(p + 10, true), size = view.getUint32(p + 20, true);
+    const nameLen = view.getUint16(p + 28, true), extraLen = view.getUint16(p + 30, true), commentLen = view.getUint16(p + 32, true);
+    const offset = view.getUint32(p + 42, true);
+    const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + commentLen;
+    if (!/\.(xml|rels)$/.test(name)) continue;
+    const lNameLen = view.getUint16(offset + 26, true), lExtraLen = view.getUint16(offset + 28, true);
+    const data = bytes.subarray(offset + 30 + lNameLen + lExtraLen, offset + 30 + lNameLen + lExtraLen + size);
+    if (method === 0) files[name] = dec.decode(data);
+    else if (method === 8) {
+      if (typeof DecompressionStream !== 'function') throw new Error('這個瀏覽器太舊，請用新版 Chrome 或 Edge');
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      files[name] = dec.decode(await new Response(stream).arrayBuffer());
+    } else throw new Error('不支援的壓縮方式');
+  }
+  return files;
+}
+
+function showVerifyImportPreview_(fileName, files, plan) {
+  const fmtVal = (v, pct) => typeof v === 'number' ? (pct ? (v * 100).toLocaleString('zh-TW', { maximumFractionDigits: 6 }) + '%' : v.toLocaleString('zh-TW', { maximumFractionDigits: 6 })) : esc(v);
+  const conflictTag = '<span class="vi-conflict" data-tip="匯出這個檔案之後，系統裡的這個地方也改過了；確認要用 Excel 的版本蓋掉才勾">匯出後系統也改過</span>';
+  const fRows = plan.formulas.map(f => `<tr>
+      <td><input type="checkbox" class="vi-pick" value="${esc(f.id)}"${f.conflict ? '' : ' checked'}></td>
+      <td class="vi-name">${esc(f.name)}<div class="muted">${esc(f.vehicles.join('、'))}</div></td>
+      <td><code>${esc(f.before)}</code></td><td><code>${esc(f.after)}</code></td>
+      <td>${f.conflict ? conflictTag : ''}${f.notes.map(n => `<div class="muted">${esc(n)}</div>`).join('')}</td></tr>`).join('');
+  const iRows = plan.inputs.map(x => `<tr>
+      <td><input type="checkbox" class="vi-pick" value="${esc(x.id)}"${x.conflict ? '' : ' checked'}></td>
+      <td class="vi-name">${esc(x.label)}<div class="muted">${esc(x.vehicle)}</div></td>
+      <td class="num">${fmtVal(x.before, x.isPct)}</td><td class="num"><b>${fmtVal(x.after, x.isPct)}</b></td>
+      <td>${x.conflict ? conflictTag : ''}${x.notes.map(n => `<div class="muted">${esc(n)}</div>`).join('')}</td></tr>`).join('');
+  const pRows = plan.problems.map(p => `<tr><td class="vi-name">${esc(p.label)}<div class="muted">${esc(p.where)}</div></td>
+      <td>${esc(p.reason)}${p.excel ? `<div class="muted"><code>=${esc(p.excel)}</code></div>` : ''}</td></tr>`).join('');
+  const nothing = !plan.formulas.length && !plan.inputs.length;
+  const body = `
+    <p>檔案：<b>${esc(fileName)}</b>　情境：<b>${esc(plan.scenario.label)}</b></p>
+    ${nothing ? '<p>這個檔案跟系統現在的公式、數字一樣，沒有要匯入的修改。</p>' : `<p class="muted">勾選要匯入的項目。匯入前系統會自動存一份快照「匯入 Excel 前」，之後匯出驗算檔選它就能看到改了什麼。</p>`}
+    ${plan.formulas.length ? `<h4 class="vi-h">公式（${plan.formulas.length}）<span class="muted">科目表是整個車型共用，會影響 ${esc(plan.scenario.typeId)} 的所有情境</span></h4>
+      <div class="grid-scroll vi-scroll"><table class="grid-table vi-table"><thead><tr><th></th><th>科目</th><th>現在</th><th>匯入後</th><th>說明</th></tr></thead><tbody>${fRows}</tbody></table></div>` : ''}
+    ${plan.inputs.length ? `<h4 class="vi-h">輸入數字（${plan.inputs.length}）<span class="muted">寫回情境 ${esc(plan.scenario.label)}</span></h4>
+      <div class="grid-scroll vi-scroll"><table class="grid-table vi-table"><thead><tr><th></th><th>項目</th><th>現在</th><th>匯入後</th><th>說明</th></tr></thead><tbody>${iRows}</tbody></table></div>` : ''}
+    ${plan.problems.length ? `<h4 class="vi-h">無法匯入（${plan.problems.length}）<span class="muted">這些格子不會存，請在系統裡改，或改成系統看得懂的寫法再匯入</span></h4>
+      <div class="grid-scroll vi-scroll"><table class="grid-table vi-table vi-problems"><thead><tr><th>格子</th><th>原因</th></tr></thead><tbody>${pRows}</tbody></table></div>` : ''}`;
+  openModal({
+    title: '從 Excel 驗算檔匯入', body, wide: true, okText: nothing ? '知道了' : '匯入勾選的項目', noCancel: nothing,
+    collect: dlg => ({ ids: Array.from(dlg.querySelectorAll('.vi-pick:checked')).map(x => x.value) })
+  }).then(r => {
+    if (!r || nothing) return;
+    if (!r.ids.length) { toast('沒有勾選任何項目', 'err'); return; }
+    google.script.run
+      .withSuccessHandler(safeHandler(res => {
+        const ok = `已匯入 ${res.applied} 項` + (res.snapshot ? `，匯入前的數字存成快照「${res.snapshot.SnapshotName}」` : '');
+        if (res.failed.length) {
+          openModal({ title: '部分項目沒有匯入', okText: '知道了', noCancel: true,
+            body: `<p>${esc(ok)}。下面這些沒有存：</p><ul>${res.failed.map(f => `<li><b>${esc(f.label)}</b>：${esc(f.error)}</li>`).join('')}</ul>` });
+        } else toast(ok, 'ok', 5000);
+        if (typeof renderTab === 'function') renderTab(currentTab);
+      }))
+      .withFailureHandler(showGlobalError)
+      .applyVerifyImport(files, r.ids);
+  });
+}
+
 /* ===== src/ui/99-init.js ===== */
 /* ---------------- 初始化 ---------------- */
 window.addEventListener('DOMContentLoaded', () => {
@@ -17430,12 +18439,14 @@ window.addEventListener('DOMContentLoaded', () => {
   var importBtn = el('button', { class: 'fsl-btn', type: 'button', text: '匯入資料包…', onclick: function () { fileInput.click(); } });
   var moreSel = el('select', { class: 'fsl-more', title: '其他' }, [
     el('option', { value: '', text: '更多…' }),
+    el('option', { value: 'xlsx', text: '從 Excel 驗算檔匯入…' }),
     el('option', { value: 'demo', text: '載入示範資料…' }),
     el('option', { value: 'reset', text: '清空所有資料…' })
   ]);
   moreSel.addEventListener('change', function () {
     var v = moreSel.value;
     moreSel.value = '';
+    if (v === 'xlsx' && typeof window.importVerifyWorkbookDialog === 'function') window.importVerifyWorkbookDialog();
     if (v === 'demo') loadDemo();
     if (v === 'reset') resetAll();
   });
