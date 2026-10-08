@@ -332,15 +332,59 @@ function referenceValue_(scenarioRef, lineCode, vehicleRef, currentVehicleId) {
   keys.forEach(function (k) {
     if (REF_STACK_.indexOf(k) !== -1) throw formulaError_('REF 循環引用：引用的情境又引用回來');
   });
+  // 被引用的科目(或它用到的科目)在那個情境算不出來(例如兩個情境互相 REF)：那邊的數字是以 0 代替的，
+  // 不能默默拿來用，這一格也要標成錯誤，畫面才看得到。那個情境裡跟這個科目無關的錯誤不影響
+  var uses = lineDependencies_(lineDefsForScenario_(target.ScenarioID), lineCode);
+  var checkTarget = function (res) {
+    var bad = Object.keys(res.errors || {}).filter(function (c) { return uses[c]; });
+    if (bad.length) throw formulaError_('REF 引用的科目算不出來（' + bad[0] + '：' + res.errors[bad[0]] + '）');
+  };
   if (vid) {
     var res = calculatePLCore_(target.ScenarioID, vid);
     if (res.lineValues[lineCode] === undefined) throw formulaError_('REF 的情境沒有科目 ' + lineCode);
+    checkTarget(res);
     return res.lineValues[lineCode];
   }
+  mix.forEach(function (r) { checkTarget(calculatePLCore_(target.ScenarioID, r.VehicleID)); });
   var weighted = calculateScenarioWeighted(target.ScenarioID);
   var line = weighted.filter(function (l) { return l.LineCode === lineCode; })[0];
   if (!line) throw formulaError_('REF 的情境沒有科目 ' + lineCode);
   return line.Amount;
+}
+
+/**
+ * 某個科目直接或間接用到的科目(含自己)：{ 代碼: true }。所有車系的個別公式都算進去(寧可多算)。
+ */
+function lineDependencies_(defs, lineCode) {
+  var byCode = {}, byName = {}, kids = {};
+  defs.forEach(function (d) {
+    byCode[d.LineCode] = d;
+    if (!byName[d.LineName]) byName[d.LineName] = d.LineCode;
+    if (d.ParentLine) (kids[d.ParentLine] = kids[d.ParentLine] || []).push(d.LineCode);
+  });
+  var taxCodes = defs.filter(function (d) { return String(d.CommodityTaxDeduct || '').toUpperCase() === 'Y'; })
+    .map(function (d) { return d.LineCode; });
+  var reserved = formulaReservedNames_();
+  var seen = {};
+  (function walk(code) {
+    if (seen[code] || !byCode[code]) return;
+    seen[code] = true;
+    var d = byCode[code];
+    var formulas = d.CalcType === CALC_TYPES.FORMULA ? [d.Formula] : [];
+    var vf = parseVehicleFormulas_(d.VehicleFormulas);
+    Object.keys(vf).forEach(function (k) { formulas.push(vf[k]); });
+    formulas.forEach(function (f) {
+      var info = inspectFormula_(f);
+      if (!info.ok) return;
+      info.refs.codes.forEach(walk);
+      info.refs.names.forEach(function (n) {
+        if (!reserved[n] && !/^[A-Za-z]{3}匯率$/.test(n) && byName[n]) walk(byName[n]);
+      });
+      if (info.refs.calls.indexOf('CHILDREN') !== -1) (kids[code] || []).forEach(walk);
+      if (info.refs.calls.indexOf('TAXDEDUCT') !== -1) taxCodes.forEach(walk);
+    });
+  })(lineCode);
+  return seen;
 }
 
 /**

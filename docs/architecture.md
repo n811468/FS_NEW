@@ -91,6 +91,9 @@ tools/                      # 開發用，只在本機用 Node 執行
 ├─ verify-write-batching.js # 整批寫入(batchWriteRows_)：跨情境隔離、新增/更新/刪除混合、呼叫次數量測
 ├─ verify-local.js         # 地端版：與 Node 驗算層逐格比對、暫存/資料包/合併、dist 為最新
 ├─ verify-excel.js         # Excel 驗算檔：公式翻譯規則、檔案結構；有 LibreOffice 時拿掉快取值重算，逐格對系統數字
+├─ verify-formula-reliability.js # 改公式的可靠度：測試裡另寫一套獨立的公式解析/計算與整張損益表算法，大量隨機改公式逐格對答案，
+│                          #     加上等價改寫、手算答案、Excel 已知答案、守門(錯的公式存不進去)、LibreOffice 重算
+├─ xlsx-tools.js           # 驗證用的 .xlsx 小工具(解壓縮、讀數值格、找 LibreOffice)
 ├─ manual-screens.js       # 使用手冊的畫面截圖：用 Chromium 實際操作 dist/FS-local.html，輸出到 docs/manual/img
 ├─ e2e-local.js            # 用 Chromium 以 file:// 開啟的端對端測試(需要 Playwright)
 └─ dev-server.js           # 本機預覽伺服器：改前端時不必每次重新 build，存檔按 F5 就看得到

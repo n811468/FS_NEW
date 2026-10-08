@@ -8,6 +8,7 @@
  *              或同一張科目表裡的科目名稱(如 [材料成本-LP])。比率參數取出來就是小數(5% → 0.05)。
  *   運算子     + - * / ^ ( )，比較 < > <= >= = <>（成立為 1、不成立為 0）
  *              也接受全形與數學符號：× ÷ − （ ），方便直接從簡報/Excel 貼上
+ *              負號比次方晚算、次方由右往左(-2^2 = -4、2^3^2 = 512)；匯出 Excel 時會補括號
  *   函式       SUM(a,b,...)、ROUND(x[,位數])、ROUNDUP、ROUNDDOWN、MIN、MAX、ABS、IF(條件,成立,不成立)
  *              CHILDREN()    這個科目底下所有子科目的合計(小計用)
  *              TAXDEDUCT()   勾選「貨物稅完稅價格可扣除」的科目合計
@@ -23,6 +24,12 @@
  */
 
 var FORMULA_FUNCTIONS = ['SUM', 'ROUND', 'ROUNDUP', 'ROUNDDOWN', 'MIN', 'MAX', 'ABS', 'IF', 'CHILDREN', 'TAXDEDUCT', 'REF'];
+
+/** 函式的參數個數 [最少, 最多]：解析時就檢查，存檔前擋下，不要等到算的時候那一格才變成 0 */
+var FORMULA_ARITY_ = {
+  SUM: [0], MIN: [1], MAX: [1], ABS: [1, 1], ROUND: [1, 2], ROUNDUP: [1, 2], ROUNDDOWN: [1, 2],
+  IF: [2, 3], CHILDREN: [0, 0], TAXDEDUCT: [0, 0], REF: [2, 3]
+};
 
 /** 解析結果快取（同一段公式字串只解析一次） */
 var FORMULA_AST_CACHE_ = {};
@@ -172,6 +179,10 @@ function parseFormula_(src) {
           while (isOp(',')) { p++; args.push(compare()); }
         }
         expectOp(')');
+        var arity = FORMULA_ARITY_[fname];
+        if (args.length < arity[0] || (arity[1] !== undefined && args.length > arity[1])) {
+          throw formulaError_(fname + '() 的參數個數不正確', tok.pos);
+        }
         return { t: 'call', name: fname, args: args, pos: tok.pos };
       }
       return { t: 'code', v: tok.v, pos: tok.pos };
@@ -233,12 +244,12 @@ function evalFormulaAst_(n, env) {
         case '*': return num_(a) * num_(b);
         case '/': return num_(b) === 0 ? 0 : num_(a) / num_(b);
         case '^': return Math.pow(num_(a), num_(b));
-        case '<': return num_(a) < num_(b) ? 1 : 0;
-        case '>': return num_(a) > num_(b) ? 1 : 0;
-        case '<=': return num_(a) <= num_(b) ? 1 : 0;
-        case '>=': return num_(a) >= num_(b) ? 1 : 0;
-        case '=': return (typeof a === 'string' || typeof b === 'string') ? (String(a) === String(b) ? 1 : 0) : (num_(a) === num_(b) ? 1 : 0);
-        case '<>': return (typeof a === 'string' || typeof b === 'string') ? (String(a) !== String(b) ? 1 : 0) : (num_(a) !== num_(b) ? 1 : 0);
+        case '<': return excelNum_(a) < excelNum_(b) ? 1 : 0;
+        case '>': return excelNum_(a) > excelNum_(b) ? 1 : 0;
+        case '<=': return excelNum_(a) <= excelNum_(b) ? 1 : 0;
+        case '>=': return excelNum_(a) >= excelNum_(b) ? 1 : 0;
+        case '=': return (typeof a === 'string' || typeof b === 'string') ? (String(a) === String(b) ? 1 : 0) : (excelNum_(a) === excelNum_(b) ? 1 : 0);
+        case '<>': return (typeof a === 'string' || typeof b === 'string') ? (String(a) !== String(b) ? 1 : 0) : (excelNum_(a) !== excelNum_(b) ? 1 : 0);
       }
       break;
     }
@@ -249,6 +260,12 @@ function evalFormulaAst_(n, env) {
 
 function num_(v) { return typeof v === 'number' ? (isFinite(v) ? v : 0) : toNumber_(v); }
 
+/**
+ * 比較與四捨五入前先取 15 位有效數字(跟 Excel 一樣)：浮點數的尾差不能改變結果，
+ * 例如 0.1+0.2=0.3 要成立、ROUND(1.005,2) 要是 1.01、ROUNDUP(0.1+0.2,1) 要是 0.3。
+ */
+function excelNum_(v) { var n = num_(v); return n === 0 ? 0 : Number(n.toPrecision(15)); }
+
 function evalFormulaCall_(n, env) {
   var args = n.args;
   var vals = function () { return args.map(function (a) { return num_(evalFormulaAst_(a, env)); }); };
@@ -258,11 +275,13 @@ function evalFormulaCall_(n, env) {
     }
   };
   var roundTo = function (x, digits, mode) {
-    var f = Math.pow(10, digits || 0);
-    var v = x * f;
+    // 位數有小數時跟 Excel 一樣捨去小數(ROUND(x, 1.9) = ROUND(x, 1))
+    digits = digits < 0 ? Math.ceil(digits) : Math.floor(digits || 0);
+    var f = Math.pow(10, digits);
+    var v = excelNum_(x * f);
     // 跟 Excel 一樣：ROUND 是「四捨五入、遠離 0」，負數 -2.5 → -3（JS 的 Math.round 會變 -2）
-    if (mode === 'up') v = v < 0 ? -Math.ceil(-v - 1e-9) : Math.ceil(v - 1e-9);
-    else if (mode === 'down') v = v < 0 ? -Math.floor(-v + 1e-9) : Math.floor(v + 1e-9);
+    if (mode === 'up') v = v < 0 ? -Math.ceil(-v) : Math.ceil(v);
+    else if (mode === 'down') v = v < 0 ? -Math.floor(-v) : Math.floor(v);
     else v = v < 0 ? -Math.round(-v) : Math.round(v);
     return v / f;
   };

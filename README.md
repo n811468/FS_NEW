@@ -55,6 +55,8 @@ node tools/verify-ui.js                # 損益表版面、% 基準、小計警�
 node tools/verify-write-batching.js    # 整批寫入：跨情境隔離、新增/更新/刪除混合、呼叫次數不隨格數線性成長
 node tools/verify-local.js             # 地端版：數字與驗算層逐格相同、暫存、資料包、合併匯入、dist 為最新
 node tools/verify-excel.js             # Excel 驗算檔：公式翻譯、檔案結構、改壞的科目表抓不抓得到、從 Excel 匯入；有 LibreOffice 時從頭重算、逐格對系統數字
+node tools/verify-formula-reliability.js   # 改公式的可靠度：跟測試裡獨立寫的另一套算法逐格對答案(隨機公式、隨機改科目表)、
+                                           # 等價改寫數字不變、手算答案、錯的公式存不進去、Excel 重算；SEED=123 ROUNDS=300 換種子、跑更多回合
 node tools/e2e-local.js                # 地端版瀏覽器測試（需要 Playwright，找不到時略過）
 E2E_ONLY=dev node tools/e2e-local.js   # 只跑「開發總投從零開始」：全新的空資料庫、從空表開始用畫面操作
 ```
