@@ -135,7 +135,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <li><a href="#results"><span class="no">5</span>看結果</a>
       <ol><li><a href="#dashboard">損益儀表板</a></li><li><a href="#whatif">目標反推與敏感度</a></li><li><a href="#waterfall">瀑布圖工具</a></li><li><a href="#report">GATE 報告</a></li></ol></li>
     <li><a href="#excel"><span class="no">6</span>Excel 驗算檔</a>
-      <ol><li><a href="#excel-export">匯出</a></li><li><a href="#excel-sheets">六張工作表</a></li><li><a href="#excel-verify">怎麼驗算</a></li><li><a href="#excel-rules">翻譯規則</a></li></ol></li>
+      <ol><li><a href="#excel-export">匯出</a></li><li><a href="#excel-sheets">驗算的六張工作表</a></li><li><a href="#excel-verify">怎麼驗算</a></li><li><a href="#excel-change">改公式之後的檢查</a></li><li><a href="#excel-rules">翻譯規則</a></li></ol></li>
     <li><a href="#tips"><span class="no">7</span>小技巧與常見問題</a></li>
   </ol>
 </nav>
@@ -434,44 +434,51 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 <!-- ======================= 6 ======================= -->
 <section class="chapter" id="excel">
   <h2><span class="no">6</span>Excel 驗算檔</h2>
-  <p class="intro">把一個情境的輸入數字與「科目與公式」頁建好的公式原樣搬進 Excel。損益表每一格都是真的 Excel 公式，打開就由 Excel 自己重算，再逐格跟系統的數字比對。可以用來確認系統算得對，也方便交給沒有這套系統的人核對。</p>
+  <p class="intro">把一個情境的輸入數字與「科目與公式」頁建好的公式原樣搬進 Excel。損益表每一格都是真的 Excel 公式，打開就由 Excel 自己重算，再逐格跟系統的數字比對。最重要的用途是<b>改了公式或科目之後，確認計算沒有出問題</b>：除了驗算，檔案裡還有四項不依賴目前公式的檢查。</p>
 
   <h3 id="excel-export">匯出</h3>
   <ol class="steps">
-    <li>在右上角選好情境。</li>
-    <li>儀表板工具列按 <span class="ui">匯出 Excel 驗算檔</span>；比較欄位有好幾個情境時，先在對話框選一個。也可以用工具列「匯出 ▾ → Excel 驗算檔（目前情境）」。</li>
-    <li>瀏覽器下載 <code>驗算_車型_GATE_情境.xlsx</code>，用 Excel 打開。</li>
+    <li><b>改公式、科目之前</b>：到「車型與情境」或 GATE 報告按 <span class="ui">存成快照</span>（例：「改公式前」）。</li>
+    <li>改「科目與公式」頁的公式、科目，存檔。</li>
+    <li>儀表板工具列按 <span class="ui">匯出 Excel 驗算檔</span>（或工具列「匯出 ▾ → Excel 驗算檔（目前情境）」），在對話框選情境，「跟快照比」選第 1 步存的快照。</li>
+    <li>瀏覽器下載 <code>驗算_車型_GATE_情境.xlsx</code>，用 Excel 打開，先看「說明」頁。</li>
   </ol>
-  <figure>
-    <img src="img/25-verify-button.png" alt="儀表板工具列的匯出 Excel 驗算檔按鈕" loading="lazy">
-    <figcaption><b>圖 6-1</b><span class="callout-no">1</span>儀表板工具列的「匯出 Excel 驗算檔」。</figcaption>
-  </figure>
+  <div class="grid2">
+    <figure>
+      <img src="img/25-verify-button.png" alt="儀表板工具列的匯出 Excel 驗算檔按鈕" loading="lazy">
+      <figcaption><b>圖 6-1</b><span class="callout-no">1</span>儀表板工具列的「匯出 Excel 驗算檔」。</figcaption>
+    </figure>
+    <figure>
+      <img src="img/46-verify-dialog.png" alt="匯出對話框：選情境與要比較的快照" loading="lazy">
+      <figcaption><b>圖 6-2</b>匯出對話框：選情境，以及改公式前存的快照。沒有快照可以留「不比較」。</figcaption>
+    </figure>
+  </div>
 
   <h3 id="excel-sheets">六張工作表</h3>
-  <p>以下是示範資料目標情境匯出的檔案，用 LibreOffice 打開後的實際畫面。顏色的意思：<b>藍字黃底</b> = 輸入值，<b>黑字</b> = 公式，<b>綠字</b> = 引用其他工作表，<b>灰底</b> = 系統數字（匯出當下的固定值）。</p>
+  <p>以下是示範資料目標情境的實際畫面（用 LibreOffice 打開）。為了示範檢查的效果，匯出前先存了快照，再刻意改了三個地方：生產毛利的公式寫錯（多加回一般材料）、季Margin 改成固定 1%、新增一個沒有掛在任何小計底下的「新增的認證費」。顏色的意思：<b>藍字黃底</b> = 輸入值，<b>黑字</b> = 公式，<b>綠字</b> = 引用其他工作表，<b>灰底</b> = 系統數字（匯出當下的固定值）。</p>
   <figure>
     <img src="img/40-xlsx-info.png" alt="說明工作表：驗算結果全部一致" loading="lazy">
-    <figcaption><b>圖 6-2</b>說明：最上面是驗算結果（「✓ 全部一致」或「✗ 有 N 個科目不一致」）、營業淨利 Excel 重算 vs 系統、容差（預設 0.01 元，可以改），下面是工作表說明、使用方式與翻譯規則。</figcaption>
+    <figcaption><b>圖 6-3</b>說明：最上面是驗算結果與容差（預設 0.01 元，可以改），接著是「改公式、改科目之後的檢查」四項。注意這個例子驗算是「✓ 全部一致」，公式改壞的地方是靠下面四項抓到的。</figcaption>
   </figure>
   <figure>
     <img src="img/41-xlsx-input.png" alt="輸入工作表" loading="lazy">
-    <figcaption><b>圖 6-3</b>輸入：銷售構成與售價、參數（% 參數存成小數）、匯率、系統變數（LC總台數、構成比、攤提總台數都是公式）、手動輸入的成本與費用。「共用」欄是全車系的值，車系沒有個別值時引用它。</figcaption>
+    <figcaption><b>圖 6-4</b>輸入：銷售構成與售價、參數（% 參數存成小數）、匯率、系統變數（LC總台數、構成比、攤提總台數都是公式）、手動輸入的成本與費用。「共用」欄是全車系的值，車系沒有個別值時引用它。</figcaption>
   </figure>
   <figure>
     <img src="img/42-xlsx-dev.png" alt="開發總投工作表" loading="lazy">
-    <figcaption><b>圖 6-4</b>開發總投：每一筆的台幣金額、低減後、各車系單台攤提；最下面依攤提落點 SUMIF 彙總，損益試算表的開發攤提科目引用這裡。</figcaption>
+    <figcaption><b>圖 6-5</b>開發總投：每一筆的台幣金額、低減後、各車系單台攤提；最下面依攤提落點 SUMIF 彙總，損益試算表的開發攤提科目引用這裡。</figcaption>
   </figure>
   <figure>
     <img src="img/43-xlsx-pl.png" alt="損益試算工作表" loading="lazy">
-    <figcaption><b>圖 6-5</b>損益試算：科目 × 車系，每一格都是 Excel 公式；加權平均 = SUMPRODUCT(各車系, 構成比)。</figcaption>
+    <figcaption><b>圖 6-6</b>損益試算：科目 × 車系，每一格都是 Excel 公式；加權平均 = SUMPRODUCT(各車系, 構成比)。</figcaption>
   </figure>
   <figure>
     <img src="img/44-xlsx-check.png" alt="驗算工作表：系統數字與差異" loading="lazy">
-    <figcaption><b>圖 6-6</b>驗算：左半部是系統數字，右半部 = 損益試算（Excel 重算）− 系統數字，最右邊「結果」超過容差就標紅。</figcaption>
+    <figcaption><b>圖 6-7</b>驗算：左半部是系統數字，右半部 = 損益試算（Excel 重算）− 系統數字，最右邊「結果」超過容差就標紅。</figcaption>
   </figure>
   <figure>
     <img src="img/45-xlsx-formulas.png" alt="公式區工作表：系統公式與 Excel 公式並排" loading="lazy">
-    <figcaption><b>圖 6-7</b>公式區：每個科目的系統公式（科目名稱）、存檔的公式、Excel 公式並排（右側還有對照說明與驗算結果）；車系有個別公式時每一種各一列。最下面是名稱對照表：公式裡每個 [名稱] 引用「輸入」表的哪一格。Excel 公式欄用 <code>FORMULATEXT</code> 讀損益試算表那一格，在 Excel 裡顯示成 <code>='輸入'!D31</code> 這種寫法（截圖是 LibreOffice 的寫法）。</figcaption>
+    <figcaption><b>圖 6-8</b>公式區：每個科目的系統公式（科目名稱）、存檔的公式、Excel 公式並排（右側還有對照說明、驗算結果、系統預設的算法與「跟系統預設比較」）；車系有個別公式時每一種各一列。最下面是名稱對照表：公式裡每個 [名稱] 引用「輸入」表的哪一格。Excel 公式欄用 <code>FORMULATEXT</code> 讀損益試算表那一格，在 Excel 裡顯示成 <code>='輸入'!D31</code> 這種寫法（截圖是 LibreOffice 的寫法）。</figcaption>
   </figure>
 
   <h3 id="excel-verify">怎麼驗算</h3>
@@ -481,7 +488,32 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <li>想追一個數字的來源：在「損益試算」選那一格，用 Excel 的「追蹤前導參照」，會一路指到「輸入」與「開發總投」的格子。</li>
     <li>想試算：改「輸入」或「開發總投」的藍字，損益試算跟著重算；「驗算」頁會顯示跟匯出當時的差異，那是改動的影響，不是錯誤。</li>
   </ol>
-  <div class="tip"><strong>每次改版都驗過：</strong>開發時用 <code>node tools/verify-excel.js</code> 把檔案裡的快取值全部拿掉，交給 LibreOffice 從頭重算，逐格對系統數字（含車系個別公式、REF 跨車型、外幣成本、只攤給部分車系的外幣投資、低減目標、攤提基準台數、IF／比較／除法等自訂公式）。</div>
+  <div class="tip"><strong>每次改版都驗過：</strong>開發時用 <code>node tools/verify-excel.js</code> 把檔案裡的快取值全部拿掉，交給 LibreOffice 從頭重算，逐格對系統數字（含車系個別公式、REF 跨車型、外幣成本、只攤給部分車系的外幣投資、低減目標、攤提基準台數、IF／比較／除法等自訂公式），也確認故意改壞的科目表會被下一節的檢查抓到。</div>
+
+  <h3 id="excel-change">改公式之後的檢查</h3>
+  <p>「驗算」一致只代表系統照<b>現在的公式</b>算對了。公式本身改壞時（小計少算一段、科目沒掛進小計、同一筆成本扣兩次），Excel 用同一個公式重算也會一致。下面四項檢查不看現在的公式怎麼寫，專門抓這類問題。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>檢查</th><th>怎麼做</th><th>抓得到</th></tr></thead>
+    <tbody>
+      <tr><td>結構檢查</td><td>用系統預設的算法在 Excel 另外算一次各段小計：A = P8 + P9、B = Σ子科目、C = A − B、E = C − Σ子科目…，以及 營業淨利 = 收入 − 全部成本費用明細</td><td>小計公式改壞、少算或多算一段</td></tr>
+      <tr><td>科目影響</td><td>系統把每個明細科目逐一 +1,000 元重算，營業淨利的變化 ÷ 1,000</td><td>沒有算進營業淨利（0）、重複計算（−2）、掛錯段落（正負號相反）</td></tr>
+      <tr><td>跟系統預設比較</td><td>每個科目的公式、計算來源、所屬小計跟系統預設（原 Gate F 試算表的算法）比</td><td>哪些科目被改過、哪些是新增的，審核時只看這幾條</td></tr>
+      <tr><td>變動檢查</td><td>選了快照才有：每個科目 快照 → 現在 的差異，加上公式有沒有改</td><td>「公式沒改、數字卻變了」的科目：上游被改到，或輸入有改</td></tr>
+    </tbody>
+  </table></div>
+  <figure>
+    <img src="img/47-xlsx-structure.png" alt="結構檢查工作表：生產毛利與整條損益鏈跟預設算法不同" loading="lazy">
+    <figcaption><b>圖 6-9</b>結構檢查：生產毛利（C）跟預設算法 A − B 差了 7,109（就是被多加回去的一般材料），整條損益鏈也對不起來。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/48-xlsx-impact.png" alt="科目影響工作表" loading="lazy">
+    <figcaption><b>圖 6-10</b>科目影響：一般材料被 C 的公式加回去，係數變成 0；「新增的認證費」沒有掛在任何小計底下，也是 0。廣宣、促銷、批標售、季Margin 會連動貨物稅（可扣除貨物稅的科目），約 −0.88 是正常的。</figcaption>
+  </figure>
+  <figure>
+    <img src="img/49-xlsx-changes.png" alt="變動檢查工作表" loading="lazy">
+    <figcaption><b>圖 6-11</b>變動檢查：銷貨成本合計（B）的公式沒改，數字卻變了，因為季Margin 改了之後連動貨物稅；判讀欄標「⚠ 公式沒改，數字卻變了」。往下看會看到 C、d4「公式改過」。</figcaption>
+  </figure>
+  <div class="tip"><strong>標紅、標黃不一定是錯。</strong>刻意改的算法（例如季Margin 改成固定 1%）也會被標出來；逐條確認「這是不是我要的改動」，不是就回「科目與公式」頁修正，再匯出一次。</div>
 
   <h3 id="excel-rules">翻譯規則</h3>
   <div class="table-wrap"><table>
@@ -522,6 +554,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <li><b>同事給的資料包要怎麼加進來？</b>工具列「匯入資料包…」選「合併匯入」：資料包裡有的車型（或情境）以資料包為準，其他不動。合併前建議先「匯出全部」備份。</li>
     <li><b>另一個分頁說資料已經被修改？</b>同一份資料在兩個分頁同時開啟時，後開的那一頁會暫停存檔，按「重新整理」就好。</li>
     <li><b>Excel 驗算檔有科目不一致？</b>如果沒有改過輸入，請把檔案與資料包一起交給維護的人；公式區的「對照說明」會寫出那個科目的翻譯方式。</li>
+    <li><b>改了公式，怎麼確定沒改壞？</b>改之前存快照，改完匯出驗算檔並選那個快照，看「說明」頁的四項檢查（見第 6 章「改公式之後的檢查」）。</li>
   </ul>
 </section>
 

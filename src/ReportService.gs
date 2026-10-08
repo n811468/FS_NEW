@@ -270,12 +270,18 @@ function createSnapshot(scenarioId, name, notes) {
   var sels = [{ ScenarioID: scenarioId, VehicleID: '' }].concat(calcSalesMix_(scenarioId).map(function (r) { return { ScenarioID: scenarioId, VehicleID: r.VehicleID }; }));
   var cmp = calculateComparison(sels);
   var round = function (v) { return typeof v === 'number' ? Math.round(v * 100) / 100 : v; };
+  // 車系個別公式也存一份：之後 Excel 驗算檔跟快照比較時，才看得出哪些公式被改過
+  var vehicleFormulas = {};
+  getPLLineItems(scenario.VehicleTypeID).forEach(function (d) {
+    var vf = parseVehicleFormulas_(d.VehicleFormulas);
+    if (Object.keys(vf).length) vehicleFormulas[d.LineCode] = JSON.stringify(vf);
+  });
   var data = {
     v: 1,
     scenario: { Gate: scenario.Gate || '', ScenarioName: scenario.ScenarioName || '', ScenarioType: scenario.ScenarioType || '', VehicleTypeID: scenario.VehicleTypeID || '' },
     lines: cmp.lines.map(function (l) {
       return { LineCode: l.LineCode, LineName: l.LineName, Category: l.Category, ParentLine: l.ParentLine, SortOrder: l.SortOrder,
-        CalcType: l.CalcType, Formula: l.Formula, AutoSource: l.AutoSource };
+        CalcType: l.CalcType, Formula: l.Formula, AutoSource: l.AutoSource, VehicleFormulas: vehicleFormulas[l.LineCode] || '' };
     }),
     columns: cmp.columns.map(function (c) {
       var amounts = {};

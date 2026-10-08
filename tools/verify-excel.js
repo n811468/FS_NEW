@@ -180,12 +180,48 @@ demo.getScenarios().forEach(s => cases.push({ gs: demo, sid: s.ScenarioID, label
 cases.push({ gs, sid, label: 'Gate F 驗算情境(含特殊情況)' });
 if (targetSid) cases.push({ gs, sid: targetSid, label: 'Gate F 目標(低減、攤提基準台數)' });
 
+// (c) 改壞的科目表：先存快照，再把公式、科目改壞 —— 驗算照樣「一致」，但其他檢查要抓得到
+const bad = loadAppsScript(['Constants.gs', 'Utils.gs', 'FormulaEngine.gs', 'DataService.gs', 'ChartService.gs', 'CalcEngine.gs', 'ReportService.gs', 'WhatIfService.gs', 'SetupSheets.gs', 'XlsxWriter.gs', 'VerifyWorkbook.gs']);
+const badSid = gatef.buildScenario(bad);
+bad.getBootstrap('DA');
+let badSnap = '';
+check('準備改壞的科目表(改之前先存快照)', () => {
+  badSnap = bad.createSnapshot(badSid, '改公式前', '').SnapshotID;
+  const r = () => { bad.SHEET_CACHE_ = {}; bad.resetCalcMemo_(); };
+  bad.saveChartLine('DA', { LineCode: 'C', LineName: '生產毛利', ParentLine: '', CalcType: 'FORMULA', Formula: 'A - B + [一般材料]' });   // 小計改壞
+  bad.saveChartLine('DA', { LineCode: 'd4', LineName: '季Margin', ParentLine: 'E', CalcType: 'FORMULA', Formula: 'P8 * 1%' });         // 刻意改的算法
+  bad.saveChartLine('DA', { LineCode: '', LineName: '漏掛的費用', ParentLine: '', CalcType: 'INPUT' });                                 // 沒掛在任何小計底下
+  bad.saveChartLine('DA', { LineCode: '', LineName: '重複的材料', ParentLine: 'I', CalcType: 'FORMULA', Formula: '[材料成本-LP]' });     // 材料成本-LP 被扣兩次
+  r();
+});
+check('改壞的科目表：驗算照樣一致，但結構檢查、科目影響、預設比較、變動檢查都抓得到', () => {
+  const built = bad.buildVerifyWorkbookModel_(badSid, { snapshotId: badSnap });
+  assert(built.model.sheets.map(s => s.name).indexOf('變動檢查') !== -1, '選了快照要有「變動檢查」');
+  const coefOf = name => { const d = bad.getPLLineItems('DA').filter(x => x.LineName === name)[0]; return built.meta.coef[d.LineCode].V1; };
+  assert(Math.abs(coefOf('漏掛的費用')) < 0.01, '沒掛小計的科目，係數應該是 0：' + coefOf('漏掛的費用'));
+  assert(Math.abs(coefOf('材料成本-LP') + 2) < 0.01, '被扣兩次的科目，係數應該是 −2：' + coefOf('材料成本-LP'));
+  assert(Math.abs(coefOf('一般材料')) < 0.01, 'C 公式把一般材料加回去，係數應該是 0：' + coefOf('一般材料'));
+  assert(built.meta.impactBad >= 3, '科目影響應該至少抓到 3 個：' + built.meta.impactBad);
+  assert(built.meta.structureBad >= 1, '結構檢查(快取值)應該抓到 C：' + built.meta.structureBad);
+  assert(built.meta.changeWarn >= 1, '變動檢查(快取值)應該有「公式沒改、數字卻變了」：' + built.meta.changeWarn);
+  assert(built.meta.stdDiffCount >= 4, '跟預設比較：C、d4 與兩個新科目都不同：' + built.meta.stdDiffCount);
+  const fm = built.model.sheets.filter(s => s.name === '公式區')[0];
+  const d4 = fm.rows.filter(r => r && r[0] && r[0].v === 'd4')[0];
+  assert(d4 && d4[10].v === '公式跟預設不同', 'd4 應標「公式跟預設不同」：' + (d4 && d4[10].v));
+  const ch = built.model.sheets.filter(s => s.name === '變動檢查')[0];
+  const fstate = code => (ch.rows.filter(r => r && r[0] && r[0].v === code)[0] || [])[2].v;
+  assert(fstate('C') === '改過' && fstate('d4') === '改過' && fstate('E') === '相同', '變動檢查的公式比較：C ' + fstate('C') + '、d4 ' + fstate('d4') + '、E ' + fstate('E'));
+});
+cases.push({ gs: bad, sid: badSid, label: '改壞的科目表(含快照比較)', snapshotId: badSnap, broken: true });
+
 /* ---------- 2. 結構 ---------- */
 cases.forEach(c => {
   check('結構：' + c.label, () => {
-    const built = c.gs.buildVerifyWorkbookModel_(c.sid);
+    const built = c.gs.buildVerifyWorkbookModel_(c.sid, { snapshotId: c.snapshotId || '' });
     const names = built.model.sheets.map(s => s.name);
-    assert(names.join(',') === '說明,輸入,開發總投,損益試算,驗算,公式區', '工作表順序：' + names.join(','));
+    assert(names.slice(0, 8).join(',') === '說明,輸入,開發總投,損益試算,驗算,公式區,結構檢查,科目影響', '工作表順序：' + names.join(','));
+    if (!c.broken) assert(built.meta.impactBad === 0, '沒改壞的情境，科目影響不應該有問題：' + built.meta.impactBad);
+    assert(built.meta.structureChecks.length >= 8, '結構檢查應該涵蓋 A B C E G I K 與整條損益鏈：' + built.meta.structureChecks.join('、'));
     assert(!built.meta.fallbacks.length, '有科目翻不成 Excel 公式：' + built.meta.fallbacks.join(','));
     assert(!built.meta.errors.length, '系統這個情境有公式錯誤：' + built.meta.errors.join(','));
     const pl = built.model.sheets.filter(s => s.name === '損益試算')[0];
@@ -225,7 +261,7 @@ if (!soffice) {
   const profile = 'file://' + path.join(dir, 'profile');
   cases.forEach((c, idx) => {
     check('LibreOffice 從頭重算 = 系統數字：' + c.label, () => {
-      const built = c.gs.buildVerifyWorkbookModel_(c.sid);
+      const built = c.gs.buildVerifyWorkbookModel_(c.sid, { snapshotId: c.snapshotId || '' });
       stripCache(built.model);
       const src = path.join(dir, 'in' + idx + '.xlsx');
       fs.writeFileSync(src, Buffer.from(c.gs.buildXlsxBase64_(built.model), 'base64'));
@@ -249,6 +285,20 @@ if (!soffice) {
       });
       assert(Math.abs(worst) <= 0.01, `Excel 重算跟系統差 ${worst}（${where}）`);
       assert(info.C9 === 0, '說明頁的不一致科目數應為 0：' + info.C9);
+      // 改公式之後的檢查：沒改壞的情境全部通過；改壞的要在 Excel 裡(重算後)抓到
+      if (!c.broken) {
+        assert(info.D15 === 0, '結構檢查應該全部符合：' + info.D15);
+        assert(info.D16 === 0, '科目影響應該沒有問題：' + info.D16);
+      } else {
+        assert(info.D15 >= 1, '結構檢查應該抓到 C 改壞：' + info.D15);
+        assert(info.D16 >= 3, '科目影響應該抓到漏算、重複算：' + info.D16);
+        assert(info.D18 >= 1, '變動檢查應該標出「公式沒改、數字卻變了」的科目：' + info.D18);
+        // 檔案裡的快取值(不重算的檢視器看到的)要跟 LibreOffice 重算的一樣
+        const cached = c.gs.buildVerifyWorkbookModel_(c.sid, { snapshotId: c.snapshotId || '' }).model.sheets[0].rows;
+        [15, 16, 17, 18].forEach(r => assert(cached[r - 1][3].v === info['D' + r], `說明 D${r} 快取 ${cached[r - 1][3].v}，重算 ${info['D' + r]}`));
+        const st = nums['結構檢查'];
+        assert(Object.keys(st).some(k => Math.abs(st[k]) > 1), '結構檢查應該有算出差異');
+      }
       // 損益試算的營業淨利直接跟計算引擎比
       const k = built.meta.profitCode;
       built.meta.vehicles.forEach((v, i) => {

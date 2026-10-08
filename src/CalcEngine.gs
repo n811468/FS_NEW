@@ -36,7 +36,7 @@ function fxRateFor_(params, currency, vehicleId) {
  * 假設分析(What-if)：目標反推與敏感度表要「假設月銷量變成 N、售價調 x%、某科目降 y%…」重算損益，
  * 但完全不能動到存檔的資料。做法是在計算期間掛一組只存在記憶體裡的覆寫(CALC_OVERRIDES_)，
  * 計算引擎讀銷售構成/參數/科目金額時套上去，算完立刻拿掉(見 WhatIfService.gs withOverrides_)。
- *   { scenarioId, volume: 倍數, price: 倍數, lineScale: {科目: 倍數}, dev: 倍數,
+ *   { scenarioId, volume: 倍數, price: 倍數, lineScale: {科目: 倍數}, lineAdd: {科目: 加減金額}, dev: 倍數,
  *     params: {參數名稱: 值(原單位)}, fx: {幣別: 匯率} }
  * 只套在指定的情境上；REF 引用到的其他情境照原本的資料算。
  * --------------------------------------------------------------- */
@@ -74,6 +74,11 @@ function calcParameters_(scenarioId) {
 function overrideLineScale_(scenarioId, code) {
   var o = overridesFor_(scenarioId);
   return o && o.lineScale && o.lineScale[code] !== undefined ? o.lineScale[code] : 1;
+}
+/** 科目加減固定金額(驗算檔的「科目對淨利的影響」用：某科目 +1 元，看營業淨利變多少) */
+function overrideLineAdd_(scenarioId, code) {
+  var o = overridesFor_(scenarioId);
+  return o && o.lineAdd && o.lineAdd[code] !== undefined ? o.lineAdd[code] : 0;
 }
 function overrideDevScale_(scenarioId) {
   var o = overridesFor_(scenarioId);
@@ -219,7 +224,7 @@ function calculatePLWithDefs_(scenarioId, vehicleId, overrideDefs, probe) {
       v = 0;
     }
     visiting[code] = false;
-    v = v * overrideLineScale_(scenarioId, code);
+    v = v * overrideLineScale_(scenarioId, code) + overrideLineAdd_(scenarioId, code);
     values[code] = typeof v === 'number' && isFinite(v) ? v : 0;
     return values[code];
   }

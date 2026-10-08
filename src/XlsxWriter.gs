@@ -99,7 +99,8 @@ function xlsxStylesXml_() {
   });
   var dxfs = [
     '<dxf><font><color rgb="FF9C0006"/></font><fill><patternFill><bgColor rgb="FFFFC7CE"/></patternFill></fill></dxf>',
-    '<dxf><font><color rgb="FF006100"/></font><fill><patternFill><bgColor rgb="FFC6EFCE"/></patternFill></fill></dxf>'
+    '<dxf><font><color rgb="FF006100"/></font><fill><patternFill><bgColor rgb="FFC6EFCE"/></patternFill></fill></dxf>',
+    '<dxf><font><color rgb="FF7A5300"/></font><fill><patternFill><bgColor rgb="FFFFEB9C"/></patternFill></fill></dxf>'
   ];
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
@@ -113,7 +114,7 @@ function xlsxStylesXml_() {
     '<dxfs count="' + dxfs.length + '">' + dxfs.join('') + '</dxfs>' +
     '</styleSheet>';
 }
-var XLSX_DXF_ = { bad: 0, good: 1 };
+var XLSX_DXF_ = { bad: 0, good: 1, warn: 2 };
 
 function xlsxCellXml_(cell, ref) {
   if (cell === null || cell === undefined || cell === '') return '';

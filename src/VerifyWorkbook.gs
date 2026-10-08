@@ -19,7 +19,8 @@
  *   開發總投攤提            → 「開發總投」表每一筆的單台攤提，依攤提落點 SUMIF
  */
 
-var VERIFY_SHEETS_ = { info: '說明', input: '輸入', dev: '開發總投', pl: '損益試算', check: '驗算', formulas: '公式區' };
+var VERIFY_SHEETS_ = { info: '說明', input: '輸入', dev: '開發總投', pl: '損益試算', check: '驗算', formulas: '公式區',
+  structure: '結構檢查', impact: '科目影響', changes: '變動檢查' };
 // 輸入表與損益試算表的車系欄位從同一欄開始(D)，同一列的公式往右拉就是下一個車系
 var VERIFY_FIRST_VEHICLE_COL_ = 3;
 
@@ -115,7 +116,8 @@ function verifyReadableFormula_(formula, defsByCode) {
  * 建立驗算檔的活頁簿 model(見 XlsxWriter.gs)。另外回傳 meta 給畫面與驗算腳本用：
  *   plCells: { 科目代碼: { 車系ID: 'D12', '': 加權平均格 } }、vehicles、profitCode…
  */
-function buildVerifyWorkbookModel_(scenarioId) {
+function buildVerifyWorkbookModel_(scenarioId, opts) {
+  opts = opts || {};
   var scenario = getScenarios().filter(function (s) { return s.ScenarioID === scenarioId; })[0];
   if (!scenario) throw new Error('找不到情境：' + scenarioId);
   var typeId = scenario.VehicleTypeID || '';
@@ -586,7 +588,8 @@ function buildVerifyWorkbookModel_(scenarioId) {
   var fmRows = [];
   fmRows[0] = [{ v: '公式區：系統公式 ⇄ Excel 公式', s: 'title' }];
   fmRows[1] = [{ v: '每個科目一列(車系有個別公式時，每一種公式各一列)。「Excel 公式」是損益試算表那一格的公式(FORMULATEXT，Excel 2013 以後才有)，改了損益試算表這裡會跟著變。', s: 'note' }];
-  var fmHeader = ['代碼', '科目', '計算來源', '適用車系', '系統公式（科目名稱）', '系統公式（存檔的樣子）', 'Excel 公式（損益試算）', '對照說明', '驗算結果'];
+  var fmHeader = ['代碼', '科目', '計算來源', '適用車系', '系統公式（科目名稱）', '系統公式（存檔的樣子）', 'Excel 公式（損益試算）', '對照說明', '驗算結果',
+    '系統預設的算法', '跟系統預設比較'];
   fmRows[3] = fmHeader.map(function (h) { return { v: h, s: 'header' }; });
   var noteText = function (d, notes, kind) {
     var out = [];
@@ -606,6 +609,29 @@ function buildVerifyWorkbookModel_(scenarioId) {
     if (errs) out.push('系統顯示公式錯誤：' + Object.keys(errs).map(function (vid) { return errs[vid]; }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join('；') + '（以 0 計）');
     return out.join('\n');
   };
+  // 跟系統預設(標準範本原本的 Gate F 算法)比：改過的科目一眼看得到，審核時只要看這幾條
+  var stdByCode = {};
+  PL_LINE_ITEMS.forEach(function (x) { stdByCode[x.LineCode] = x; });
+  var kindOfStd = function (x) { return x.CalcType === CALC_TYPES.FORMULA ? 'formula' : x.CalcType === CALC_TYPES.DEV_AMORT ? 'dev' : 'input'; };
+  var KIND_NAME = { formula: '公式', dev: '開發總投攤提', input: '手動輸入' };
+  var stdFormulaText = function (d) {
+    var std = stdByCode[d.LineCode];
+    if (!std) return '（預設沒有這個科目）';
+    return kindOfStd(std) === 'formula' ? verifyReadableFormula_(std.Formula, defsByCode) : KIND_NAME[kindOfStd(std)];
+  };
+  var stdCompare = function (d, g) {
+    var std = stdByCode[d.LineCode];
+    if (!std) return '新增的科目（系統預設沒有）';
+    var out = [];
+    if (g.kind !== kindOfStd(std)) out.push('計算來源改過：預設是' + KIND_NAME[kindOfStd(std)]);
+    else if (g.kind === 'formula' && cleanFormulaText_(g.formula) !== cleanFormulaText_(std.Formula)) out.push('公式跟預設不同');
+    if (parseVehicleFormulas_(d.VehicleFormulas)[vehicles[g.idx[0]].id]) out.push('這幾個車系用個別公式');
+    if ((d.ParentLine || '') !== (std.ParentLine || '')) {
+      out.push('所屬小計改過：預設在「' + (std.ParentLine ? (defsByCode[std.ParentLine] || stdByCode[std.ParentLine] || {}).LineName || std.ParentLine : '最上層') + '」底下');
+    }
+    return out.length ? out.join('；') : '相同';
+  };
+  var stdDiffCount = 0;
   var fr = 4;
   lines.forEach(function (d) {
     var notes = formulaNotes[d.LineCode] || {};
@@ -630,8 +656,11 @@ function buildVerifyWorkbookModel_(scenarioId) {
         { v: g.formula ? '=' + cleanFormulaText_(g.formula) : '', s: 'code' },
         ftext ? { f: '_xlfn.FORMULATEXT(' + verifySheetRef_(PL, cellRef) + ')', v: ftext, s: 'code' } : { v: '（帶入系統數字）', s: 'code' },
         { v: noteText(d, notes, g.kind), s: 'wrap' },
-        { f: verifySheetRef_(CK, checkResultAt[d.LineCode]), v: '✓ 一致', s: 'label' }
+        { f: verifySheetRef_(CK, checkResultAt[d.LineCode]), v: '✓ 一致', s: 'label' },
+        { v: stdFormulaText(d), s: 'code' },
+        { v: stdCompare(d, g), s: 'wrap' }
       ];
+      if (stdCompare(d, g) !== '相同') stdDiffCount++;
     });
   });
   fr++;
@@ -648,6 +677,208 @@ function buildVerifyWorkbookModel_(scenarioId) {
   SYSTEM_VARIABLES.forEach(function (sv) { nameRow(sv.name, '系統變數', smKey[sv.name] || 'var:' + sv.name, sv.desc); });
   paramDefs.forEach(function (d) { nameRow(d.ParamName, '參數', 'param:' + d.ParamName, (d.Unit === '%' ? '% 參數，存成小數。' : '') + (d.Description || '')); });
   currencies.forEach(function (c) { nameRow(c + '匯率', '匯率', 'fx:' + c, '1 ' + c + ' = ? 台幣'); });
+
+  var anyBad = function (range) { return 'SUMPRODUCT(--(ABS(' + range + ')>' + tolRef + '))'; };
+  var plCell = function (code, k) { return verifySheetRef_(PL, (k < nV ? vCol(k) : wCol) + plAt[code]); };
+
+  /* ================= 結構檢查 =================
+   * 不看使用者現在寫的公式：小計一律用系統預設的算法(A = P8 + P9、C = A − B、E = C − Σ子科目…)，
+   * 子科目照現在的科目表，在 Excel 裡另外算一次跟損益試算比。改壞小計公式、明細掛錯小計、少算一段都會在這裡對不起來。 */
+  var ST = VERIFY_SHEETS_.structure;
+  var stRows = [];
+  stRows[0] = [{ v: '結構檢查：用系統預設的算法重算各段小計', s: 'title' }];
+  stRows[1] = [{ v: '每一列 = 損益試算的實際數字 − 用預設算法算出來的數字(Excel 公式)。標紅代表那一段小計跟預設算法不同：可能是公式改壞、明細掛錯小計，也可能是刻意改的算法(對照公式區最右邊「跟系統預設比較」)。', s: 'note' }];
+  stRows[3] = [{ v: '代碼', s: 'header' }, { v: '檢查', s: 'header' }, { v: '預設算法', s: 'header' }]
+    .concat(vehicles.map(function (v) { return { v: '差異\n' + v.label, s: 'header' }; })).concat([{ v: '差異\n加權平均', s: 'header' }, { v: '結果', s: 'header' }]);
+  var stChecks = [];
+  ['A', 'B', 'C', 'E', 'G', 'I', 'K'].forEach(function (code) {
+    if (plAt[code] === undefined || !DEFAULT_FORMULAS[code]) return;
+    var info = inspectFormula_(DEFAULT_FORMULAS[code]);
+    if (!info.ok || info.refs.codes.some(function (c) { return plAt[c] === undefined; })) return;
+    stChecks.push({ label: code + ' ' + defsByCode[code].LineName, formula: DEFAULT_FORMULAS[code], code: code });
+  });
+  // 整條損益鏈：營業淨利 = 收入 − 各段明細全部扣掉(不經過中間小計)
+  if (['A', 'B', 'E', 'G', 'I', 'J', 'K'].every(function (c) { return plAt[c] !== undefined; })) {
+    var leafs = ['B', 'E', 'G', 'I'].map(function (g) { return (children[g] || []).filter(function (c) { return plAt[c] !== undefined; }); });
+    stChecks.push({ label: 'K ' + defsByCode.K.LineName + '（整條損益鏈）', code: 'K', custom: function (col) {
+      var parts = leafs.map(function (list) { return list.length ? '-SUM(' + list.map(function (c) { return col + plAt[c]; }).join(',') + ')' : ''; }).join('');
+      return col + plAt.A + parts + '-' + col + plAt.J;
+    }, customValue: function (vals) {
+      return (vals.A || 0) - leafs.reduce(function (s, list) { return s + list.reduce(function (t, c) { return t + (vals[c] || 0); }, 0); }, 0) - (vals.J || 0);
+    }, text: '= [收入] − 銷貨成本明細 − 銷售費用明細 − 產品貢獻前費用明細 − 固定營業費用明細 − [前瞻費用]' });
+  }
+  // 使用者自己加的群組(有子科目、不是「前一段 − 明細」那種)：= 子科目合計
+  lines.forEach(function (d) {
+    if (stdByCode[d.LineCode] || !(children[d.LineCode] || []).length || isFooterGroupLine_(d)) return;
+    stChecks.push({ label: d.LineCode + ' ' + d.LineName, formula: 'CHILDREN()', code: d.LineCode });
+  });
+  var stFirst = 5;
+  var valsFor = function (k) { return k < nV ? results[vehicles[k].id].lineValues : weighted; };
+  // 快取值(Excel 打開時會重算；不重算的檢視器看到的也要是對的)：用同一個預設算法在這裡先算一次
+  var expectedValue = function (chk, vals) {
+    if (chk.customValue) return chk.customValue(vals);
+    return num_(evalFormulaAst_(parseFormula_(chk.formula), {
+      code: function (c) { return vals[c] || 0; }, name: function () { return 0; },
+      children: function () { return (children[chk.code] || []).reduce(function (s, c) { return s + (vals[c] || 0); }, 0); },
+      taxDeduct: function () { return 0; }, ref: function () { return 0; }
+    }));
+  };
+  var stBad = 0;
+  stChecks.forEach(function (chk, i) {
+    var rn = stFirst + i;
+    var rowBad = false;
+    var row = [{ v: chk.code, s: 'label' }, { v: chk.label, s: 'labelBold' }, { v: chk.text || verifyReadableFormula_(chk.formula, defsByCode), s: 'code' }];
+    for (var k = 0; k <= nV; k++) {
+      var col = k < nV ? vCol(k) : wCol;
+      var expected = chk.custom ? chk.custom(col) : verifyPrintAst_(parseFormula_(chk.formula), {
+        code: function (c) { return col + plAt[c]; },
+        name: function (n) { throw formulaError_('預設算法不應該有 [' + n + ']'); },
+        sumOf: function () {
+          var list = (children[chk.code] || []).filter(function (c) { return plAt[c] !== undefined; });
+          return list.length ? 'SUM(' + list.map(function (c) { return col + plAt[c]; }).join(',') + ')' : '0';
+        },
+        ref: function () { return '0'; }, note: function () { }
+      }, 'excel');
+      // 公式只引用損益試算表：把 D12 這種格子加上工作表名稱
+      expected = expected.replace(/(^|[^A-Za-z0-9!$'])([A-Z]{1,3}\d+)/g, function (m, pre, ref) { return pre + verifySheetRef_(PL, ref); });
+      var vals = valsFor(k);
+      var diff = Math.round(((vals[chk.code] || 0) - expectedValue(chk, vals)) * 1e6) / 1e6 + 0;   // + 0：-0 顯示成 0
+      if (Math.abs(diff) > 0.01) rowBad = true;
+      row.push({ f: plCell(chk.code, k) + '-(' + expected + ')', v: diff, s: 'diff' });
+    }
+    if (rowBad) stBad++;
+    var range = vCol(0) + rn + ':' + wCol + rn;
+    row.push({ f: 'IF(' + anyBad(range) + '=0,"✓ 符合","✗ 跟預設算法不同")', v: rowBad ? '✗ 跟預設算法不同' : '✓ 符合', s: 'label' });
+    stRows[rn - 1] = row;
+  });
+  var stLast = stFirst + Math.max(stChecks.length, 1) - 1;
+  var stResultCol = xlsxCol_(VC + nV + 1);
+
+  /* ================= 科目影響 =================
+   * 系統把每個明細科目逐一 +1,000 元重算，看營業淨利變多少：成本/費用應該 −1、收入 +1。
+   * 0 = 沒有算進營業淨利、−2 = 重複計算、正負號反了 = 掛錯段落。完全不看公式怎麼寫，只看結果。 */
+  var IM = VERIFY_SHEETS_.impact;
+  var imRows = [];
+  imRows[0] = [{ v: '科目影響：每個明細科目多 1 元，營業淨利變多少', s: 'title' }];
+  imRows[1] = [{ v: '系統把每個科目逐一加 1,000 元重新計算整張損益表，(營業淨利的變化) ÷ 1,000。成本、費用應該是 −1，收入 +1；0 = 沒有算進營業淨利，−2 = 重複計算。這一頁是系統算的固定值，用來抓「科目掛錯小計、漏算、重複算」。', s: 'note' }];
+  imRows[3] = [{ v: '代碼', s: 'header' }, { v: '科目', s: 'header' }, { v: '所屬小計', s: 'header' }]
+    .concat(vehicles.map(function (v) { return { v: v.label, s: 'header' }; })).concat([{ v: '預期', s: 'header' }, { v: '結果', s: 'header' }]);
+  var isRevenueLine = function (d) {
+    var cur = d, guard = 0;
+    while (cur && guard++ < 20) {
+      if (cur.LineCode === 'A' || String(cur.Category || '') === '收入') return true;
+      cur = defsByCode[cur.ParentLine];
+    }
+    return false;
+  };
+  // 明細科目：有所屬小計的末端科目，加上最上層的手動輸入/開發攤提(例：前瞻費用)；最上層的公式科目是小計(收入、生產毛利…)不列
+  var impactLines = lines.filter(function (d) {
+    if (String(d.Category || '') === '售價結構' || (children[d.LineCode] || []).length || d.LineCode === profitCode) return false;
+    return !!d.ParentLine || d.CalcType !== CALC_TYPES.FORMULA;
+  });
+  var STEP = 1000;
+  var coef = {};   // code → vid → 係數
+  vehicles.forEach(function (v) {
+    var base = results[v.id].lineValues[profitCode] || 0;
+    impactLines.forEach(function (d) {
+      var after = withOverrides_({ scenarioId: scenarioId, lineAdd: (function () { var o = {}; o[d.LineCode] = STEP; return o; })() }, function () {
+        return calculatePLCore_(scenarioId, v.id).lineValues[profitCode] || 0;
+      });
+      (coef[d.LineCode] = coef[d.LineCode] || {})[v.id] = Math.round((after - base) / STEP * 10000) / 10000;
+    });
+  });
+  var impactBad = 0;
+  impactLines.forEach(function (d, i) {
+    var expected = isRevenueLine(d) ? 1 : -1;
+    var worst = '✓ 正常';
+    var cs = vehicles.map(function (v) { return coef[d.LineCode][v.id]; });
+    var deductible = String(d.CommodityTaxDeduct || '').toUpperCase() === 'Y';
+    cs.forEach(function (c) {
+      var msg;
+      if (Math.abs(c) < 0.01) msg = '✗ 沒有算進營業淨利（確認所屬小計）';
+      else if (Math.abs(c) > 1.5) msg = '✗ 算了 ' + Math.round(Math.abs(c)) + ' 次（重複計算）';
+      else if (c * expected < 0) msg = '✗ 正負號跟預期相反（確認是收入還是成本）';
+      else if (Math.abs(c - expected) > 0.01) msg = deductible ? 'ℹ 會連動貨物稅（可扣除貨物稅的科目）' : 'ℹ 會連動其他科目，每多 1 元淨利變 ' + c;
+      if (msg && (worst.charAt(0) !== '✗')) worst = msg;
+    });
+    if (worst.charAt(0) === '✗') impactBad++;
+    var parent = d.ParentLine && defsByCode[d.ParentLine] ? defsByCode[d.ParentLine].LineName : '（最上層）';
+    imRows[4 + i] = [{ v: d.LineCode, s: 'label' }, { v: d.LineName, s: 'label' }, { v: parent, s: 'label' }]
+      .concat(cs.map(function (c) { return { v: c, s: 'sys' }; }))
+      .concat([{ v: expected, s: 'label' }, { v: worst, s: 'label' }]);
+  });
+  var imResultCol = xlsxCol_(VC + nV + 1);
+  var imLast = 4 + Math.max(impactLines.length, 1);
+
+  /* ================= 變動檢查(選了快照才有) =================
+   * 改公式/科目前先存情境快照，匯出時選它：逐科目列出 快照 → 現在 的差異與公式有沒有改，
+   * 「公式沒改、數字卻變了」的科目特別標出來(通常是上游被改到)。 */
+  var CH = VERIFY_SHEETS_.changes;
+  var chRows = null, chLast = 0, chJudgeCol = '', snapLabel = '', chWarn = 0;
+  var snap = opts.snapshotId ? snapshotData_(opts.snapshotId) : null;
+  if (opts.snapshotId && !snap) throw new Error('找不到快照：' + opts.snapshotId);
+  if (snap) {
+    chRows = [];
+    snapLabel = snap.meta.SnapshotName + '（' + [snap.scenario.Gate, snap.scenario.ScenarioName].filter(function (x) { return x; }).join(' ') + '，' + formatDateTime_(new Date(snap.meta.CreatedAt)) + '）';
+    var snapCols = {};
+    snap.columns.forEach(function (c) { snapCols[c.vehicleId || ''] = c.amounts; });
+    var snapLine = {};
+    snap.lines.forEach(function (l) { snapLine[l.LineCode] = l; });
+    var hasVf = snap.lines.some(function (l) { return l.VehicleFormulas !== undefined; });
+    var sig = function (calcType, formula, vf) {
+      var o = parseVehicleFormulas_(vf);
+      var vfText = hasVf ? Object.keys(o).sort().map(function (k) { return k + '=' + cleanFormulaText_(o[k]); }).join(';') : '';
+      return calcType + '|' + (calcType === CALC_TYPES.FORMULA ? cleanFormulaText_(formula) : '') + '|' + vfText;
+    };
+    var shownFormula = function (calcType, formula) {
+      return calcType === CALC_TYPES.FORMULA ? verifyReadableFormula_(formula, defsByCode) : calcType === CALC_TYPES.DEV_AMORT ? '（開發總投攤提）' : '（手動輸入）';
+    };
+    chRows[0] = [{ v: '變動檢查：跟快照比', s: 'title' }];
+    chRows[1] = [{ v: '快照：' + snapLabel + '。差異 = 現在(損益試算，Excel 重算) − 快照當時的數字。快照之後輸入的數字有改，也會出現在差異裡。' + (hasVf ? '' : '這個快照比較舊，沒有存車系個別公式，只比主要公式。'), s: 'note' }];
+    var dCols = ['加權平均'].concat(vehicles.map(function (v) { return v.label; }));
+    chRows[3] = ['代碼', '科目', '公式', '快照\n加權平均', '現在\n加權平均'].map(function (h) { return { v: h, s: 'header' }; })
+      .concat(dCols.map(function (l) { return { v: '差異\n' + l, s: 'header' }; }))
+      .concat(['判讀', '快照時的公式', '現在的公式'].map(function (h) { return { v: h, s: 'header' }; }));
+    var dFirst = 5;   // F 欄開始是差異
+    var dLastCol = xlsxCol_(dFirst + dCols.length - 1);
+    chJudgeCol = xlsxCol_(dFirst + dCols.length);
+    var order = lines.map(function (d) { return d.LineCode; });
+    snap.lines.forEach(function (l) { if (order.indexOf(l.LineCode) === -1) order.push(l.LineCode); });
+    order.forEach(function (code, i) {
+      var rn = 5 + i;
+      var d = defsByCode[code], sl = snapLine[code];
+      var inNow = plAt[code] !== undefined;
+      var fState = !sl ? '新增的科目' : !inNow ? '已刪除' :
+        sig(sl.CalcType, sl.Formula, sl.VehicleFormulas) !== sig(d.CalcType, d.Formula, hasVf ? d.VehicleFormulas : '') ? '改過' :
+        (sl.ParentLine || '') !== (d.ParentLine || '') ? '改了所屬小計' : '相同';
+      var row = [{ v: code, s: 'label' }, { v: (d || sl).LineName, s: 'label' }, { v: fState, s: 'label' }];
+      var sw = sl && snapCols[''] ? snapCols[''][code] : undefined;
+      row.push(sw === undefined ? { v: '', s: 'label' } : { v: sw, s: 'sys' });
+      row.push(inNow ? { f: plCell(code, nV), v: weighted[code] || 0, s: 'link' } : { v: '', s: 'label' });
+      dCols.forEach(function (x, k) {
+        var vid = k === 0 ? '' : vehicles[k - 1].id;
+        var sv = sl && snapCols[vid] ? snapCols[vid][code] : undefined;
+        if (!inNow || sv === undefined) { row.push({ v: '', s: 'label' }); return; }
+        var now = k === 0 ? weighted[code] || 0 : results[vid].lineValues[code] || 0;
+        row.push({ f: plCell(code, k === 0 ? nV : k - 1) + '-(' + verifyNumText_(sv) + ')', v: now - sv, s: 'calc' });
+      });
+      var range = xlsxCol_(dFirst) + rn + ':' + dLastCol + rn;
+      var numChanged = row.slice(dFirst).some(function (c) { return c && c.f && typeof c.v === 'number' && Math.abs(c.v) > 0.01; });
+      var judge;
+      if (fState === '新增的科目') judge = { v: '新增的科目：確認掛在正確的小計底下（看「科目影響」）', s: 'wrap' };
+      else if (fState === '已刪除') judge = { v: '快照有、現在刪掉了：確認它的金額有沒有移到別的科目', s: 'wrap' };
+      else {
+        judge = { f: 'IF(' + anyBad(range) + '=0,IF($C' + rn + '="相同","✓ 沒變","公式改過，但數字沒變"),IF($C' + rn + '="相同","⚠ 公式沒改，數字卻變了：上游科目或輸入有變","公式改過，數字跟著變：確認變動是預期的"))',
+          v: !numChanged ? (fState === '相同' ? '✓ 沒變' : '公式改過，但數字沒變') : (fState === '相同' ? '⚠ 公式沒改，數字卻變了：上游科目或輸入有變' : '公式改過，數字跟著變：確認變動是預期的'), s: 'wrap' };
+        if (numChanged && fState === '相同') chWarn++;
+      }
+      row.push(judge);
+      row.push({ v: sl ? shownFormula(sl.CalcType, sl.Formula) : '', s: 'code' });
+      row.push({ v: d ? shownFormula(d.CalcType, lineFormulaFor_(d, '')) : '', s: 'code' });
+      chRows[rn - 1] = row;
+    });
+    chLast = 4 + order.length;
+  }
 
   /* ================= 輸入表實際內容 ================= */
   var inRows = [];
@@ -692,13 +923,17 @@ function buildVerifyWorkbookModel_(scenarioId) {
     ['開發總投', '每一筆開發投資的台幣金額、低減後、各車系單台攤提，最下面依攤提落點彙總'],
     ['損益試算', '每個科目 × 每個車系都是 Excel 公式(由「科目與公式」頁的公式翻譯)，加權平均 = SUMPRODUCT(各車系, 構成比)'],
     ['驗算', '系統數字(匯出當下的固定值)與 Excel 重算的差異，逐格比對'],
-    ['公式區', '每個科目的系統公式與 Excel 公式並排，加上名稱對照表：公式裡的 [名稱] 引用哪一格'],
+    ['公式區', '每個科目的系統公式與 Excel 公式並排，最右邊是跟系統預設算法的比較；最下面是名稱對照表：公式裡的 [名稱] 引用哪一格'],
+    ['結構檢查', '用系統預設的算法(C = A − B、E = C − Σ子科目…)在 Excel 另外算一次各段小計，跟損益試算比'],
+    ['科目影響', '每個明細科目多 1 元時營業淨利變多少：成本費用 −1、收入 +1，0 = 沒算進去、−2 = 重複算'],
+    ['變動檢查', '匯出時選了快照才有：每個科目 快照 → 現在 的差異，以及公式有沒有改過'],
     ['', ''],
     ['怎麼用', ''],
     ['1', '打開檔案時 Excel 會重算全部公式。先看上面的「驗算結果」：全部一致 = 系統的計算跟 Excel 用同一套公式算出來一樣。'],
     ['2', '想知道某個科目怎麼算：到「公式區」找那一列，左邊是系統公式(科目名稱)，右邊是 Excel 公式；點「損益試算」那一格也看得到公式。'],
     ['3', '想試算：改「輸入」或「開發總投」的藍字，損益試算跟著變；「驗算」頁會顯示跟匯出當時的差異(那是你改的影響，不是錯誤)。'],
-    ['4', '顏色：藍字黃底 = 輸入值；黑字 = 公式；綠字 = 引用其他工作表；灰底 = 系統數字(固定值)。'],
+    ['4', '改了公式或科目之後：看上面「改公式、改科目之後的檢查」四項。驗算一致只代表系統照公式算對了；公式本身改得對不對，要看這四項。'],
+    ['5', '顏色：藍字黃底 = 輸入值；黑字 = 公式；綠字 = 引用其他工作表；灰底 = 系統數字(固定值)。'],
     ['', ''],
     ['翻譯規則', ''],
     ['科目', '科目代碼、[科目名稱] → 損益試算表同一個車系欄那個科目的格子'],
@@ -710,24 +945,56 @@ function buildVerifyWorkbookModel_(scenarioId) {
     ['REF()', '另一個情境的科目 → 「輸入」表「跨情境引用」那一列帶入數字(要驗那個情境，另外匯出它的驗算檔)'],
     ['開發總投攤提', '「開發總投」表：低減後 ÷ 攤提總台數(只攤給部分車系的 ÷ 那幾個車系的攤提台數)，依攤提落點 SUMIF']
   ];
-  var gr = 13;
+  var stCount = 'COUNTIF(' + verifySheetRef_(ST, '$' + stResultCol + '$' + stFirst + ':$' + stResultCol + '$' + stLast) + ',"✗*")';
+  infoRows[13] = [{ v: '改公式、改科目之後的檢查（不依賴目前的公式）', s: 'section' }, { v: '', s: 'section' }, { v: '', s: 'section' }, { v: '', s: 'section' }];
+  infoRows[14] = [{ v: '結構檢查', s: 'labelBold' }, null,
+    { f: 'IF(' + stCount + '=0,"✓ 各段小計跟系統預設的算法一致","✗ 有 "&' + stCount + '&" 段小計跟預設算法不同，見「結構檢查」")',
+      v: stBad ? '✗ 有 ' + stBad + ' 段小計跟預設算法不同，見「結構檢查」' : '✓ 各段小計跟系統預設的算法一致', s: 'label' }, { f: stCount, v: stBad, s: 'int' }];
+  infoRows[15] = [{ v: '科目對淨利的影響', s: 'labelBold' }, null,
+    { v: impactBad ? '✗ 有 ' + impactBad + ' 個科目沒算進營業淨利、重複計算或正負號相反，見「科目影響」' : '✓ 每個明細科目都剛好算進營業淨利一次', s: 'label' }, { v: impactBad, s: 'int' }];
+  infoRows[16] = [{ v: '跟系統預設比較', s: 'labelBold' }, null,
+    { v: stdDiffCount ? '⚠ 有 ' + stdDiffCount + ' 個科目的算法跟系統預設不同（含新增的科目），見「公式區」最右邊兩欄' : '✓ 所有科目都是系統預設的算法', s: 'label' }, { v: stdDiffCount, s: 'int' }];
+  if (snap) {
+    var chCount = 'COUNTIF(' + verifySheetRef_(CH, '$' + chJudgeCol + '$5:$' + chJudgeCol + '$' + chLast) + ',"⚠*")';
+    infoRows[17] = [{ v: '跟快照比較', s: 'labelBold' }, null,
+      { f: 'IF(' + chCount + '=0,"✓ 沒有「公式沒改、數字卻變了」的科目","⚠ 有 "&' + chCount + '&" 個科目公式沒改、數字卻變了，見「變動檢查」")',
+        v: chWarn ? '⚠ 有 ' + chWarn + ' 個科目公式沒改、數字卻變了，見「變動檢查」' : '✓ 沒有「公式沒改、數字卻變了」的科目', s: 'label' }, { f: chCount, v: chWarn, s: 'int' }];
+    infoRows[18] = [{ v: '　快照', s: 'label' }, null, { v: snapLabel, s: 'label' }];
+  } else {
+    infoRows[17] = [{ v: '跟快照比較', s: 'labelBold' }, null, { v: '沒有選快照：改公式、科目之前先存情境快照，匯出時選它，就會多一頁「變動檢查」', s: 'note' }, { v: '', s: 'label' }];
+  }
+  var gr = 20;
   guide.forEach(function (g) {
     if (!g[0] && !g[1]) { gr++; return; }
     infoRows[gr++] = g[1] ? [{ v: g[0], s: 'labelBold' }, null, { v: g[1], s: 'wrap' }] : [{ v: g[0], s: 'section' }, { v: '', s: 'section' }, { v: '', s: 'section' }];
   });
 
   var sheets = [
-    { name: INFO, rows: infoRows, cols: [22, 2, 110, 16], merges: [], cf: [
-      { ref: 'C8', formula: 'LEFT($C$8,1)="✗"', style: 'bad' }, { ref: 'C8', formula: 'LEFT($C$8,1)="✓"', style: 'good' }] },
+    { name: INFO, rows: infoRows, cols: [26, 2, 110, 10], merges: [], cf: [
+      { ref: 'C8', formula: 'LEFT($C$8,1)="✗"', style: 'bad' }, { ref: 'C8', formula: 'LEFT($C$8,1)="✓"', style: 'good' },
+      { ref: 'C15:C18', formula: 'OR(LEFT($C15,1)="✗",LEFT($C15,1)="⚠")', style: 'bad' }, { ref: 'C15:C18', formula: 'LEFT($C15,1)="✓"', style: 'good' }] },
     { name: IN, rows: inRows, cols: [30, 12, 14].concat(vehicles.map(function () { return 14; })).concat([48]), freeze: { row: 4, col: 3 } },
     { name: DEV, rows: devSheet.rows, cols: devSheet.cols, freeze: devSheet.freeze },
     { name: PL, rows: plRows, cols: [7, 30, 12].concat(vehicles.map(function () { return 15; })).concat([15]), freeze: { row: PL_HEADER_ROW, col: 3 } },
     { name: CK, rows: ckRows, cols: [7, 26].concat(new Array(nCols * 2).join(',').split(',').map(function () { return 13; })).concat([12]), freeze: { row: PL_HEADER_ROW, col: 2 },
       cf: [{ ref: resultCol + PL_FIRST + ':' + resultCol + plLast, formula: 'LEFT($' + resultCol + PL_FIRST + ',1)="✗"', style: 'bad' },
         { ref: resultCol + PL_FIRST + ':' + resultCol + plLast, formula: 'LEFT($' + resultCol + PL_FIRST + ',1)="✓"', style: 'good' }] },
-    { name: FM, rows: fmRows, cols: [7, 22, 12, 14, 48, 30, 60, 46, 11], freeze: { row: 4, col: 2 },
-      cf: [{ ref: 'I5:I' + (4 + lines.length * 4), formula: 'LEFT($I5,1)="✗"', style: 'bad' }] }
+    { name: FM, rows: fmRows, cols: [7, 22, 12, 14, 48, 30, 60, 46, 11, 40, 30], freeze: { row: 4, col: 2 },
+      cf: [{ ref: 'I5:I' + (4 + lines.length * 4), formula: 'LEFT($I5,1)="✗"', style: 'bad' },
+        { ref: 'K5:K' + (4 + lines.length * 4), formula: 'AND($K5<>"",$K5<>"相同")', style: 'warn' }] },
+    { name: ST, rows: stRows, cols: [7, 30, 56].concat(vehicles.map(function () { return 13; })).concat([13, 18]), freeze: { row: 4, col: 1 },
+      cf: [{ ref: stResultCol + stFirst + ':' + stResultCol + stLast, formula: 'LEFT($' + stResultCol + stFirst + ',1)="✗"', style: 'bad' },
+        { ref: stResultCol + stFirst + ':' + stResultCol + stLast, formula: 'LEFT($' + stResultCol + stFirst + ',1)="✓"', style: 'good' }] },
+    { name: IM, rows: imRows, cols: [7, 26, 18].concat(vehicles.map(function () { return 12; })).concat([7, 40]), freeze: { row: 4, col: 2 },
+      cf: [{ ref: imResultCol + '5:' + imResultCol + imLast, formula: 'LEFT($' + imResultCol + '5,1)="✗"', style: 'bad' },
+        { ref: imResultCol + '5:' + imResultCol + imLast, formula: 'LEFT($' + imResultCol + '5,1)="✓"', style: 'good' }] }
   ];
+  if (chRows) {
+    sheets.push({ name: CH, rows: chRows, cols: [7, 24, 12, 14, 14].concat(vehicles.map(function () { return 12; })).concat([12, 36, 40, 40]), freeze: { row: 4, col: 2 },
+      cf: [{ ref: chJudgeCol + '5:' + chJudgeCol + chLast, formula: 'LEFT($' + chJudgeCol + '5,1)="⚠"', style: 'bad' },
+        { ref: chJudgeCol + '5:' + chJudgeCol + chLast, formula: 'LEFT($' + chJudgeCol + '5,1)="✓"', style: 'good' },
+        { ref: 'C5:C' + chLast, formula: 'AND($C5<>"",$C5<>"相同")', style: 'warn' }] });
+  }
   var fileName = '驗算_' + [typeId, scenarioLabel].filter(function (x) { return x; }).join('_').replace(/[\\\/:*?"<>|\s]+/g, '_') + '.xlsx';
   return {
     model: { title: '損益驗算檔 ' + typeId + ' ' + scenarioLabel, sheets: sheets },
@@ -736,7 +1003,9 @@ function buildVerifyWorkbookModel_(scenarioId) {
       vehicles: vehicles, lines: lines.map(function (d) { return d.LineCode; }), plFirstRow: PL_FIRST, plAt: plAt,
       firstVehicleCol: VC, weightedCol: wCol, profitCode: profitCode, sheets: VERIFY_SHEETS_,
       fallbacks: Object.keys(formulaNotes).filter(function (c) { return formulaNotes[c].fallback; }),
-      errors: Object.keys(cellErrors)
+      errors: Object.keys(cellErrors),
+      structureChecks: stChecks.map(function (c) { return c.label; }), structureBad: stBad, changeWarn: chWarn, impactBad: impactBad, stdDiffCount: stdDiffCount, coef: coef,
+      hasChanges: !!chRows
     }
   };
 }
@@ -749,14 +1018,16 @@ function formatDateTime_(d) {
 /**
  * 前端呼叫：匯出某情境的 Excel 驗算檔。回傳 { fileName, base64, lines, vehicles, fallbacks }。
  */
-function exportVerifyWorkbook(scenarioId) {
-  var built = buildVerifyWorkbookModel_(scenarioId);
+function exportVerifyWorkbook(scenarioId, snapshotId) {
+  var built = buildVerifyWorkbookModel_(scenarioId, { snapshotId: snapshotId || '' });
   return {
     fileName: built.fileName,
     base64: buildXlsxBase64_(built.model),
     lines: built.meta.lines.length,
     vehicles: built.meta.vehicles.length,
     fallbacks: built.meta.fallbacks,
-    errors: built.meta.errors
+    errors: built.meta.errors,
+    impactBad: built.meta.impactBad,
+    stdDiffCount: built.meta.stdDiffCount
   };
 }

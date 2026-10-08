@@ -31,6 +31,9 @@ function have(cmd, args) {
 }
 
 const shot = name => !ONLY || name.indexOf(ONLY) !== -1;
+// Excel 驗算檔的截圖：[檔名, 那張工作表第一行的標題]
+const XLSX_SHOTS = [['40-xlsx-info', '損益驗算檔'], ['41-xlsx-input', '輸入資料'], ['42-xlsx-dev', '開發總投攤提'], ['43-xlsx-pl', '損益試算'],
+  ['44-xlsx-check', '驗算：'], ['45-xlsx-formulas', '公式區：'], ['46-verify-dialog', ''], ['47-xlsx-structure', '結構檢查：'], ['48-xlsx-impact', '科目影響：'], ['49-xlsx-changes', '變動檢查：']];
 const done = [];
 const skipped = [];
 
@@ -347,11 +350,27 @@ async function main() {
   const soffice = ['soffice', 'libreoffice'].find(c => have(c));
   if (!soffice || !have('pdftoppm', ['-v'])) {
     skipped.push('Excel 驗算檔畫面：找不到 LibreOffice 或 pdftoppm');
-  } else if (['40-xlsx-info', '41-xlsx-input', '42-xlsx-dev', '43-xlsx-pl', '44-xlsx-check', '45-xlsx-formulas'].some(n => shot(n))) {
+  } else if (XLSX_SHOTS.some(n => shot(n[0]))) {
     await step('40-xlsx', async () => {
       await page.selectOption('#scenario-selector', target.ScenarioID);
       await page.waitForTimeout(500);
-      const [dl] = await Promise.all([page.waitForEvent('download'), page.evaluate(id => exportVerifyWorkbook(id), target.ScenarioID)]);
+      // 手冊示範「改了公式之後」：先存快照，再透過系統同一條路徑改幾個地方
+      //   生產毛利的公式改壞、季Margin 換成固定 1%、新增一個沒掛在任何小計底下的費用
+      const snap = await call(page, 'createSnapshot', target.ScenarioID, '改公式前', '');
+      await call(page, 'saveChartLine', typeId, { LineCode: 'C', LineName: '生產毛利', ParentLine: '', CalcType: 'FORMULA', Formula: 'A - B + [一般材料]' });
+      await call(page, 'saveChartLine', typeId, { LineCode: 'd4', LineName: '季Margin', ParentLine: 'E', CalcType: 'FORMULA', Formula: 'P8 * 1%' });
+      await call(page, 'saveChartLine', typeId, { LineCode: '', LineName: '新增的認證費', ParentLine: '', CalcType: 'INPUT' });
+      await tab(page, 'dashboard', '營業淨利');
+      if (shot('46-verify-dialog')) {
+        await page.click('#dashboard-content button[onclick^="exportVerifyWorkbookFromDashboard"]');
+        await page.waitForSelector('dialog.modal[open]');
+        await page.selectOption('dialog.modal select#mf-0', target.ScenarioID);
+        await page.selectOption('dialog.modal select#mf-1', snap.SnapshotID);
+        await page.waitForTimeout(300);
+        await save(page, '46-verify-dialog', { el: 'dialog.modal' });
+        await closeModal(page);
+      }
+      const [dl] = await Promise.all([page.waitForEvent('download'), page.evaluate(([id, sn]) => exportVerifyWorkbook(id, sn), [target.ScenarioID, snap.SnapshotID])]);
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-manual-'));
       const xlsx = path.join(tmp, 'verify.xlsx');
       await dl.saveAs(xlsx);
@@ -361,13 +380,12 @@ async function main() {
       const pages = fs.readdirSync(tmp).filter(f => /^p-\d+\.png$/.test(f)).sort();
       // 每張工作表從新的一頁開始，第一行就是那張表的標題
       const text = execFileSync('pdftotext', ['-layout', path.join(tmp, 'verify.pdf'), '-'], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).split('\f');
-      const want = [['40-xlsx-info', '損益驗算檔'], ['41-xlsx-input', '輸入資料'], ['42-xlsx-dev', '開發總投攤提'], ['43-xlsx-pl', '損益試算'], ['44-xlsx-check', '驗算：'], ['45-xlsx-formulas', '公式區：']];
-      want.filter(([name]) => shot(name)).forEach(([name, marker]) => {
+      XLSX_SHOTS.filter(([name, marker]) => marker && shot(name)).filter(([name]) => shot(name)).forEach(([name, marker]) => {
         const idx = text.findIndex(t => t.trim().indexOf(marker) === 0);
         if (idx === -1 || !pages[idx]) { skipped.push(name + '：PDF 裡找不到「' + marker + '」'); return; }
         // 去掉頁面四周的白邊；太長的頁面只留上半部(手冊裡看得到表頭與前幾十列就夠)
         // 公式區很寬，縮成一頁後字太小：只取左上角(代碼、科目、系統公式、Excel 公式)
-        const crop = name === '45-xlsx-formulas' ? ['-crop', '78%x45%+0+0'] : ['-crop', 'x1300+0+0'];
+        const crop = name === '45-xlsx-formulas' ? ['-crop', '78%x45%+0+0'] : name === '49-xlsx-changes' ? ['-crop', '100%x60%+0+0'] : ['-crop', 'x1300+0+0'];
         execFileSync('convert', [path.join(tmp, pages[idx]), '-trim', '+repage'].concat(crop).concat(['+repage', '-bordercolor', 'white', '-border', '16', path.join(OUT, name + '.png')]), { stdio: 'pipe' });
         done.push(name);
       });

@@ -449,7 +449,15 @@ async function main() {
     if (await page.locator('dialog.modal').count()) await page.click('dialog.modal button[value=ok]');
   })]);
   assert(await xlsxOk(dlX), '儀表板匯出的驗算檔不是 xlsx：' + dlX.suggestedFilename());
-  const [dlX2] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar .fsl-menu summary').then(() => page.click('#fs-local-bar button:has-text("Excel 驗算檔")'))]);
+  // 工具列：有快照時先開對話框(可以選要比較的快照)，選第一個快照匯出 → 檔案多一頁「變動檢查」(sheet9)
+  const [dlX2] = await Promise.all([page.waitForEvent('download'), page.click('#fs-local-bar .fsl-menu summary').then(() => page.click('#fs-local-bar button:has-text("Excel 驗算檔")')).then(async () => {
+    await page.waitForTimeout(400);
+    if (await page.locator('dialog.modal').count()) {
+      const snapOpts = await page.$$eval('dialog.modal select#mf-1 option', os => os.map(o => o.value).filter(Boolean));
+      if (snapOpts.length) await page.selectOption('dialog.modal select#mf-1', snapOpts[0]);
+      await page.click('dialog.modal button[value=ok]');
+    }
+  })]);
   assert(await xlsxOk(dlX2), '工具列匯出的驗算檔不是 xlsx：' + dlX2.suggestedFilename());
 
   // 透過前端同一條路徑(google.script.run)改資料：新增車型 DQ
