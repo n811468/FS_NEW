@@ -95,6 +95,8 @@ tools/                      # 開發用，只在本機用 Node 執行
 │                          #     加上等價改寫、手算答案、Excel 已知答案、守門(錯的公式存不進去)、LibreOffice 重算
 ├─ xlsx-tools.js           # 驗證用的 .xlsx 小工具(解壓縮、讀數值格、找 LibreOffice)
 ├─ manual-screens.js       # 使用手冊的畫面截圖：用 Chromium 實際操作 dist/FS-local.html，輸出到 docs/manual/img
+├─ build-manual.js         # 使用手冊 index.html → README.md(GitHub 上直接看得到圖文)
+├─ verify-manual.js        # 使用手冊有沒有跟上系統：README 最新、圖都在、截圖是目前這一版、每一頁都有寫到
 ├─ e2e-local.js            # 用 Chromium 以 file:// 開啟的端對端測試(需要 Playwright)
 └─ dev-server.js           # 本機預覽伺服器：改前端時不必每次重新 build，存檔按 F5 就看得到
 ```
