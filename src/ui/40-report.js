@@ -686,7 +686,7 @@ function reportReconHtml_() {
       <td class="${r.actual === null ? '' : r.actual > 0.5 ? 'gap-good' : r.actual < -0.5 ? 'gap-bad' : ''}">${r.actual === null ? '—' : signed_(r.actual)}</td>
       <td>${r.diff === null ? '—' : signed_(r.diff)}</td>
       <td class="note recon-${r.tone}">${r.tone === 'ok' ? '✔ ' : '⚠ '}${esc(r.status)}</td>
-      <td class="no-print">${r.code ? `<button type="button" class="btn ghost sm" onclick="openWaterfallTool_('actions', { scenarioId: reportSel.base }, { scenarioId: reportSel.target }, { actionLine: '${esc(r.code)}' })" data-tip="在瀑布圖工具看這個科目：現況 → 每一個原因 → 目標，也可以直接補原因">瀑布</button>` : ''}</td></tr>`).join('')}</tbody>
+      <td class="no-print">${r.code ? `<button type="button" class="btn ghost sm" onclick="openWaterfallTool_('actions', { scenarioId: reportSel.base }, { scenarioId: reportSel.target }, { actionLine: ${jsArg(r.code)} })" data-tip="在瀑布圖工具看這個科目：現況 → 每一個原因 → 目標，也可以直接補原因">瀑布</button>` : ''}</td></tr>`).join('')}</tbody>
   </table></div>
   <p class="help">實際改善 = 該科目從現況到目標的變動，換算成對營業淨利的影響（成本降 = 正）。容差 500 元或 5%。</p>`;
 }

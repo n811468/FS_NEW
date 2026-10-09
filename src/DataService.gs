@@ -124,6 +124,8 @@ function renameVehicleType(oldId, newId) {
       throw new Error('車型代號「' + newId + '」已經存在');
     }
 
+    // 舊公式用名稱寫的 REF("車型 GATE 情境名稱") 名稱裡有車型代號：改名前先換成 ScenarioID，改名後才找得到
+    codifyAllRefScenarios_();
     row.VehicleTypeID = newId;
     upsertRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', row);
     deleteRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', oldId);
@@ -193,6 +195,30 @@ function saveVehicle(rowObj) {
 /** 刪除車系：它在各情境的銷售構成、成本、費用、車系參數、說明一起刪掉，免得之後新增同代號車系時舊數字又冒出來 */
 function deleteVehicle(vehicleId) {
   return withLock_(function () {
+    // 科目的車系個別公式、開發總投的分攤車系也記著車系代號：一起拿掉，之後新增同代號車系才不會套到舊設定。
+    // 只攤給這個車系的投資拿掉後會變成「攤給全部車系」，意思不一樣，先擋下來讓使用者決定
+    var devRows = vehicleId ? (sheetToObjects_(SHEETS.DEV_INVESTMENT) || []).filter(function (r) {
+      return parseVehicleScope_(r.VehicleScope).indexOf(vehicleId) !== -1;
+    }) : [];
+    var onlyThis = devRows.filter(function (r) { return parseVehicleScope_(r.VehicleScope).length === 1; });
+    if (onlyThis.length) {
+      throw new Error('開發總投有 ' + onlyThis.length + ' 筆只攤給車系「' + vehicleId + '」（' +
+        onlyThis.slice(0, 5).map(function (r) { return (r.Department || '未填部門') + (r.AssetType ? ' ' + r.AssetType : ''); }).join('、') +
+        (onlyThis.length > 5 ? '…' : '') + '），請先改分攤車系或刪除那幾筆，再刪除車系。');
+    }
+    devRows.forEach(function (r) {
+      r.VehicleScope = parseVehicleScope_(r.VehicleScope).filter(function (id) { return id !== vehicleId; }).join(',');
+    });
+    if (devRows.length) batchWriteRows_(SHEETS.DEV_INVESTMENT, 'RowID', devRows, []);
+    var lines = vehicleId ? (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) {
+      return parseVehicleFormulas_(r.VehicleFormulas)[vehicleId] !== undefined;
+    }) : [];
+    lines.forEach(function (r) {
+      var vf = parseVehicleFormulas_(r.VehicleFormulas);
+      delete vf[vehicleId];
+      r.VehicleFormulas = Object.keys(vf).length ? JSON.stringify(vf) : '';
+    });
+    if (lines.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', lines, []);
     [[SHEETS.SALES_MIX, 'RowID'], [SHEETS.COST_OF_SALES, 'RowID'], [SHEETS.OPERATING_EXPENSE, 'RowID'],
       [SHEETS.PARAMETERS, 'ParamID'], [SHEETS.LINE_NOTES, 'RowID'], [SHEETS.PL_RESULT, 'ResultID']].forEach(function (pair) {
       if (!sheetExists_(pair[0])) return;
@@ -294,14 +320,21 @@ function renameVehicle(vehicleTypeId, oldId, newId) {
       r.VehicleScope = parseVehicleScope_(r.VehicleScope).map(function (id) { return id === oldId ? newId : id; }).join(',');
     });
     if (devRows.length) batchWriteRows_(SHEETS.DEV_INVESTMENT, 'RowID', devRows, []);
-    var lines = (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) {
-      return parseVehicleFormulas_(r.VehicleFormulas)[oldId] !== undefined;
-    });
-    lines.forEach(function (r) {
+    // 公式裡 REF("情境", "科目", "車系") 的車系參數也是車系代號(車系代號全資料庫唯一，直接換)
+    var lines = [];
+    (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).forEach(function (r) {
       var vf = parseVehicleFormulas_(r.VehicleFormulas);
-      vf[newId] = vf[oldId];
-      delete vf[oldId];
-      r.VehicleFormulas = JSON.stringify(vf);
+      var hit = vf[oldId] !== undefined;
+      if (hit) { vf[newId] = vf[oldId]; delete vf[oldId]; }
+      Object.keys(vf).forEach(function (k) {
+        var f = renameRefVehicle_(vf[k], oldId, newId);
+        if (f !== vf[k]) { vf[k] = f; hit = true; }
+      });
+      var formula = renameRefVehicle_(r.Formula, oldId, newId);
+      if (formula !== r.Formula) { r.Formula = formula; hit = true; }
+      if (!hit) return;
+      r.VehicleFormulas = Object.keys(vf).length ? JSON.stringify(vf) : '';
+      lines.push(r);
     });
     if (lines.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', lines, []);
     // 快照裡每個車系一欄，欄位記著車系代號：改成新代號，快照才對得到現在的車系
@@ -315,6 +348,13 @@ function renameVehicle(vehicleTypeId, oldId, newId) {
     });
     return getVehicles(vehicleTypeId);
   });
+}
+
+/** 公式裡 REF("情境", "科目", "舊車系") 的車系換成新代號 */
+function renameRefVehicle_(formula, oldId, newId) {
+  if (!formula || !/REF\s*\(/i.test(formula)) return formula;
+  return String(formula).replace(/(REF\s*\(\s*("|')[^"']*\2\s*,\s*("|')[^"']*\3\s*,\s*)("|')([^"']*)\4/gi,
+    function (m, head, q1, q2, q3, vid) { return vid.trim() === oldId ? head + q3 + newId + q3 : m; });
 }
 
 // ---- Scenarios（隸屬某個 VehicleType，同一車型可有多個情境版本並排比較） ----
@@ -939,14 +979,25 @@ function getConfiguredCurrencies(scenarioId) {
   return list;
 }
 
+/**
+ * 從同名參數裡挑最貼近的一筆：情境自己的設定優先於全公司共用(空白 ScenarioID)，
+ * 同一層裡指定車系的優先於全車系。不能照試算表順序拿第一筆：合併匯入帶進來的共用列可能排在前面，
+ * 畫面上(只顯示這個情境的列)看到的值就跟計算用的不一樣。
+ */
+function pickScopedParam_(match, vehicleId) {
+  var best = null, bestScore = -1;
+  match.forEach(function (p) {
+    var score = (p.ScenarioID ? 2 : 0) + (p.VehicleID && p.VehicleID === vehicleId ? 1 : 0);
+    if (score > bestScore) { best = p; bestScore = score; }
+  });
+  return best;
+}
+
 /** 依 ParamName(+可選VehicleID) 查值，找不到就用 DEFAULT_PARAMS，最後 fallback 0 */
 function lookupParam_(paramsForScenario, paramName, vehicleId) {
-  var match = paramsForScenario.filter(function (p) {
+  var picked = pickScopedParam_(paramsForScenario.filter(function (p) {
     return p.ParamName === paramName && (!p.VehicleID || p.VehicleID === vehicleId);
-  });
-  // 有指定車型的參數優先於全域參數
-  var specific = match.filter(function (p) { return p.VehicleID === vehicleId; });
-  var picked = specific.length ? specific[0] : match[0];
+  }), vehicleId);
   if (picked) return toNumber_(picked.Value);
   return DEFAULT_PARAMS[paramName] !== undefined ? DEFAULT_PARAMS[paramName] : 0;
 }

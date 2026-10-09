@@ -89,7 +89,7 @@ function devPctText_(v) { return String(Math.round(num(v) * 100) / 100); }
 function devAmt_(v) { return Math.abs(v) >= 0.5 ? fmt(v) : '-'; }
 function devDeptLabel_(name) { return name || '（未填部門）'; }
 /** 部門名稱放進 onclick 等屬性裡：JSON 字串再轉義，名稱有引號也不會壞 */
-function devJs_(s) { return esc(JSON.stringify(String(s))); }
+function devJs_(s) { return jsArg(s); }
 /** 同一組(資產/費用)或整個部門目前的 %，新的一筆沿用；都沒有就用工具列的「統一低減目標」 */
 function devInheritPct_(g, cat) {
   if (!devIsTarget_()) return '';

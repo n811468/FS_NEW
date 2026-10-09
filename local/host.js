@@ -66,6 +66,25 @@
       backend.beginExecution();
     }
 
+    /** 資料包內容有問題、補齊分頁時才出錯：記憶體裡的資料庫還原成換之前的樣子，不要留下換了一半的表 */
+    function writeTablesOrRollback(tables) {
+      var before = readTables();
+      try { writeTables(tables); }
+      catch (e) {
+        Object.keys(C.SCHEMA).forEach(function (name) {
+          spreadsheet.replaceTable(name, C.SCHEMA[name], before[name] || [], C.TEXT_COLUMNS[name]);
+        });
+        spreadsheet.replaceTable(Pack.AUDIT_TABLE, Pack.AUDIT_HEADERS, before[Pack.AUDIT_TABLE] || [], []);
+        backend.beginExecution();
+        throw e;
+      }
+    }
+
+    /** 另一個分頁已經存了新資料：這個分頁再寫暫存就會把對方的修改蓋掉 */
+    function assertNotStale() {
+      if (state.stale) throw new Error('資料已在另一個視窗或分頁更新過，請重新整理這一頁再繼續操作（避免互相覆蓋）。');
+    }
+
     function persist() {
       if (!storage) return true;
       var tables = readTables();
@@ -129,7 +148,7 @@
 
     /** 前端呼叫後端函式。跟 google.script.run 一樣只開放公開函式(結尾不是底線)，參數與回傳值都走一次 JSON。 */
     function call(fnName, args) {
-      if (state.stale) throw new Error('資料已在另一個視窗或分頁更新過，請重新整理這一頁再繼續操作（避免互相覆蓋）。');
+      assertNotStale();
       var fn = backend.fns[fnName];
       if (typeof fn !== 'function' || /_$/.test(fnName)) {
         throw new Error('沒有這個後端函式：' + fnName);
@@ -152,6 +171,7 @@
 
     /** 匯出資料包：vehicleTypeIds 有值 = 只匯出這幾個車型；opts2.scenarioIds 有值 = 只匯出這幾個情境；都沒有 = 整份 */
     function exportPack(vehicleTypeIds, opts2) {
+      assertNotStale();   // 過期分頁匯出的是舊資料，也會寫暫存
       var scenarioIds = opts2 && opts2.scenarioIds && opts2.scenarioIds.length ? opts2.scenarioIds : null;
       var tables = readTables();
       var pack = Pack.buildPack(tables, {
@@ -179,7 +199,8 @@
 
     /** 取代匯入：整份資料庫換成資料包的內容 */
     function replaceWithPack(pack) {
-      writeTables(pack.tables);
+      assertNotStale();
+      writeTablesOrRollback(pack.tables);
       state.changesSinceExport = 0;
       state.firstUnsavedAt = '';
       if (!(pack.scope && pack.scope.kind === 'all')) markChanged();
@@ -191,10 +212,11 @@
       return { lineCodePrefix: C.LINE_CODE_PREFIX, builtInLineCodes: C.PL_LINE_ITEMS.map(function (d) { return d.LineCode; }), defaultParams: C.DEFAULT_PARAMS || {} };
     }
     /** 合併匯入的預覽：不改資料，回傳要給使用者確認的報告 */
-    function previewMerge(pack) { return Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope); }
+    function previewMerge(pack) { assertNotStale(); return Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope); }
     function mergePack(pack) {
+      assertNotStale();
       var merged = Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope);
-      writeTables(merged.tables);
+      writeTablesOrRollback(merged.tables);
       markChanged();
       persist();
       notify();
@@ -203,7 +225,8 @@
 
     /** 清空資料庫(只留內建科目) */
     function resetAll() {
-      writeTables({});
+      assertNotStale();
+      writeTablesOrRollback({});
       state.changesSinceExport = 0;
       state.firstUnsavedAt = '';
       persist();

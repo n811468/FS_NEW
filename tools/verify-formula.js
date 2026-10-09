@@ -644,6 +644,76 @@ check('公式編輯器：公式有錯時其他行照樣試算、參數值依車�
   near(gs.getChartEditor('DA', sid).paramValues['關稅率'], expect, '關稅率(V2 另外設 10%)', 1e-9);
 });
 
+check('科目/參數名稱裡的全形括號、％、連續空白原樣保留，只有名稱外面的全形運算子轉半形', () => {
+  assert(gs.cleanFormulaText_('［材料（LP）］  ＋  ［稅率 ％］ × 2') === '[材料（LP）] + [稅率 ％] * 2', '名稱裡不轉、外面轉：' + gs.cleanFormulaText_('［材料（LP）］  ＋  ［稅率 ％］ × 2'));
+  assert(gs.cleanFormulaText_('REF(“DE  GATE（甲）”，"b4")') === 'REF("DE  GATE（甲）","b4")', 'REF 的情境名稱不轉');
+  const added = gs.saveChartLine('DA', { LineCode: '', LineName: '材料（LP）', ParentLine: 'B', CalcType: 'FORMULA', Formula: '100' });
+  const user = gs.saveChartLine('DA', { LineCode: '', LineName: '倍數試算', ParentLine: 'B', CalcType: 'FORMULA', Formula: '［材料（LP）］ × 2' });
+  reset();
+  near(amt(sid, 'V1', user.line.LineCode), 200, '用全形括號名稱引用');
+  gs.deletePLLineItem(user.line.LineCode, 'DA');
+  gs.deletePLLineItem(added.line.LineCode, 'DA');
+  reset();
+});
+
+check('參數優先順序：情境自己的設定 > 全公司共用；同一層指定車系 > 全車系，跟試算表裡的順序無關', () => {
+  const row = (ScenarioID, VehicleID, Value) => ({ ScenarioID, VehicleID, ParamName: '營業稅率', Currency: '', Value });
+  near(gs.lookupParam_([row('', '', 5), row('S', '', 6)], '營業稅率', 'X'), 6, '共用列排在前面也用情境的');
+  near(gs.lookupParam_([row('', 'X', 7), row('S', '', 6)], '營業稅率', 'X'), 6, '共用的車系列不蓋過情境的設定');
+  near(gs.lookupParam_([row('S', '', 6), row('S', 'X', 8), row('', 'X', 7)], '營業稅率', 'X'), 8, '情境的車系列最優先');
+  near(gs.lookupParam_([row('', '', 5), row('', 'X', 7)], '營業稅率', 'X'), 7, '只有共用列時車系列優先');
+  const fx = (ScenarioID, Value) => ({ ScenarioID, VehicleID: '', ParamName: gs.COST_FX_PARAM_NAME, Currency: 'CNY', Value });
+  near(gs.fxRateFor_([fx('', 4.2), fx('S', 4.5)], 'CNY', 'X'), 4.5, '匯率也是情境的優先');
+});
+
+check('車系/車型改名、刪車系：REF 的車系參數、舊名稱寫的 REF、個別公式與分攤車系一起更新', () => {
+  gs.createVehicleType('DW', '', '');
+  gs.saveVehicle({ VehicleID: 'Q1', VehicleTypeID: 'DW', VehicleCode: '甲' });
+  gs.saveVehicle({ VehicleID: 'Q2', VehicleTypeID: 'DW', VehicleCode: '乙' });
+  const dq = gs.createScenarioFrom({ ScenarioID: '', Gate: 'GATE F', ScenarioName: '改名測試', ScenarioType: '現況', VehicleTypeID: 'DW' }, '', []);
+  const mixRow = (VehicleID) => ({ RowID: '', VehicleID, SalesMixPct: 50, MonthlyVolume: 100, LifeCycleYears: 10, ListPriceTaxIncl: 800000, ScrapFee: 0, ScrapFeeTaxStatus: '含稅' });
+  gs.saveSalesMixGrid(dq.ScenarioID, 'DW', [mixRow('Q1'), mixRow('Q2')]);
+  gs.saveCostOfSalesMatrix(dq.ScenarioID, [{ RowID: '', VehicleID: 'Q1', LineCode: 'b4', Amount: 3000, Currency: 'TWD' }]);
+  const b4Of = () => gs.getPLLineItems('DA').filter(d => d.LineCode === 'b4')[0];
+
+  // 車系改名：REF 的第三個參數跟著換
+  gs.saveChartLine('DA', { LineCode: 'b4', LineName: '一般材料', CalcType: 'FORMULA', Formula: `REF("${dq.ScenarioID}", "b4", "Q1") * 2` });
+  gs.renameVehicle('DW', 'Q1', 'Q9');
+  reset();
+  assert(/"Q9"/.test(b4Of().Formula), 'REF 的車系要換成新代號：' + b4Of().Formula);
+  near(amt(sid, 'V1', 'b4'), 6000, '改名後照樣算得出來');
+
+  // 車型改名：用名稱寫的舊 REF(名稱裡有車型代號)改名前先換成情境代號
+  const raw = gs.sheetToObjects_(gs.SHEETS.PL_LINE_ITEMS).filter(r => r.VehicleTypeID === 'DA' && r.LineCode === 'b4')[0];
+  raw.Formula = 'REF("DW GATE F 改名測試", "b4", "Q9") * 2';
+  gs.batchWriteRows_(gs.SHEETS.PL_LINE_ITEMS, 'LineID', [raw], []);
+  gs.renameVehicleType('DW', 'DW2');
+  reset();
+  const res = gs.calculatePLCore_(sid, 'V1');
+  assert(!res.errors.b4, '車型改名後 REF 不應出錯：' + res.errors.b4);
+  near(res.lineValues.b4, 6000, '車型改名後照樣算得出來');
+
+  // 被別的車型用 REF 引用的科目不能刪
+  throws(() => gs.deletePLLineItem('b4', 'DW2'), /REF/, '被 REF 引用的科目');
+  gs.saveChartLine('DA', { LineCode: 'b4', LineName: '一般材料', CalcType: 'INPUT', Formula: '' });
+
+  // 刪車系：個別公式、分攤車系拿掉；只攤給這個車系的投資先擋下
+  gs.saveChartLine('DW2', { LineCode: 'b4', LineName: '一般材料', CalcType: 'INPUT', VehicleFormulas: { Q2: '100', Q9: '200' } });
+  gs.saveDevInvestmentGrid(dq.ScenarioID, [
+    { RowID: '', Department: '開發部', TargetLineCode: 'b5', Amount: 1000, Currency: 'TWD', VehicleScope: 'Q9,Q2' },
+    { RowID: '', Department: '品保部', TargetLineCode: 'b5', Amount: 1000, Currency: 'TWD', VehicleScope: 'Q2' }]);
+  throws(() => gs.deleteVehicle('Q2'), /只攤給車系「Q2」/, '只攤給這個車系的投資');
+  const devRows = gs.getDevInvestmentSummary(dq.ScenarioID).rows;
+  gs.saveDevInvestmentGrid(dq.ScenarioID, devRows.map(r => r.VehicleScope === 'Q2' ? { RowID: r.RowID, Department: '', Amount: '' } : r));
+  gs.deleteVehicle('Q2');
+  reset();
+  const vf = gs.parseVehicleFormulas_(gs.getPLLineItems('DW2').filter(d => d.LineCode === 'b4')[0].VehicleFormulas);
+  assert(vf.Q2 === undefined && vf.Q9 === '200', '個別公式拿掉 Q2：' + JSON.stringify(vf));
+  const scopes = gs.getDevInvestmentSummary(dq.ScenarioID).rows.map(r => r.VehicleScope);
+  assert(scopes.length === 1 && scopes[0] === 'Q9', '分攤車系拿掉 Q2：' + JSON.stringify(scopes));
+  reset();
+});
+
 check('預設公式下 Gate F 數字不變(回歸)', () => {
   reset();
   const all = gs.calculatePLAllVehicles(sid);

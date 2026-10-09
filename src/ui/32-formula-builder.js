@@ -431,7 +431,7 @@ function fxTextHtml_() {
       <span class="muted">運算：+ − × ÷ ( )，可以直接打 15%</span>
       <details class="fx-help"><summary class="link-btn">函式與變數說明</summary>
         <table class="grid-table"><tbody>
-          ${FORMULA_FUNCTIONS_UI.map(f => `<tr><td class="row-head"><code>${esc(f[0])}</code></td><td style="text-align:left;">${esc(f[1])}</td><td><button type="button" class="ins-chip fn" onclick="insertFormulaText('${esc(f[0].replace(/, …/, ''))}')">插入</button></td></tr>`).join('')}
+          ${FORMULA_FUNCTIONS_UI.map(f => `<tr><td class="row-head"><code>${esc(f[0])}</code></td><td style="text-align:left;">${esc(f[1])}</td><td><button type="button" class="ins-chip fn" onclick="insertFormulaText(${jsArg(f[0].replace(/, …/, ''))})">插入</button></td></tr>`).join('')}
           ${(chartEditor.variables || []).map(v => `<tr><td class="row-head"><code>[${esc(v.name)}]</code></td><td style="text-align:left;">${esc(v.desc)}</td><td><button type="button" class="ins-chip var" onclick="insertFormulaText('[${esc(v.name)}]')">插入</button></td></tr>`).join('')}
         </tbody></table>
       </details>

@@ -152,7 +152,7 @@ function drawChartEditor_() {
           <button type="button" class="link-btn" onclick="toggleAllChartGroups_()">全部收合/展開</button>
         </div>
         ${chartShowProblems ? `<ul class="problem-list tree-problems">${chartEditor.problems.map(p =>
-          `<li class="${p.level}"><a href="#" onclick="selectChartLine('${esc(p.code)}');return false;">${esc(p.message)}</a></li>`).join('')}</ul>` : ''}
+          `<li class="${p.level}"><a href="#" onclick="selectChartLine(${jsArg(p.code)});return false;">${esc(p.message)}</a></li>`).join('')}</ul>` : ''}
         <div class="chart-tree-body" id="chart-tree-body"></div>
         <div class="tree-legend"><span><b class="ti ti-INPUT">✎</b> 手動輸入</span><span><b class="ti ti-FORMULA">ƒ</b> 公式</span><span><b class="ti ti-DEV_AMORT">⚙</b> 開發攤提</span><span>⠿ 拖曳排序</span></div>
       </div>
@@ -200,12 +200,12 @@ function drawChartTreeBody_() {
     const cls = ['tree-row', isGroup ? 'group' : '', l.isProtected ? 'subtotal-row' : '', chartSelected === l.LineCode ? 'selected' : '', q && !matches(l) ? 'dimmed' : ''].filter(c => c).join(' ');
     const info = CALC_TYPE_INFO[l.CalcType];
     const typeTip = info[0] + (l.CalcType === 'FORMULA' ? '：' + humanizeFormula_(l.Formula, chartCodeNameMap_(), l.LineCode) : '');
-    return `<div class="${cls}" style="padding-left:${6 + depth * 18}px;" onclick="selectChartLine('${esc(l.LineCode)}')">
+    return `<div class="${cls}" style="padding-left:${6 + depth * 18}px;" onclick="selectChartLine(${jsArg(l.LineCode)})">
       ${q ? '<span class="tree-spacer"></span>' : dragHandleHtml('拖曳調整「' + l.LineName + '」的順序')}
-      ${isGroup ? `<button type="button" class="tree-toggle${collapsed ? ' collapsed' : ''}" onclick="event.stopPropagation();toggleChartGroup('${esc(l.LineCode)}')" aria-label="收合/展開">▾</button>` : '<span class="tree-toggle-space"></span>'}
+      ${isGroup ? `<button type="button" class="tree-toggle${collapsed ? ' collapsed' : ''}" onclick="event.stopPropagation();toggleChartGroup(${jsArg(l.LineCode)})" aria-label="收合/展開">▾</button>` : '<span class="tree-toggle-space"></span>'}
       <span class="tree-name" title="${esc(l.LineName)}">${esc(l.LineName)}</span>
       ${hasErr ? '<span class="tree-err" data-tip="公式有錯誤，暫時以 0 計">!</span>' : hasWarn ? '<span class="tree-warn" data-tip="沒有被算進營業淨利">?</span>' : ''}
-      ${isGroup ? `<button type="button" class="tree-add" onclick="event.stopPropagation();startNewChartLine('${esc(l.LineCode)}')" data-tip="在「${esc(l.LineName)}」底下新增科目">＋</button>` : ''}
+      ${isGroup ? `<button type="button" class="tree-add" onclick="event.stopPropagation();startNewChartLine(${jsArg(l.LineCode)})" data-tip="在「${esc(l.LineName)}」底下新增科目">＋</button>` : ''}
       <span class="tree-val${v !== null && v < 0 ? ' negative' : ''}">${v === null ? '' : fmt(v)}</span>
       <b class="ti ti-${esc(l.CalcType)}" data-tip="${esc(typeTip)}">${info[2]}</b>
       ${chartShowCodes ? `<span class="tree-code">${esc(l.LineCode)}</span>` : ''}
@@ -376,7 +376,7 @@ function chartEditorPaneHtml_() {
           ${vehicles.length ? `<table class="grid-table override-table"><tbody>${vehicles.map(v => `<tr>
               <td class="row-head" style="width:170px;">${esc(v.VehicleCode || v.VehicleID)}</td>
               <td><input type="text" value="${esc(overrides[v.VehicleID] || '')}" placeholder="（照上面的設定）"
-                oninput="setChartOverride('${esc(v.VehicleID)}', this.value)"></td></tr>`).join('')}</tbody></table>` : '<p class="muted">這個車型還沒有車系。</p>'}
+                oninput="setChartOverride(${jsArg(v.VehicleID)}, this.value)"></td></tr>`).join('')}</tbody></table>` : '<p class="muted">這個車型還沒有車系。</p>'}
           <label class="chk" style="margin-top:12px;" data-tip="貨物稅的完稅價格要扣除這個科目（預設：廣宣、促銷、批標售、季Margin）。公式 TAXDEDUCT() 就是這些科目的合計。">
             <input type="checkbox" ${String(d.CommodityTaxDeduct).toUpperCase() === 'Y' ? 'checked' : ''}
               onchange="chartDraft.CommodityTaxDeduct=this.checked?'Y':'';chartDirty_();schedulePreview_()"> 貨物稅完稅價格可以扣除這個科目</label>
