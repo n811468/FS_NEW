@@ -560,6 +560,36 @@ function lineReferencedBy_(defs, lineCode) {
 }
 
 /**
+ * 其他科目用 REF("情境", "科目代碼") 跨情境引用這個車型的某個科目：別的車型、或同車型的公式都算。
+ * lineReferencedBy_ 只看同一份科目表的 [名稱]/代碼，刪掉被 REF 引用的科目，引用的那邊整格就歸零。
+ */
+function lineReferencedByRef_(vehicleTypeId, lineCode) {
+  var scenarios = getScenarios();
+  var inType = {};
+  scenarios.forEach(function (s) { if (!vehicleTypeId || s.VehicleTypeID === vehicleTypeId) inType[s.ScenarioID] = true; });
+  var hits = [];
+  allLineItemRows_().forEach(function (raw) {
+    var d = normalizeLineDef_(raw);
+    var formulas = [d.CalcType === CALC_TYPES.FORMULA ? d.Formula : ''];
+    var vf = parseVehicleFormulas_(d.VehicleFormulas);
+    Object.keys(vf).forEach(function (k) { formulas.push(vf[k]); });
+    var uses = formulas.some(function (f) {
+      if (!f || !/REF\s*\(/i.test(f)) return false;
+      var info = inspectFormula_(f);
+      if (!info.ok) return false;
+      return info.refs.refCalls.some(function (c) {
+        if (!c.args[0] || c.args[0].t !== 'str' || !c.args[1] || c.args[1].t !== 'str' || c.args[1].v !== lineCode) return false;
+        var sc = null;
+        try { sc = resolveRefScenario_(c.args[0].v, scenarios); } catch (e) { sc = null; }
+        return !!sc && !!inType[sc.ScenarioID];
+      });
+    });
+    if (uses) hits.push((d.VehicleTypeID ? '車型 ' + d.VehicleTypeID : '預設科目表') + ' 的「' + d.LineName + '」');
+  });
+  return hits;
+}
+
+/**
  * 刪除科目，連同這個車型所有情境裡該科目已輸入的金額/說明。
  * 所有科目(含預設的小計/毛利/淨利)都可以刪；只會擋下會讓資料壞掉的情況：還有其他科目公式引用它、還有子科目、還有開發總投列攤提到這裡。
  */
@@ -573,6 +603,10 @@ function deletePLLineItem(lineCode, vehicleTypeId) {
     if (users.length) {
       throw new Error('「' + def.LineName + '」被這些科目的公式引用：' +
         users.map(function (u) { return u.LineName; }).join('、') + '。請先修改那些公式再刪除。');
+    }
+    var refUsers = lineReferencedByRef_(vehicleTypeId, lineCode);
+    if (refUsers.length) {
+      throw new Error('「' + def.LineName + '」被這些科目用 REF 跨情境引用：' + refUsers.join('、') + '。請先修改那些公式再刪除。');
     }
     var kids = defs.filter(function (d) { return d.ParentLine === lineCode; });
     if (kids.length) {

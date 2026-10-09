@@ -366,6 +366,31 @@ assert(brokenStorage.getItem(Host.STORAGE_KEY + '.corrupt') === '{"tables": 壞�
 const hostStale = newHost(memoryStorage());
 hostStale.markStale();
 throws(() => hostStale.call('saveVehicleType', [{ VehicleTypeID: 'Q' }]), /另一個/, '另一個分頁改過資料後，這一頁應該停止寫入');
+{
+  // 匯出/匯入/清空也會寫暫存：過期的分頁一樣要擋，不能把另一個分頁剛存的資料蓋掉
+  const shared = memoryStorage();
+  const fresh = newHost(shared);
+  apiOf(fresh).saveVehicleType({ VehicleTypeID: 'NEW' });
+  const stale = newHost(memoryStorage());
+  stale.markStale();
+  throws(() => stale.exportPack(null), /另一個/, '過期分頁不能匯出全部(會寫暫存)');
+  throws(() => stale.replaceWithPack(Pack.parsePack(JSON.stringify(fresh.exportPack(null)))), /另一個/, '過期分頁不能取代匯入');
+  throws(() => stale.mergePack(Pack.parsePack(JSON.stringify(fresh.exportPack(null)))), /另一個/, '過期分頁不能合併匯入');
+  throws(() => stale.resetAll(), /另一個/, '過期分頁不能清空');
+  assert(shared.getItem(Host.STORAGE_KEY) !== null && JSON.parse(shared.getItem(Host.STORAGE_KEY)).tables.VehicleTypes.some(t => t.VehicleTypeID === 'NEW'), '另一個分頁的資料不應被蓋掉');
+}
+{
+  // 匯入到一半出錯：記憶體裡的資料庫要還原，畫面說「資料未變更」才是真的
+  const host = newHost(memoryStorage());
+  apiOf(host).saveVehicleType({ VehicleTypeID: 'KEEP' });
+  const before = JSON.stringify(host.readTables());
+  const realSetup = host.backend.fns.setupSpreadsheet;
+  host.backend.fns.setupSpreadsheet = () => { throw new Error('模擬升級失敗'); };
+  throws(() => host.replaceWithPack(Pack.parsePack(JSON.stringify(demo0()))), /模擬升級失敗/, '匯入失敗要丟出錯誤');
+  host.backend.fns.setupSpreadsheet = realSetup;
+  assert(JSON.stringify(host.readTables()) === before, '匯入失敗後資料庫應該還原成匯入前的樣子');
+  assert(same(apiOf(host).getVehicleTypes().map(t => t.VehicleTypeID), ['KEEP']), '匯入失敗後車型應該維持原狀');
+}
 
 // google.script.run 替身：非同步回呼、withFailureHandler、withUserObject
 {
@@ -380,6 +405,7 @@ throws(() => hostStale.call('saveVehicleType', [{ VehicleTypeID: 'Q' }]), /另�
   assert(err instanceof Error && /沒有這個後端函式/.test(err.message), 'google.script.run 替身的失敗回呼不對');
 }
 
+function demo0() { return build.buildDemoPack(); }
 /* ---- 6. 示範資料與 dist ------------------------------------------------------------------------- */
 const demo = build.buildDemoPack();
 const hostDemo = newHost(memoryStorage());

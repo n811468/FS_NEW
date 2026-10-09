@@ -41,13 +41,28 @@ function formulaError_(message, pos) {
   return e;
 }
 
+/**
+ * 只改 [名稱] 與 "字串" 以外的部分：科目/參數名稱、情境名稱裡的全形括號、％、連續空白要原樣保留，
+ * 不然 [材料成本（LP）] 會變成 [材料成本(LP)]，跟存起來的名稱對不上
+ */
+function mapOutsideNames_(s, fn) {
+  var out = '', last = 0, re = /"[^"]*"|'[^']*'|\[[^\]]*\]/g, m;
+  while ((m = re.exec(s))) {
+    out += fn(s.slice(last, m.index)) + m[0];
+    last = m.index + m[0].length;
+  }
+  return out + fn(s.slice(last));
+}
+
 /** 全形/數學符號 → 半形運算子 */
 function normalizeFormulaText_(src) {
-  return String(src === undefined || src === null ? '' : src)
-    .replace(/[×＊]/g, '*').replace(/[÷／]/g, '/').replace(/[−–—－]/g, '-').replace(/＋/g, '+')
-    .replace(/（/g, '(').replace(/）/g, ')').replace(/，/g, ',').replace(/［/g, '[').replace(/］/g, ']')
-    .replace(/％/g, '%').replace(/＝/g, '=').replace(/[＜]/g, '<').replace(/[＞]/g, '>')
-    .replace(/[“”]/g, '"').replace(/^\s*=/, '');
+  var s = String(src === undefined || src === null ? '' : src)
+    .replace(/［/g, '[').replace(/］/g, ']').replace(/[“”]/g, '"');
+  return mapOutsideNames_(s, function (part) {
+    return part.replace(/[×＊]/g, '*').replace(/[÷／]/g, '/').replace(/[−–—－]/g, '-').replace(/＋/g, '+')
+      .replace(/（/g, '(').replace(/）/g, ')').replace(/，/g, ',')
+      .replace(/％/g, '%').replace(/＝/g, '=').replace(/[＜]/g, '<').replace(/[＞]/g, '>');
+  }).replace(/^\s*=/, '');
 }
 
 function tokenizeFormula_(src) {
@@ -283,11 +298,11 @@ function excelNum_(v) { var n = num_(v); return n === 0 ? 0 : Number(n.toPrecisi
 function evalFormulaCall_(n, env) {
   var args = n.args;
   var vals = function () { return args.map(function (a) { return num_(evalFormulaAst_(a, env)); }); };
-  var need = function (min, max) {
-    if (args.length < min || (max !== undefined && args.length > max)) {
-      throw formulaError_(n.name + '() 的參數個數不正確', n.pos);
-    }
-  };
+  // 參數個數只看 FORMULA_ARITY_ 一個地方：解析時檢查過，這裡擋的是從 Excel 匯入、不經過 parseFormula_ 組出來的節點
+  var arity = FORMULA_ARITY_[n.name];
+  if (arity && (args.length < arity[0] || (arity[1] !== undefined && args.length > arity[1]))) {
+    throw formulaError_(n.name + '() 的參數個數不正確', n.pos);
+  }
   var roundTo = function (x, digits, mode) {
     // 位數有小數時跟 Excel 一樣捨去小數(ROUND(x, 1.9) = ROUND(x, 1))
     digits = digits < 0 ? Math.ceil(digits) : Math.floor(digits || 0);
@@ -301,20 +316,20 @@ function evalFormulaCall_(n, env) {
   };
   switch (n.name) {
     case 'SUM': return vals().reduce(function (s, x) { return s + x; }, 0);
-    case 'MIN': need(1); return Math.min.apply(null, vals());
-    case 'MAX': need(1); return Math.max.apply(null, vals());
-    case 'ABS': need(1, 1); return Math.abs(vals()[0]);
-    case 'ROUND': need(1, 2); var r = vals(); return roundTo(r[0], r[1] || 0);
-    case 'ROUNDUP': need(1, 2); var u = vals(); return roundTo(u[0], u[1] || 0, 'up');
-    case 'ROUNDDOWN': need(1, 2); var d = vals(); return roundTo(d[0], d[1] || 0, 'down');
+    case 'MIN': return Math.min.apply(null, vals());
+    case 'MAX': return Math.max.apply(null, vals());
+    case 'ABS': return Math.abs(vals()[0]);
+    case 'ROUND': var r = vals(); return roundTo(r[0], r[1] || 0);
+    case 'ROUNDUP': var u = vals(); return roundTo(u[0], u[1] || 0, 'up');
+    case 'ROUNDDOWN': var d = vals(); return roundTo(d[0], d[1] || 0, 'down');
     case 'IF':
-      need(2, 3);
+      
       // 只算被選到的那一支：沒選到的分支裡可能引用了這個車系沒有的資料
       return num_(evalFormulaAst_(args[0], env)) ? evalFormulaAst_(args[1], env) : (args[2] ? evalFormulaAst_(args[2], env) : 0);
-    case 'CHILDREN': need(0, 0); return env.children(n.pos);
-    case 'TAXDEDUCT': need(0, 0); return env.taxDeduct(n.pos);
+    case 'CHILDREN': return env.children(n.pos);
+    case 'TAXDEDUCT': return env.taxDeduct(n.pos);
     case 'REF': {
-      need(2, 3);
+      
       var parts = args.map(function (a) { return evalFormulaAst_(a, env); });
       return env.ref(String(parts[0]), String(parts[1]), parts[2] === undefined ? '' : String(parts[2]), n.pos);
     }
@@ -337,5 +352,5 @@ function inspectFormula_(src) {
 
 /** 公式文字的標準化（存檔前用）：去掉開頭的 = 與多餘空白，全形符號轉半形 */
 function cleanFormulaText_(src) {
-  return normalizeFormulaText_(src).replace(/\s+/g, ' ').trim();
+  return mapOutsideNames_(normalizeFormulaText_(src), function (part) { return part.replace(/\s+/g, ' '); }).trim();
 }

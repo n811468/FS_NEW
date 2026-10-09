@@ -23,12 +23,10 @@ function pct_(v) {
  */
 function fxRateFor_(params, currency, vehicleId) {
   if (!currency || currency === BASE_CURRENCY) return 1;
-  var match = params.filter(function (p) {
+  var picked = pickScopedParam_(params.filter(function (p) {
     return p.ParamName === COST_FX_PARAM_NAME && p.Currency === currency &&
       (!p.VehicleID || p.VehicleID === vehicleId);
-  });
-  var specific = match.filter(function (p) { return p.VehicleID === vehicleId; });
-  var picked = specific.length ? specific[0] : match[0];
+  }), vehicleId);
   return picked ? (toNumber_(picked.Value) || 1) : 1;
 }
 

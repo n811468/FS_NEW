@@ -316,7 +316,7 @@ function drawMatrix(key) {
             <td class="calc" id="${key}-sum-${esc(line.value)}"></td>
             <td><input type="text" class="note-input wide" id="${key}-note-${esc(line.value)}" value="${esc(noteOf(line.value))}"
               oninput="matrixDirty_('${key}')" placeholder="例：依業務部提供"></td>
-            <td class="row-actions"><button type="button" class="btn ghost sm" onclick="deleteMatrixLine('${key}', '${esc(line.value)}')" data-tip="刪除這個項目">✕</button></td>
+            <td class="row-actions"><button type="button" class="btn ghost sm" onclick="deleteMatrixLine('${key}', ${jsArg(line.value)})" data-tip="刪除這個項目">✕</button></td>
           </tr>`).join('')}
         ${(data.autoLines || []).length ? `<tr class="group-row"><td class="row-head" colspan="${data.vehicles.length + (cfg.hasCurrency ? 5 : 4)}"
             style="background:var(--surface-3);font-size:12px;color:var(--text-2);">由公式或開發總投算出（唯讀，要改算法請到「科目與公式」）</td></tr>` : ''}
@@ -646,7 +646,7 @@ function drawRateGrid() {
             <td class="calc" style="text-align:center;">${esc(rate.unit || '%')}</td>
             <td><input type="number" step="any" class="rate-global" data-name="${esc(rate.ParamName)}"
               data-paramid="${esc(rate.globalParamID)}" value="${esc(rate.globalValue)}"
-              oninput="updateRatePlaceholders('${esc(rate.ParamName)}'); ${dirty()}"></td>
+              oninput="updateRatePlaceholders(${jsArg(rate.ParamName)}); ${dirty()}"></td>
             ${rateData.vehicles.map(v => {
               const o = rate.overrides[v.VehicleID] || {};
               return `<td><input type="number" step="any" class="rate-override" data-name="${esc(rate.ParamName)}"

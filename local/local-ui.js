@@ -91,12 +91,18 @@
   });
 
   var exportAllBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出全部（備份）', title: '整份資料庫存成一個資料包（備份用）', onclick: function () {
-    download(host.exportPack(null), '全部');
+    var pack;
+    try { pack = host.exportPack(null); }
+    catch (e) { say('無法匯出', e.message); return; }
+    download(pack, '全部');
   } });
   var exportTypeBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出車型（含所有情境）', title: '匯出上方選的車型：所有情境、車系與科目表，交給同事「合併匯入」（對方這個車型會整個換成這一包）', onclick: function () {
     var id = currentVehicleTypeId();
     if (!id) { say('還沒有選擇車型', '請先在右上角選擇要匯出的車型。'); return; }
-    download(host.exportPack([id]), id);
+    var pack;
+    try { pack = host.exportPack([id]); }
+    catch (e) { say('無法匯出', e.message); return; }
+    download(pack, id);
   } });
   var exportScenarioBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出情境（只有這一個）', title: '只匯出上方選的情境，交給同事「合併匯入」（對方只新增/更新這個情境，同車型的其他情境不動）', onclick: function () {
     var id = currentVehicleTypeId(), sc = currentScenario();

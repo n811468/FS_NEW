@@ -181,8 +181,10 @@ function amountUnitDigits_(u) { return normAmountUnit_(u) === 1 ? 0 : 1; }
 /** 科目名稱/備註等使用者輸入會被塞進 HTML，& < > " 都要轉義，否則表格會被破壞 */
 function esc(s) {
   return String(s === undefined || s === null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+/** 放進 onclick 等屬性裡當 JS 字串參數：HTML 會先把 &#39; 解回 '，光用 esc() 包在 '...' 裡擋不住引號，要先變成 JS 字串字面值再轉義 */
+function jsArg(s) { return esc(JSON.stringify(String(s === undefined || s === null ? '' : s))); }
 function val(id) { const el = document.getElementById(id); return el ? el.value : ''; }
 
 function showGlobalError(err) {

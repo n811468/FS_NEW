@@ -617,6 +617,19 @@ api('setBaselineColumnAt(99)');   // 超出範圍不該爆掉，也不該亂改
 assert(api('baselineKey') === colKeyOf_(cols[1]), '索引超出範圍時不該改動比較基準');
 api("baselineKey = ''");
 
+// 使用者輸入的名稱/代號放進 onclick 的 JS 字串：一律用 jsArg()，不能 '${esc(...)}'(HTML 會先把 &#39; 解回 ')
+{
+  const offenders = require('./frontend').frontendFiles().filter(f =>
+    /'\$\{esc\(/.test(require('fs').readFileSync(require('path').join(require('./frontend').UI_DIR, f), 'utf8')));
+  assert(!offenders.length, `onclick 裡用 '\${esc(...)}' 包使用者輸入，名稱有引號就會壞掉：${offenders.join(', ')}`);
+  const decode = h => h.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  ["Tom's率", "x');alert(1);('", 'a"b\\c', '<b>&'].forEach(name => {
+    const attrJs = decode(api('jsArg')(name));
+    assert(eval(attrJs) === name, `jsArg 要讓屬性裡的 JS 字串還原成原本的名稱：${name} → ${attrJs}`);
+  });
+  assert(api('esc')("Tom's") === 'Tom&#39;s', "esc() 也要轉義單引號");
+}
+
 // 基準欄的台數是 0 時，年度/LC 總額的 vs 基準百分比不可以變成 ∞%
 ctx.__in.zeroVol = {
   columns: [

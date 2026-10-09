@@ -2376,13 +2376,28 @@ function formulaError_(message, pos) {
   return e;
 }
 
+/**
+ * 只改 [名稱] 與 "字串" 以外的部分：科目/參數名稱、情境名稱裡的全形括號、％、連續空白要原樣保留，
+ * 不然 [材料成本（LP）] 會變成 [材料成本(LP)]，跟存起來的名稱對不上
+ */
+function mapOutsideNames_(s, fn) {
+  var out = '', last = 0, re = /"[^"]*"|'[^']*'|\[[^\]]*\]/g, m;
+  while ((m = re.exec(s))) {
+    out += fn(s.slice(last, m.index)) + m[0];
+    last = m.index + m[0].length;
+  }
+  return out + fn(s.slice(last));
+}
+
 /** 全形/數學符號 → 半形運算子 */
 function normalizeFormulaText_(src) {
-  return String(src === undefined || src === null ? '' : src)
-    .replace(/[×＊]/g, '*').replace(/[÷／]/g, '/').replace(/[−–—－]/g, '-').replace(/＋/g, '+')
-    .replace(/（/g, '(').replace(/）/g, ')').replace(/，/g, ',').replace(/［/g, '[').replace(/］/g, ']')
-    .replace(/％/g, '%').replace(/＝/g, '=').replace(/[＜]/g, '<').replace(/[＞]/g, '>')
-    .replace(/[“”]/g, '"').replace(/^\s*=/, '');
+  var s = String(src === undefined || src === null ? '' : src)
+    .replace(/［/g, '[').replace(/］/g, ']').replace(/[“”]/g, '"');
+  return mapOutsideNames_(s, function (part) {
+    return part.replace(/[×＊]/g, '*').replace(/[÷／]/g, '/').replace(/[−–—－]/g, '-').replace(/＋/g, '+')
+      .replace(/（/g, '(').replace(/）/g, ')').replace(/，/g, ',')
+      .replace(/％/g, '%').replace(/＝/g, '=').replace(/[＜]/g, '<').replace(/[＞]/g, '>');
+  }).replace(/^\s*=/, '');
 }
 
 function tokenizeFormula_(src) {
@@ -2618,11 +2633,11 @@ function excelNum_(v) { var n = num_(v); return n === 0 ? 0 : Number(n.toPrecisi
 function evalFormulaCall_(n, env) {
   var args = n.args;
   var vals = function () { return args.map(function (a) { return num_(evalFormulaAst_(a, env)); }); };
-  var need = function (min, max) {
-    if (args.length < min || (max !== undefined && args.length > max)) {
-      throw formulaError_(n.name + '() 的參數個數不正確', n.pos);
-    }
-  };
+  // 參數個數只看 FORMULA_ARITY_ 一個地方：解析時檢查過，這裡擋的是從 Excel 匯入、不經過 parseFormula_ 組出來的節點
+  var arity = FORMULA_ARITY_[n.name];
+  if (arity && (args.length < arity[0] || (arity[1] !== undefined && args.length > arity[1]))) {
+    throw formulaError_(n.name + '() 的參數個數不正確', n.pos);
+  }
   var roundTo = function (x, digits, mode) {
     // 位數有小數時跟 Excel 一樣捨去小數(ROUND(x, 1.9) = ROUND(x, 1))
     digits = digits < 0 ? Math.ceil(digits) : Math.floor(digits || 0);
@@ -2636,20 +2651,20 @@ function evalFormulaCall_(n, env) {
   };
   switch (n.name) {
     case 'SUM': return vals().reduce(function (s, x) { return s + x; }, 0);
-    case 'MIN': need(1); return Math.min.apply(null, vals());
-    case 'MAX': need(1); return Math.max.apply(null, vals());
-    case 'ABS': need(1, 1); return Math.abs(vals()[0]);
-    case 'ROUND': need(1, 2); var r = vals(); return roundTo(r[0], r[1] || 0);
-    case 'ROUNDUP': need(1, 2); var u = vals(); return roundTo(u[0], u[1] || 0, 'up');
-    case 'ROUNDDOWN': need(1, 2); var d = vals(); return roundTo(d[0], d[1] || 0, 'down');
+    case 'MIN': return Math.min.apply(null, vals());
+    case 'MAX': return Math.max.apply(null, vals());
+    case 'ABS': return Math.abs(vals()[0]);
+    case 'ROUND': var r = vals(); return roundTo(r[0], r[1] || 0);
+    case 'ROUNDUP': var u = vals(); return roundTo(u[0], u[1] || 0, 'up');
+    case 'ROUNDDOWN': var d = vals(); return roundTo(d[0], d[1] || 0, 'down');
     case 'IF':
-      need(2, 3);
+      
       // 只算被選到的那一支：沒選到的分支裡可能引用了這個車系沒有的資料
       return num_(evalFormulaAst_(args[0], env)) ? evalFormulaAst_(args[1], env) : (args[2] ? evalFormulaAst_(args[2], env) : 0);
-    case 'CHILDREN': need(0, 0); return env.children(n.pos);
-    case 'TAXDEDUCT': need(0, 0); return env.taxDeduct(n.pos);
+    case 'CHILDREN': return env.children(n.pos);
+    case 'TAXDEDUCT': return env.taxDeduct(n.pos);
     case 'REF': {
-      need(2, 3);
+      
       var parts = args.map(function (a) { return evalFormulaAst_(a, env); });
       return env.ref(String(parts[0]), String(parts[1]), parts[2] === undefined ? '' : String(parts[2]), n.pos);
     }
@@ -2672,7 +2687,7 @@ function inspectFormula_(src) {
 
 /** 公式文字的標準化（存檔前用）：去掉開頭的 = 與多餘空白，全形符號轉半形 */
 function cleanFormulaText_(src) {
-  return normalizeFormulaText_(src).replace(/\s+/g, ' ').trim();
+  return mapOutsideNames_(normalizeFormulaText_(src), function (part) { return part.replace(/\s+/g, ' '); }).trim();
 }
 
 
@@ -2803,6 +2818,8 @@ function renameVehicleType(oldId, newId) {
       throw new Error('車型代號「' + newId + '」已經存在');
     }
 
+    // 舊公式用名稱寫的 REF("車型 GATE 情境名稱") 名稱裡有車型代號：改名前先換成 ScenarioID，改名後才找得到
+    codifyAllRefScenarios_();
     row.VehicleTypeID = newId;
     upsertRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', row);
     deleteRow_(SHEETS.VEHICLE_TYPES, 'VehicleTypeID', oldId);
@@ -2872,6 +2889,30 @@ function saveVehicle(rowObj) {
 /** 刪除車系：它在各情境的銷售構成、成本、費用、車系參數、說明一起刪掉，免得之後新增同代號車系時舊數字又冒出來 */
 function deleteVehicle(vehicleId) {
   return withLock_(function () {
+    // 科目的車系個別公式、開發總投的分攤車系也記著車系代號：一起拿掉，之後新增同代號車系才不會套到舊設定。
+    // 只攤給這個車系的投資拿掉後會變成「攤給全部車系」，意思不一樣，先擋下來讓使用者決定
+    var devRows = vehicleId ? (sheetToObjects_(SHEETS.DEV_INVESTMENT) || []).filter(function (r) {
+      return parseVehicleScope_(r.VehicleScope).indexOf(vehicleId) !== -1;
+    }) : [];
+    var onlyThis = devRows.filter(function (r) { return parseVehicleScope_(r.VehicleScope).length === 1; });
+    if (onlyThis.length) {
+      throw new Error('開發總投有 ' + onlyThis.length + ' 筆只攤給車系「' + vehicleId + '」（' +
+        onlyThis.slice(0, 5).map(function (r) { return (r.Department || '未填部門') + (r.AssetType ? ' ' + r.AssetType : ''); }).join('、') +
+        (onlyThis.length > 5 ? '…' : '') + '），請先改分攤車系或刪除那幾筆，再刪除車系。');
+    }
+    devRows.forEach(function (r) {
+      r.VehicleScope = parseVehicleScope_(r.VehicleScope).filter(function (id) { return id !== vehicleId; }).join(',');
+    });
+    if (devRows.length) batchWriteRows_(SHEETS.DEV_INVESTMENT, 'RowID', devRows, []);
+    var lines = vehicleId ? (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) {
+      return parseVehicleFormulas_(r.VehicleFormulas)[vehicleId] !== undefined;
+    }) : [];
+    lines.forEach(function (r) {
+      var vf = parseVehicleFormulas_(r.VehicleFormulas);
+      delete vf[vehicleId];
+      r.VehicleFormulas = Object.keys(vf).length ? JSON.stringify(vf) : '';
+    });
+    if (lines.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', lines, []);
     [[SHEETS.SALES_MIX, 'RowID'], [SHEETS.COST_OF_SALES, 'RowID'], [SHEETS.OPERATING_EXPENSE, 'RowID'],
       [SHEETS.PARAMETERS, 'ParamID'], [SHEETS.LINE_NOTES, 'RowID'], [SHEETS.PL_RESULT, 'ResultID']].forEach(function (pair) {
       if (!sheetExists_(pair[0])) return;
@@ -2973,14 +3014,21 @@ function renameVehicle(vehicleTypeId, oldId, newId) {
       r.VehicleScope = parseVehicleScope_(r.VehicleScope).map(function (id) { return id === oldId ? newId : id; }).join(',');
     });
     if (devRows.length) batchWriteRows_(SHEETS.DEV_INVESTMENT, 'RowID', devRows, []);
-    var lines = (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).filter(function (r) {
-      return parseVehicleFormulas_(r.VehicleFormulas)[oldId] !== undefined;
-    });
-    lines.forEach(function (r) {
+    // 公式裡 REF("情境", "科目", "車系") 的車系參數也是車系代號(車系代號全資料庫唯一，直接換)
+    var lines = [];
+    (sheetToObjects_(SHEETS.PL_LINE_ITEMS) || []).forEach(function (r) {
       var vf = parseVehicleFormulas_(r.VehicleFormulas);
-      vf[newId] = vf[oldId];
-      delete vf[oldId];
-      r.VehicleFormulas = JSON.stringify(vf);
+      var hit = vf[oldId] !== undefined;
+      if (hit) { vf[newId] = vf[oldId]; delete vf[oldId]; }
+      Object.keys(vf).forEach(function (k) {
+        var f = renameRefVehicle_(vf[k], oldId, newId);
+        if (f !== vf[k]) { vf[k] = f; hit = true; }
+      });
+      var formula = renameRefVehicle_(r.Formula, oldId, newId);
+      if (formula !== r.Formula) { r.Formula = formula; hit = true; }
+      if (!hit) return;
+      r.VehicleFormulas = Object.keys(vf).length ? JSON.stringify(vf) : '';
+      lines.push(r);
     });
     if (lines.length) batchWriteRows_(SHEETS.PL_LINE_ITEMS, 'LineID', lines, []);
     // 快照裡每個車系一欄，欄位記著車系代號：改成新代號，快照才對得到現在的車系
@@ -2994,6 +3042,13 @@ function renameVehicle(vehicleTypeId, oldId, newId) {
     });
     return getVehicles(vehicleTypeId);
   });
+}
+
+/** 公式裡 REF("情境", "科目", "舊車系") 的車系換成新代號 */
+function renameRefVehicle_(formula, oldId, newId) {
+  if (!formula || !/REF\s*\(/i.test(formula)) return formula;
+  return String(formula).replace(/(REF\s*\(\s*("|')[^"']*\2\s*,\s*("|')[^"']*\3\s*,\s*)("|')([^"']*)\4/gi,
+    function (m, head, q1, q2, q3, vid) { return vid.trim() === oldId ? head + q3 + newId + q3 : m; });
 }
 
 // ---- Scenarios（隸屬某個 VehicleType，同一車型可有多個情境版本並排比較） ----
@@ -3618,14 +3673,25 @@ function getConfiguredCurrencies(scenarioId) {
   return list;
 }
 
+/**
+ * 從同名參數裡挑最貼近的一筆：情境自己的設定優先於全公司共用(空白 ScenarioID)，
+ * 同一層裡指定車系的優先於全車系。不能照試算表順序拿第一筆：合併匯入帶進來的共用列可能排在前面，
+ * 畫面上(只顯示這個情境的列)看到的值就跟計算用的不一樣。
+ */
+function pickScopedParam_(match, vehicleId) {
+  var best = null, bestScore = -1;
+  match.forEach(function (p) {
+    var score = (p.ScenarioID ? 2 : 0) + (p.VehicleID && p.VehicleID === vehicleId ? 1 : 0);
+    if (score > bestScore) { best = p; bestScore = score; }
+  });
+  return best;
+}
+
 /** 依 ParamName(+可選VehicleID) 查值，找不到就用 DEFAULT_PARAMS，最後 fallback 0 */
 function lookupParam_(paramsForScenario, paramName, vehicleId) {
-  var match = paramsForScenario.filter(function (p) {
+  var picked = pickScopedParam_(paramsForScenario.filter(function (p) {
     return p.ParamName === paramName && (!p.VehicleID || p.VehicleID === vehicleId);
-  });
-  // 有指定車型的參數優先於全域參數
-  var specific = match.filter(function (p) { return p.VehicleID === vehicleId; });
-  var picked = specific.length ? specific[0] : match[0];
+  }), vehicleId);
   if (picked) return toNumber_(picked.Value);
   return DEFAULT_PARAMS[paramName] !== undefined ? DEFAULT_PARAMS[paramName] : 0;
 }
@@ -4281,6 +4347,36 @@ function lineReferencedBy_(defs, lineCode) {
 }
 
 /**
+ * 其他科目用 REF("情境", "科目代碼") 跨情境引用這個車型的某個科目：別的車型、或同車型的公式都算。
+ * lineReferencedBy_ 只看同一份科目表的 [名稱]/代碼，刪掉被 REF 引用的科目，引用的那邊整格就歸零。
+ */
+function lineReferencedByRef_(vehicleTypeId, lineCode) {
+  var scenarios = getScenarios();
+  var inType = {};
+  scenarios.forEach(function (s) { if (!vehicleTypeId || s.VehicleTypeID === vehicleTypeId) inType[s.ScenarioID] = true; });
+  var hits = [];
+  allLineItemRows_().forEach(function (raw) {
+    var d = normalizeLineDef_(raw);
+    var formulas = [d.CalcType === CALC_TYPES.FORMULA ? d.Formula : ''];
+    var vf = parseVehicleFormulas_(d.VehicleFormulas);
+    Object.keys(vf).forEach(function (k) { formulas.push(vf[k]); });
+    var uses = formulas.some(function (f) {
+      if (!f || !/REF\s*\(/i.test(f)) return false;
+      var info = inspectFormula_(f);
+      if (!info.ok) return false;
+      return info.refs.refCalls.some(function (c) {
+        if (!c.args[0] || c.args[0].t !== 'str' || !c.args[1] || c.args[1].t !== 'str' || c.args[1].v !== lineCode) return false;
+        var sc = null;
+        try { sc = resolveRefScenario_(c.args[0].v, scenarios); } catch (e) { sc = null; }
+        return !!sc && !!inType[sc.ScenarioID];
+      });
+    });
+    if (uses) hits.push((d.VehicleTypeID ? '車型 ' + d.VehicleTypeID : '預設科目表') + ' 的「' + d.LineName + '」');
+  });
+  return hits;
+}
+
+/**
  * 刪除科目，連同這個車型所有情境裡該科目已輸入的金額/說明。
  * 所有科目(含預設的小計/毛利/淨利)都可以刪；只會擋下會讓資料壞掉的情況：還有其他科目公式引用它、還有子科目、還有開發總投列攤提到這裡。
  */
@@ -4294,6 +4390,10 @@ function deletePLLineItem(lineCode, vehicleTypeId) {
     if (users.length) {
       throw new Error('「' + def.LineName + '」被這些科目的公式引用：' +
         users.map(function (u) { return u.LineName; }).join('、') + '。請先修改那些公式再刪除。');
+    }
+    var refUsers = lineReferencedByRef_(vehicleTypeId, lineCode);
+    if (refUsers.length) {
+      throw new Error('「' + def.LineName + '」被這些科目用 REF 跨情境引用：' + refUsers.join('、') + '。請先修改那些公式再刪除。');
     }
     var kids = defs.filter(function (d) { return d.ParentLine === lineCode; });
     if (kids.length) {
@@ -4998,12 +5098,10 @@ function pct_(v) {
  */
 function fxRateFor_(params, currency, vehicleId) {
   if (!currency || currency === BASE_CURRENCY) return 1;
-  var match = params.filter(function (p) {
+  var picked = pickScopedParam_(params.filter(function (p) {
     return p.ParamName === COST_FX_PARAM_NAME && p.Currency === currency &&
       (!p.VehicleID || p.VehicleID === vehicleId);
-  });
-  var specific = match.filter(function (p) { return p.VehicleID === vehicleId; });
-  var picked = specific.length ? specific[0] : match[0];
+  }), vehicleId);
   return picked ? (toNumber_(picked.Value) || 1) : 1;
 }
 
@@ -9341,7 +9439,7 @@ function applyVerifyImport(files, ids) {
 }
 
   return {
-    fns: { getSheet_: getSheet_, validateCode_: validateCode_, sheetExists_: sheetExists_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, excelNum_: excelNum_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, deleteScenarioData_: deleteScenarioData_, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, updateSnapshots_: updateSnapshots_, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, assertUniqueScenarioNames_: assertUniqueScenarioNames_, codifyAllRefScenarios_: codifyAllRefScenarios_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, codifyRefScenarios_: codifyRefScenarios_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, clarifyPowerFormula_: clarifyPowerFormula_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, validateLineName_: validateLineName_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, isDevDeptNote_: isDevDeptNote_, getDevDeptNotes: getDevDeptNotes, saveDevDeptNotes_: saveDevDeptNotes_, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideLineAdd_: overrideLineAdd_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, resolveRefScenario_: resolveRefScenario_, referenceValue_: referenceValue_, lineDependencies_: lineDependencies_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, snapshotReportBlock_: snapshotReportBlock_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getDevComparison: getDevComparison, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, metricGoodDir_: metricGoodDir_, solveGoalPlan: solveGoalPlan, devCutTotals_: devCutTotals_, adjustedValue_: adjustedValue_, plSnapshot_: plSnapshot_, simulateAdjustments: simulateAdjustments, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_, xlsxEsc_: xlsxEsc_, xlsxCol_: xlsxCol_, xlsxRef_: xlsxRef_, xlsxStylesXml_: xlsxStylesXml_, xlsxCellXml_: xlsxCellXml_, xlsxSheetXml_: xlsxSheetXml_, xlsxParts_: xlsxParts_, utf8Bytes_: utf8Bytes_, crc32_: crc32_, zipStore_: zipStore_, base64Bytes_: base64Bytes_, buildXlsxBase64_: buildXlsxBase64_, verifySheetRef_: verifySheetRef_, verifyNumText_: verifyNumText_, verifyPrintAst_: verifyPrintAst_, verifyReadableFormula_: verifyReadableFormula_, buildVerifyWorkbookModel_: buildVerifyWorkbookModel_, formatDateTime_: formatDateTime_, exportVerifyWorkbook: exportVerifyWorkbook, xmlUnescape_: xmlUnescape_, xmlAttr_: xmlAttr_, cellPos_: cellPos_, shiftFormulaRefs_: shiftFormulaRefs_, readXlsxSheets_: readXlsxSheets_, readSheetCells_: readSheetCells_, excelFormulaError_: excelFormulaError_, tokenizeExcel_: tokenizeExcel_, parseExcelFormula_: parseExcelFormula_, normalizeExcelText_: normalizeExcelText_, verifyImportContext_: verifyImportContext_, importCell_: importCell_, excelToSystemAst_: excelToSystemAst_, canonicalSystemFormula_: canonicalSystemFormula_, systemFormulaText_: systemFormulaText_, verifyCurrentFormula_: verifyCurrentFormula_, verifyCurrentInput_: verifyCurrentInput_, verifyAmountRows_: verifyAmountRows_, sameValue_: sameValue_, verifyInputLabel_: verifyInputLabel_, previewVerifyImport: previewVerifyImport, buildVerifyImportPlan_: buildVerifyImportPlan_, applyVerifyImport: applyVerifyImport },
+    fns: { getSheet_: getSheet_, validateCode_: validateCode_, sheetExists_: sheetExists_, generateId_: generateId_, normalizeCellValue_: normalizeCellValue_, sheetCacheKey_: sheetCacheKey_, invalidateSheetCache_: invalidateSheetCache_, resetCalcMemo_: resetCalcMemo_, sheetToObjects_: sheetToObjects_, readSheetObjects_: readSheetObjects_, samePk_: samePk_, indexByPk_: indexByPk_, mergeRowForBatch_: mergeRowForBatch_, upsertRowMerge_: upsertRowMerge_, upsertRow_: upsertRow_, applyTextColumnFormats_: applyTextColumnFormats_, deleteRow_: deleteRow_, batchWriteRows_: batchWriteRows_, rowIdPrefix_: rowIdPrefix_, logAudit_: logAudit_, logAuditBatch_: logAuditBatch_, toNumber_: toNumber_, sortByOrder_: sortByOrder_, formulaError_: formulaError_, mapOutsideNames_: mapOutsideNames_, normalizeFormulaText_: normalizeFormulaText_, tokenizeFormula_: tokenizeFormula_, parseFormula_: parseFormula_, formulaRefs_: formulaRefs_, evalFormulaAst_: evalFormulaAst_, num_: num_, excelNum_: excelNum_, evalFormulaCall_: evalFormulaCall_, inspectFormula_: inspectFormula_, cleanFormulaText_: cleanFormulaText_, withLock_: withLock_, getBootstrap: getBootstrap, getVehicleTypes: getVehicleTypes, saveVehicleType: saveVehicleType, deleteVehicleType: deleteVehicleType, deleteScenarioData_: deleteScenarioData_, saveVehicleTypeGrid: saveVehicleTypeGrid, renameVehicleType: renameVehicleType, updateSnapshots_: updateSnapshots_, getVehicles: getVehicles, saveVehicle: saveVehicle, deleteVehicle: deleteVehicle, saveVehicleGrid: saveVehicleGrid, reorderVehicle: reorderVehicle, renameVehicle: renameVehicle, renameRefVehicle_: renameRefVehicle_, getScenarios: getScenarios, validateScenarioRow_: validateScenarioRow_, assertUniqueScenarioNames_: assertUniqueScenarioNames_, codifyAllRefScenarios_: codifyAllRefScenarios_, saveScenario: saveScenario, deleteScenario: deleteScenario, saveScenarioGrid: saveScenarioGrid, createScenarioFrom: createScenarioFrom, getSalesMix: getSalesMix, saveSalesMixRow: saveSalesMixRow, deleteSalesMixRow: deleteSalesMixRow, getSalesMixGrid: getSalesMixGrid, saveSalesMixGrid: saveSalesMixGrid, recalcSalesMixPctByVolume: recalcSalesMixPctByVolume, recalcSalesMixVolumeByPct: recalcSalesMixVolumeByPct, getCostOfSales: getCostOfSales, saveCostOfSalesRow: saveCostOfSalesRow, deleteCostOfSalesRow: deleteCostOfSalesRow, buildAmountMatrix_: buildAmountMatrix_, saveAmountMatrix_: saveAmountMatrix_, getCostOfSalesMatrix: getCostOfSalesMatrix, saveCostOfSalesMatrix: saveCostOfSalesMatrix, getOperatingExpenseMatrix: getOperatingExpenseMatrix, saveOperatingExpenseMatrix: saveOperatingExpenseMatrix, devAmortTargetOf_: devAmortTargetOf_, getDevInvestment: getDevInvestment, saveDevInvestmentRow: saveDevInvestmentRow, deleteDevInvestmentRow: deleteDevInvestmentRow, saveDevInvestmentGrid: saveDevInvestmentGrid, copyScenarioData: copyScenarioData, saveAmortBasis: saveAmortBasis, getKnownDepartments: getKnownDepartments, getOperatingExpense: getOperatingExpense, saveOperatingExpenseRow: saveOperatingExpenseRow, deleteOperatingExpenseRow: deleteOperatingExpenseRow, getParameters: getParameters, saveParameterRow: saveParameterRow, deleteParameterRow: deleteParameterRow, getTaxRateParameters: getTaxRateParameters, getFxParameters: getFxParameters, getRateGrid: getRateGrid, saveRateGrid: saveRateGrid, getFxGrid: getFxGrid, saveFxGrid: saveFxGrid, getConfiguredCurrencies: getConfiguredCurrencies, pickScopedParam_: pickScopedParam_, lookupParam_: lookupParam_, normalizeLineNameKey_: normalizeLineNameKey_, importMatrixRows: importMatrixRows, lineIdOf_: lineIdOf_, vehicleTypeOfScenario_: vehicleTypeOfScenario_, allLineItemRows_: allLineItemRows_, lineCalcType_: lineCalcType_, lineFormulaFor_: lineFormulaFor_, parseVehicleFormulas_: parseVehicleFormulas_, codifyFormulaNames_: codifyFormulaNames_, codifyRefScenarios_: codifyRefScenarios_, replaceNameRef_: replaceNameRef_, formulaReservedNames_: formulaReservedNames_, mapFormulaTokens_: mapFormulaTokens_, normalizeLineDef_: normalizeLineDef_, sortLineDefs_: sortLineDefs_, isFooterGroupLine_: isFooterGroupLine_, displayOrderDefs_: displayOrderDefs_, getTemplateLineItems_: getTemplateLineItems_, hasOwnChart_: hasOwnChart_, getPLLineItems: getPLLineItems, lineDefsForScenario_: lineDefsForScenario_, ensureTypeChart_: ensureTypeChart_, copyLineRow_: copyLineRow_, migrateDataModel_: migrateDataModel_, clarifyPowerFormula_: clarifyPowerFormula_, rewriteTable_: rewriteTable_, lineCodePrefixFor_: lineCodePrefixFor_, nextLineCode_: nextLineCode_, nextSortOrder_: nextSortOrder_, validateLineName_: validateLineName_, newLineItemRow_: newLineItemRow_, isCostSectionLine_: isCostSectionLine_, inputLineOptions_: inputLineOptions_, getCostOfSalesLineOptions: getCostOfSalesLineOptions, getOperatingExpenseLineOptions: getOperatingExpenseLineOptions, getDevAmortTargetOptions: getDevAmortTargetOptions, addLineItemInline: addLineItemInline, addDevAmortLineItem: addDevAmortLineItem, saveChartLine: saveChartLine, savePLLineItemGrid: savePLLineItemGrid, savePLLineItem: savePLLineItem, lineReferencedBy_: lineReferencedBy_, lineReferencedByRef_: lineReferencedByRef_, deletePLLineItem: deletePLLineItem, deleteLineItemInline: deleteLineItemInline, setLineOrder: setLineOrder, copyChartFromType: copyChartFromType, saveChartAsTemplate: saveChartAsTemplate, restoreBuiltInLineItems: restoreBuiltInLineItems, formulaNameCatalog_: formulaNameCatalog_, isKnownFormulaName_: isKnownFormulaName_, chartProblems_: chartProblems_, getChartEditor: getChartEditor, lineUsageCounts_: lineUsageCounts_, chartPreviewValues_: chartPreviewValues_, previewLineFormula: previewLineFormula, seedParamDefs_: seedParamDefs_, getParamDefs: getParamDefs, validateParamName_: validateParamName_, saveParamDef: saveParamDef, renameParamDef: renameParamDef, deleteParamDef: deleteParamDef, paramValueForFormula_: paramValueForFormula_, getLineNotes: getLineNotes, isDevDeptNote_: isDevDeptNote_, getDevDeptNotes: getDevDeptNotes, saveDevDeptNotes_: saveDevDeptNotes_, saveLineNotes: saveLineNotes, getActions: getActions, saveActions: saveActions, setVehicleOrder: setVehicleOrder, setScenarioOrder: setScenarioOrder, createVehicleType: createVehicleType, pct_: pct_, fxRateFor_: fxRateFor_, overridesFor_: overridesFor_, calcSalesMix_: calcSalesMix_, calcParameters_: calcParameters_, overrideLineScale_: overrideLineScale_, overrideLineAdd_: overrideLineAdd_, overrideDevScale_: overrideDevScale_, calculatePL: calculatePL, calculatePLCore_: calculatePLCore_, systemVariables_: systemVariables_, calculatePLWithDefs_: calculatePLWithDefs_, resolveRefScenario_: resolveRefScenario_, referenceValue_: referenceValue_, lineDependencies_: lineDependencies_, calculatePLAllVehicles: calculatePLAllVehicles, calculateScenarioWeighted: calculateScenarioWeighted, unionLineDefs_: unionLineDefs_, calculateComparison: calculateComparison, profitLineCode_: profitLineCode_, lineDepths_: lineDepths_, isGroupLine_: isGroupLine_, resultAutoSource_: resultAutoSource_, columnVolumeInfo_: columnVolumeInfo_, subtotalChecks_: subtotalChecks_, getComparisonOptions: getComparisonOptions, parseVehicleScope_: parseVehicleScope_, vehicleAmortUnits_: vehicleAmortUnits_, amortizeDevInvestmentPerUnit_: amortizeDevInvestmentPerUnit_, isBaselineScenario_: isBaselineScenario_, getLifeCycleUnits: getLifeCycleUnits, getSalesMixLifeCycleUnits: getSalesMixLifeCycleUnits, getDevInvestmentSummary: getDevInvestmentSummary, previewDevInvestmentSummary: previewDevInvestmentSummary, sumValues_: sumValues_, writePLResult_: writePLResult_, buildResultLines_: buildResultLines_, buildAutoLines_: buildAutoLines_, getCostOfSalesAutoLines: getCostOfSalesAutoLines, getOperatingExpenseAutoLines: getOperatingExpenseAutoLines, getPLResult: getPLResult, scenarioMeta_: scenarioMeta_, snapshotReportBlock_: snapshotReportBlock_, reportScenarioBlock_: reportScenarioBlock_, devByDepartment_: devByDepartment_, getDevComparison: getDevComparison, getGateReport: getGateReport, isSnapshotId_: isSnapshotId_, ensureSnapshotSheet_: ensureSnapshotSheet_, snapshotRows_: snapshotRows_, snapshotMeta_: snapshotMeta_, getSnapshots: getSnapshots, snapshotData_: snapshotData_, createSnapshot: createSnapshot, renameSnapshot: renameSnapshot, deleteSnapshot: deleteSnapshot, snapshotLabel_: snapshotLabel_, snapshotScenarioOptions_: snapshotScenarioOptions_, snapshotColumn_: snapshotColumn_, withOverrides_: withOverrides_, whatIfMetric_: whatIfMetric_, weightedLineOf_: weightedLineOf_, driverBase_: driverBase_, driverOverrides_: driverOverrides_, driverLabel_: driverLabel_, getWhatIfOptions: getWhatIfOptions, solveGoal: solveGoal, sensitivityTable: sensitivityTable, breakEvenVolume_: breakEvenVolume_, mergeOverrides_: mergeOverrides_, solveScalar_: solveScalar_, metricGoodDir_: metricGoodDir_, solveGoalPlan: solveGoalPlan, devCutTotals_: devCutTotals_, adjustedValue_: adjustedValue_, plSnapshot_: plSnapshot_, simulateAdjustments: simulateAdjustments, getWaterfallSources: getWaterfallSources, saveWhatIfAsScenario: saveWhatIfAsScenario, setupSpreadsheet: setupSpreadsheet, seedPLLineItems_: seedPLLineItems_, resetPLLineItemDefaults: resetPLLineItemDefaults, removeUnusedParameters: removeUnusedParameters, reportMaintenance_: reportMaintenance_, xlsxEsc_: xlsxEsc_, xlsxCol_: xlsxCol_, xlsxRef_: xlsxRef_, xlsxStylesXml_: xlsxStylesXml_, xlsxCellXml_: xlsxCellXml_, xlsxSheetXml_: xlsxSheetXml_, xlsxParts_: xlsxParts_, utf8Bytes_: utf8Bytes_, crc32_: crc32_, zipStore_: zipStore_, base64Bytes_: base64Bytes_, buildXlsxBase64_: buildXlsxBase64_, verifySheetRef_: verifySheetRef_, verifyNumText_: verifyNumText_, verifyPrintAst_: verifyPrintAst_, verifyReadableFormula_: verifyReadableFormula_, buildVerifyWorkbookModel_: buildVerifyWorkbookModel_, formatDateTime_: formatDateTime_, exportVerifyWorkbook: exportVerifyWorkbook, xmlUnescape_: xmlUnescape_, xmlAttr_: xmlAttr_, cellPos_: cellPos_, shiftFormulaRefs_: shiftFormulaRefs_, readXlsxSheets_: readXlsxSheets_, readSheetCells_: readSheetCells_, excelFormulaError_: excelFormulaError_, tokenizeExcel_: tokenizeExcel_, parseExcelFormula_: parseExcelFormula_, normalizeExcelText_: normalizeExcelText_, verifyImportContext_: verifyImportContext_, importCell_: importCell_, excelToSystemAst_: excelToSystemAst_, canonicalSystemFormula_: canonicalSystemFormula_, systemFormulaText_: systemFormulaText_, verifyCurrentFormula_: verifyCurrentFormula_, verifyCurrentInput_: verifyCurrentInput_, verifyAmountRows_: verifyAmountRows_, sameValue_: sameValue_, verifyInputLabel_: verifyInputLabel_, previewVerifyImport: previewVerifyImport, buildVerifyImportPlan_: buildVerifyImportPlan_, applyVerifyImport: applyVerifyImport },
     consts: { SCHEMA: SCHEMA, TEXT_COLUMNS: TEXT_COLUMNS, PL_LINE_ITEMS: PL_LINE_ITEMS, LINE_CODE_PREFIX: LINE_CODE_PREFIX, DEFAULT_PARAMS: DEFAULT_PARAMS },
     // 模擬 Apps Script「每次 google.script.run 都是全新執行」：單次執行內的快取要清掉
     beginExecution: function () { SHEET_CACHE_ = {}; resetCalcMemo_(); LOCK_DEPTH_ = 0; }
@@ -9417,6 +9515,25 @@ function applyVerifyImport(files, ids) {
       backend.beginExecution();
     }
 
+    /** 資料包內容有問題、補齊分頁時才出錯：記憶體裡的資料庫還原成換之前的樣子，不要留下換了一半的表 */
+    function writeTablesOrRollback(tables) {
+      var before = readTables();
+      try { writeTables(tables); }
+      catch (e) {
+        Object.keys(C.SCHEMA).forEach(function (name) {
+          spreadsheet.replaceTable(name, C.SCHEMA[name], before[name] || [], C.TEXT_COLUMNS[name]);
+        });
+        spreadsheet.replaceTable(Pack.AUDIT_TABLE, Pack.AUDIT_HEADERS, before[Pack.AUDIT_TABLE] || [], []);
+        backend.beginExecution();
+        throw e;
+      }
+    }
+
+    /** 另一個分頁已經存了新資料：這個分頁再寫暫存就會把對方的修改蓋掉 */
+    function assertNotStale() {
+      if (state.stale) throw new Error('資料已在另一個視窗或分頁更新過，請重新整理這一頁再繼續操作（避免互相覆蓋）。');
+    }
+
     function persist() {
       if (!storage) return true;
       var tables = readTables();
@@ -9480,7 +9597,7 @@ function applyVerifyImport(files, ids) {
 
     /** 前端呼叫後端函式。跟 google.script.run 一樣只開放公開函式(結尾不是底線)，參數與回傳值都走一次 JSON。 */
     function call(fnName, args) {
-      if (state.stale) throw new Error('資料已在另一個視窗或分頁更新過，請重新整理這一頁再繼續操作（避免互相覆蓋）。');
+      assertNotStale();
       var fn = backend.fns[fnName];
       if (typeof fn !== 'function' || /_$/.test(fnName)) {
         throw new Error('沒有這個後端函式：' + fnName);
@@ -9503,6 +9620,7 @@ function applyVerifyImport(files, ids) {
 
     /** 匯出資料包：vehicleTypeIds 有值 = 只匯出這幾個車型；opts2.scenarioIds 有值 = 只匯出這幾個情境；都沒有 = 整份 */
     function exportPack(vehicleTypeIds, opts2) {
+      assertNotStale();   // 過期分頁匯出的是舊資料，也會寫暫存
       var scenarioIds = opts2 && opts2.scenarioIds && opts2.scenarioIds.length ? opts2.scenarioIds : null;
       var tables = readTables();
       var pack = Pack.buildPack(tables, {
@@ -9530,7 +9648,8 @@ function applyVerifyImport(files, ids) {
 
     /** 取代匯入：整份資料庫換成資料包的內容 */
     function replaceWithPack(pack) {
-      writeTables(pack.tables);
+      assertNotStale();
+      writeTablesOrRollback(pack.tables);
       state.changesSinceExport = 0;
       state.firstUnsavedAt = '';
       if (!(pack.scope && pack.scope.kind === 'all')) markChanged();
@@ -9542,10 +9661,11 @@ function applyVerifyImport(files, ids) {
       return { lineCodePrefix: C.LINE_CODE_PREFIX, builtInLineCodes: C.PL_LINE_ITEMS.map(function (d) { return d.LineCode; }), defaultParams: C.DEFAULT_PARAMS || {} };
     }
     /** 合併匯入的預覽：不改資料，回傳要給使用者確認的報告 */
-    function previewMerge(pack) { return Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope); }
+    function previewMerge(pack) { assertNotStale(); return Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope); }
     function mergePack(pack) {
+      assertNotStale();
       var merged = Pack.mergePack(readTables(), pack.tables, mergeContext(), pack.scope);
-      writeTables(merged.tables);
+      writeTablesOrRollback(merged.tables);
       markChanged();
       persist();
       notify();
@@ -9554,7 +9674,8 @@ function applyVerifyImport(files, ids) {
 
     /** 清空資料庫(只留內建科目) */
     function resetAll() {
-      writeTables({});
+      assertNotStale();
+      writeTablesOrRollback({});
       state.changesSinceExport = 0;
       state.firstUnsavedAt = '';
       persist();
@@ -9944,8 +10065,10 @@ function amountUnitDigits_(u) { return normAmountUnit_(u) === 1 ? 0 : 1; }
 /** 科目名稱/備註等使用者輸入會被塞進 HTML，& < > " 都要轉義，否則表格會被破壞 */
 function esc(s) {
   return String(s === undefined || s === null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+/** 放進 onclick 等屬性裡當 JS 字串參數：HTML 會先把 &#39; 解回 '，光用 esc() 包在 '...' 裡擋不住引號，要先變成 JS 字串字面值再轉義 */
+function jsArg(s) { return esc(JSON.stringify(String(s === undefined || s === null ? '' : s))); }
 function val(id) { const el = document.getElementById(id); return el ? el.value : ''; }
 
 function showGlobalError(err) {
@@ -11465,7 +11588,7 @@ function drawMatrix(key) {
             <td class="calc" id="${key}-sum-${esc(line.value)}"></td>
             <td><input type="text" class="note-input wide" id="${key}-note-${esc(line.value)}" value="${esc(noteOf(line.value))}"
               oninput="matrixDirty_('${key}')" placeholder="例：依業務部提供"></td>
-            <td class="row-actions"><button type="button" class="btn ghost sm" onclick="deleteMatrixLine('${key}', '${esc(line.value)}')" data-tip="刪除這個項目">✕</button></td>
+            <td class="row-actions"><button type="button" class="btn ghost sm" onclick="deleteMatrixLine('${key}', ${jsArg(line.value)})" data-tip="刪除這個項目">✕</button></td>
           </tr>`).join('')}
         ${(data.autoLines || []).length ? `<tr class="group-row"><td class="row-head" colspan="${data.vehicles.length + (cfg.hasCurrency ? 5 : 4)}"
             style="background:var(--surface-3);font-size:12px;color:var(--text-2);">由公式或開發總投算出（唯讀，要改算法請到「科目與公式」）</td></tr>` : ''}
@@ -11795,7 +11918,7 @@ function drawRateGrid() {
             <td class="calc" style="text-align:center;">${esc(rate.unit || '%')}</td>
             <td><input type="number" step="any" class="rate-global" data-name="${esc(rate.ParamName)}"
               data-paramid="${esc(rate.globalParamID)}" value="${esc(rate.globalValue)}"
-              oninput="updateRatePlaceholders('${esc(rate.ParamName)}'); ${dirty()}"></td>
+              oninput="updateRatePlaceholders(${jsArg(rate.ParamName)}); ${dirty()}"></td>
             ${rateData.vehicles.map(v => {
               const o = rate.overrides[v.VehicleID] || {};
               return `<td><input type="number" step="any" class="rate-override" data-name="${esc(rate.ParamName)}"
@@ -12070,7 +12193,7 @@ function devPctText_(v) { return String(Math.round(num(v) * 100) / 100); }
 function devAmt_(v) { return Math.abs(v) >= 0.5 ? fmt(v) : '-'; }
 function devDeptLabel_(name) { return name || '（未填部門）'; }
 /** 部門名稱放進 onclick 等屬性裡：JSON 字串再轉義，名稱有引號也不會壞 */
-function devJs_(s) { return esc(JSON.stringify(String(s))); }
+function devJs_(s) { return jsArg(s); }
 /** 同一組(資產/費用)或整個部門目前的 %，新的一筆沿用；都沒有就用工具列的「統一低減目標」 */
 function devInheritPct_(g, cat) {
   if (!devIsTarget_()) return '';
@@ -13209,7 +13332,7 @@ function drawChartEditor_() {
           <button type="button" class="link-btn" onclick="toggleAllChartGroups_()">全部收合/展開</button>
         </div>
         ${chartShowProblems ? `<ul class="problem-list tree-problems">${chartEditor.problems.map(p =>
-          `<li class="${p.level}"><a href="#" onclick="selectChartLine('${esc(p.code)}');return false;">${esc(p.message)}</a></li>`).join('')}</ul>` : ''}
+          `<li class="${p.level}"><a href="#" onclick="selectChartLine(${jsArg(p.code)});return false;">${esc(p.message)}</a></li>`).join('')}</ul>` : ''}
         <div class="chart-tree-body" id="chart-tree-body"></div>
         <div class="tree-legend"><span><b class="ti ti-INPUT">✎</b> 手動輸入</span><span><b class="ti ti-FORMULA">ƒ</b> 公式</span><span><b class="ti ti-DEV_AMORT">⚙</b> 開發攤提</span><span>⠿ 拖曳排序</span></div>
       </div>
@@ -13257,12 +13380,12 @@ function drawChartTreeBody_() {
     const cls = ['tree-row', isGroup ? 'group' : '', l.isProtected ? 'subtotal-row' : '', chartSelected === l.LineCode ? 'selected' : '', q && !matches(l) ? 'dimmed' : ''].filter(c => c).join(' ');
     const info = CALC_TYPE_INFO[l.CalcType];
     const typeTip = info[0] + (l.CalcType === 'FORMULA' ? '：' + humanizeFormula_(l.Formula, chartCodeNameMap_(), l.LineCode) : '');
-    return `<div class="${cls}" style="padding-left:${6 + depth * 18}px;" onclick="selectChartLine('${esc(l.LineCode)}')">
+    return `<div class="${cls}" style="padding-left:${6 + depth * 18}px;" onclick="selectChartLine(${jsArg(l.LineCode)})">
       ${q ? '<span class="tree-spacer"></span>' : dragHandleHtml('拖曳調整「' + l.LineName + '」的順序')}
-      ${isGroup ? `<button type="button" class="tree-toggle${collapsed ? ' collapsed' : ''}" onclick="event.stopPropagation();toggleChartGroup('${esc(l.LineCode)}')" aria-label="收合/展開">▾</button>` : '<span class="tree-toggle-space"></span>'}
+      ${isGroup ? `<button type="button" class="tree-toggle${collapsed ? ' collapsed' : ''}" onclick="event.stopPropagation();toggleChartGroup(${jsArg(l.LineCode)})" aria-label="收合/展開">▾</button>` : '<span class="tree-toggle-space"></span>'}
       <span class="tree-name" title="${esc(l.LineName)}">${esc(l.LineName)}</span>
       ${hasErr ? '<span class="tree-err" data-tip="公式有錯誤，暫時以 0 計">!</span>' : hasWarn ? '<span class="tree-warn" data-tip="沒有被算進營業淨利">?</span>' : ''}
-      ${isGroup ? `<button type="button" class="tree-add" onclick="event.stopPropagation();startNewChartLine('${esc(l.LineCode)}')" data-tip="在「${esc(l.LineName)}」底下新增科目">＋</button>` : ''}
+      ${isGroup ? `<button type="button" class="tree-add" onclick="event.stopPropagation();startNewChartLine(${jsArg(l.LineCode)})" data-tip="在「${esc(l.LineName)}」底下新增科目">＋</button>` : ''}
       <span class="tree-val${v !== null && v < 0 ? ' negative' : ''}">${v === null ? '' : fmt(v)}</span>
       <b class="ti ti-${esc(l.CalcType)}" data-tip="${esc(typeTip)}">${info[2]}</b>
       ${chartShowCodes ? `<span class="tree-code">${esc(l.LineCode)}</span>` : ''}
@@ -13433,7 +13556,7 @@ function chartEditorPaneHtml_() {
           ${vehicles.length ? `<table class="grid-table override-table"><tbody>${vehicles.map(v => `<tr>
               <td class="row-head" style="width:170px;">${esc(v.VehicleCode || v.VehicleID)}</td>
               <td><input type="text" value="${esc(overrides[v.VehicleID] || '')}" placeholder="（照上面的設定）"
-                oninput="setChartOverride('${esc(v.VehicleID)}', this.value)"></td></tr>`).join('')}</tbody></table>` : '<p class="muted">這個車型還沒有車系。</p>'}
+                oninput="setChartOverride(${jsArg(v.VehicleID)}, this.value)"></td></tr>`).join('')}</tbody></table>` : '<p class="muted">這個車型還沒有車系。</p>'}
           <label class="chk" style="margin-top:12px;" data-tip="貨物稅的完稅價格要扣除這個科目（預設：廣宣、促銷、批標售、季Margin）。公式 TAXDEDUCT() 就是這些科目的合計。">
             <input type="checkbox" ${String(d.CommodityTaxDeduct).toUpperCase() === 'Y' ? 'checked' : ''}
               onchange="chartDraft.CommodityTaxDeduct=this.checked?'Y':'';chartDirty_();schedulePreview_()"> 貨物稅完稅價格可以扣除這個科目</label>
@@ -14231,7 +14354,7 @@ function fxTextHtml_() {
       <span class="muted">運算：+ − × ÷ ( )，可以直接打 15%</span>
       <details class="fx-help"><summary class="link-btn">函式與變數說明</summary>
         <table class="grid-table"><tbody>
-          ${FORMULA_FUNCTIONS_UI.map(f => `<tr><td class="row-head"><code>${esc(f[0])}</code></td><td style="text-align:left;">${esc(f[1])}</td><td><button type="button" class="ins-chip fn" onclick="insertFormulaText('${esc(f[0].replace(/, …/, ''))}')">插入</button></td></tr>`).join('')}
+          ${FORMULA_FUNCTIONS_UI.map(f => `<tr><td class="row-head"><code>${esc(f[0])}</code></td><td style="text-align:left;">${esc(f[1])}</td><td><button type="button" class="ins-chip fn" onclick="insertFormulaText(${jsArg(f[0].replace(/, …/, ''))})">插入</button></td></tr>`).join('')}
           ${(chartEditor.variables || []).map(v => `<tr><td class="row-head"><code>[${esc(v.name)}]</code></td><td style="text-align:left;">${esc(v.desc)}</td><td><button type="button" class="ins-chip var" onclick="insertFormulaText('[${esc(v.name)}]')">插入</button></td></tr>`).join('')}
         </tbody></table>
       </details>
@@ -15205,7 +15328,7 @@ function reportReconHtml_() {
       <td class="${r.actual === null ? '' : r.actual > 0.5 ? 'gap-good' : r.actual < -0.5 ? 'gap-bad' : ''}">${r.actual === null ? '—' : signed_(r.actual)}</td>
       <td>${r.diff === null ? '—' : signed_(r.diff)}</td>
       <td class="note recon-${r.tone}">${r.tone === 'ok' ? '✔ ' : '⚠ '}${esc(r.status)}</td>
-      <td class="no-print">${r.code ? `<button type="button" class="btn ghost sm" onclick="openWaterfallTool_('actions', { scenarioId: reportSel.base }, { scenarioId: reportSel.target }, { actionLine: '${esc(r.code)}' })" data-tip="在瀑布圖工具看這個科目：現況 → 每一個原因 → 目標，也可以直接補原因">瀑布</button>` : ''}</td></tr>`).join('')}</tbody>
+      <td class="no-print">${r.code ? `<button type="button" class="btn ghost sm" onclick="openWaterfallTool_('actions', { scenarioId: reportSel.base }, { scenarioId: reportSel.target }, { actionLine: ${jsArg(r.code)} })" data-tip="在瀑布圖工具看這個科目：現況 → 每一個原因 → 目標，也可以直接補原因">瀑布</button>` : ''}</td></tr>`).join('')}</tbody>
   </table></div>
   <p class="help">實際改善 = 該科目從現況到目標的變動，換算成對營業淨利的影響（成本降 = 正）。容差 500 元或 5%。</p>`;
 }
@@ -17850,7 +17973,7 @@ function plTableHtml(cols, lines) {
     const isGroupHead = groupParents.indexOf(line.LineCode) !== -1;
     const toggleBtn = isGroupHead
       ? `<button class="row-toggle${isFooterGroupLine_(line) ? ' up' : ''}" data-group="${esc(line.LineCode)}" aria-expanded="${!collapsedGroups.has(line.LineCode)}"
-           onclick="toggleGroupCollapse('${esc(line.LineCode)}')" data-tip="${collapsedGroups.has(line.LineCode) ? '展開明細' : '收合明細'}">
+           onclick="toggleGroupCollapse(${jsArg(line.LineCode)})" data-tip="${collapsedGroups.has(line.LineCode) ? '展開明細' : '收合明細'}">
            <svg viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 7l3-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
          </button>` : '';
     const hidden = (line.ParentLine && isHiddenByCollapse(line.LineCode)) ? ' hidden' : '';
@@ -18515,12 +18638,18 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   var exportAllBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出全部（備份）', title: '整份資料庫存成一個資料包（備份用）', onclick: function () {
-    download(host.exportPack(null), '全部');
+    var pack;
+    try { pack = host.exportPack(null); }
+    catch (e) { say('無法匯出', e.message); return; }
+    download(pack, '全部');
   } });
   var exportTypeBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出車型（含所有情境）', title: '匯出上方選的車型：所有情境、車系與科目表，交給同事「合併匯入」（對方這個車型會整個換成這一包）', onclick: function () {
     var id = currentVehicleTypeId();
     if (!id) { say('還沒有選擇車型', '請先在右上角選擇要匯出的車型。'); return; }
-    download(host.exportPack([id]), id);
+    var pack;
+    try { pack = host.exportPack([id]); }
+    catch (e) { say('無法匯出', e.message); return; }
+    download(pack, id);
   } });
   var exportScenarioBtn = el('button', { class: 'fsl-menu-item', type: 'button', text: '匯出情境（只有這一個）', title: '只匯出上方選的情境，交給同事「合併匯入」（對方只新增/更新這個情境，同車型的其他情境不動）', onclick: function () {
     var id = currentVehicleTypeId(), sc = currentScenario();
