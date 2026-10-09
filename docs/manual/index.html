@@ -331,13 +331,14 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
       <tr><td><code>[名稱]</code></td><td>科目名稱、系統變數、參數（% 參數取出來是小數）、匯率</td><td><code>[廠價(未稅)] * [季Margin率]</code></td></tr>
       <tr><td>科目代碼</td><td>直接打代碼也可以</td><td><code>P5 - P6 - P7</code></td></tr>
       <tr><td><code>+ - * / ^ ( )</code>、<code>15%</code></td><td>運算；全形 × ÷ − （）也可以</td><td><code>[一般材料] * 1.2</code></td></tr>
+      <tr><td><code>^</code> 次方</td><td>負號直接接次方、連續次方要加括號（數學課本跟 Excel 的算法不同）</td><td><code>-(2^2)</code>、<code>(-2)^2</code>、<code>(1 + [年增率])^[年數]</code></td></tr>
       <tr><td><code>CHILDREN()</code></td><td>子科目合計</td><td><code>[生產毛利] - CHILDREN()</code></td></tr>
       <tr><td><code>TAXDEDUCT()</code></td><td>勾「貨物稅完稅價格可扣除」的科目合計</td><td>貨物稅公式</td></tr>
-      <tr><td><code>ROUND</code> <code>ROUNDUP</code> <code>ROUNDDOWN</code> <code>SUM</code> <code>MIN</code> <code>MAX</code> <code>ABS</code> <code>IF</code></td><td>跟 Excel 同名同義</td><td><code>ROUND([實際零售價(含稅)] * [營業稅率] / (1 + [營業稅率]))</code></td></tr>
+      <tr><td><code>ROUND</code> <code>ROUNDUP</code> <code>ROUNDDOWN</code> <code>SUM</code> <code>MIN</code> <code>MAX</code> <code>ABS</code> <code>IF</code></td><td>跟 Excel 同名同義；四捨五入與比較跟 Excel 一樣先取 15 位有效數字（<code>ROUND(1.005, 2)</code> = 1.01）</td><td><code>ROUND([實際零售價(含稅)] * [營業稅率] / (1 + [營業稅率]))</code></td></tr>
       <tr><td><code>REF("情境", "科目"[, "車系"])</code></td><td>引用另一個情境（可以是別的車型）的科目</td><td><code>REF("S3 GATE E 實績", "b4") * 1.2</code></td></tr>
     </tbody>
   </table></div>
-  <div class="tip"><strong>除以 0 = 0。</strong>試算初期台數還沒填時，整張表不會因此全部變成錯誤。公式語法錯誤、引用不存在的科目、循環引用會在存檔時擋下來。</div>
+  <div class="tip"><strong>除以 0 = 0。</strong>試算初期台數還沒填時，整張表不會因此全部變成錯誤。存檔時會擋下：公式語法錯誤、函式參數個數不對（例如 <code>ROUND(x, 1, 2)</code>）、負號或連續次方沒加括號、引用不存在的科目、循環引用。<code>REF</code> 引用的情境自己有算不出來的科目時，那一格會標成錯誤，不會默默用 0 代替。</div>
 
   <h3 id="params">參數與匯率</h3>
   <figure>

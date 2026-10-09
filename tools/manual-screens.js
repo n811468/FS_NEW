@@ -31,6 +31,9 @@ function have(cmd, args) {
 }
 
 const shot = name => !ONLY || name.indexOf(ONLY) !== -1;
+const FIXED_TIME = '2026-10-01T09:30:00+08:00';
+// 截圖用的是哪一版系統(dist 的雜湊)：tools/verify-manual.js 用它檢查系統改了之後有沒有重新截圖
+const SOURCE_FILE = path.join(OUT, '.source');
 // Excel 驗算檔的截圖：[檔名, 那張工作表第一行的標題]
 const XLSX_SHOTS = [['40-xlsx-info', '損益驗算檔'], ['41-xlsx-input', '輸入資料'], ['42-xlsx-dev', '開發總投攤提'], ['43-xlsx-pl', '損益試算'],
   ['44-xlsx-check', '驗算：'], ['45-xlsx-formulas', '公式區：'], ['46-verify-dialog', ''], ['47-xlsx-structure', '結構檢查：'], ['48-xlsx-impact', '科目影響：'], ['49-xlsx-changes', '變動檢查：'],
@@ -110,6 +113,8 @@ async function save(page, name, opts) {
   if (!shot(name)) return;
   opts = opts || {};
   const file = path.join(OUT, name + '.png');
+  // 滑鼠移到角落：上一步點過的按鈕不會留著 hover 提示(要截 hover 的那張傳 hover: true)
+  if (!opts.hover) { await page.mouse.move(1439, 899); await page.waitForTimeout(150); }
   if (opts.marks) await annotate(page, opts.marks);
   await page.waitForTimeout(opts.wait === undefined ? 250 : opts.wait);
   if (opts.el) {
@@ -154,7 +159,9 @@ async function main() {
     try { await pw.chromium.launch(launchOpts).then(b => b.close()); } catch (e) { launchOpts.executablePath = '/opt/pw-browsers/chromium'; }
   }
   const browser = await pw.chromium.launch(launchOpts);
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, acceptDownloads: true, locale: 'zh-TW' });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, acceptDownloads: true, locale: 'zh-TW', timezoneId: 'Asia/Taipei' });
+  // 時間固定：快照名稱、匯出時間不會每次重截都不一樣，畫面沒改的圖重截出來也一樣(git 不會多一堆沒意義的變更)
+  await context.clock.setFixedTime(new Date(FIXED_TIME));
   // 截長元素時頁首不要黏在畫面上方(會蓋住元素的上緣)
   await context.addInitScript(() => document.addEventListener('DOMContentLoaded', () => {
     const st = document.createElement('style');
@@ -318,11 +325,12 @@ async function main() {
     await save(page, '22-dash-table');
   });
   await step('23-dash-hover', async () => {
-    const cell = page.locator('.pl-table td.amt[data-l="d4"]').first();
+    // 第三欄是車系欄(前兩欄是加權平均，加權平均沒有單一計算過程)：提示框顯示公式代入的數字
+    const cell = page.locator('.pl-table td.amt[data-l="d4"]').nth(2);
     await cell.scrollIntoViewIfNeeded();
     await cell.hover();
     await page.waitForTimeout(800);
-    await save(page, '23-dash-hover', { wait: 300 });
+    await save(page, '23-dash-hover', { wait: 300, hover: true });
     await page.mouse.move(5, 5);
   });
   await step('24-dash-chart', async () => {
@@ -469,8 +477,13 @@ async function main() {
   if (have('convert', ['-version'])) {
     done.forEach(name => {
       const f = path.join(OUT, name + '.png');
-      if (fs.existsSync(f)) execFileSync('convert', [f, '-dither', 'None', '-colors', '256', 'PNG8:' + f], { stdio: 'pipe' });
+      // -strip 與不寫日期：畫面沒變的圖，檔案也要一模一樣
+      if (fs.existsSync(f)) execFileSync('convert', [f, '-strip', '-define', 'png:exclude-chunks=date,time', '-dither', 'None', '-colors', '256', 'PNG8:' + f], { stdio: 'pipe' });
     });
+  }
+  // 全部重截(沒有 ONLY)而且沒有略過任何一張，才記下這一版：只重截幾張的不算
+  if (!ONLY && !skipped.length) {
+    fs.writeFileSync(SOURCE_FILE, require('crypto').createHash('sha256').update(fs.readFileSync(DIST)).digest('hex') + '\n');
   }
   console.log(`已截 ${done.length} 張 → docs/manual/img/`);
   if (skipped.length) console.log('略過：\n  ' + skipped.join('\n  '));

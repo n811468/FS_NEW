@@ -22,7 +22,7 @@
   在驗算檔裡改的公式與藍字可以「從 Excel 匯入」回系統（先預覽、確認才存）。
 - 舊格式的資料（暫存或資料包）開啟時自動升級，數字不變。
 
-詳細操作見 [`docs/usage.md`](docs/usage.md)；圖文版的使用手冊（實際畫面截圖）見 [`docs/manual/index.html`](docs/manual/index.html)。
+詳細操作見 [`docs/usage.md`](docs/usage.md)；圖文版的使用手冊（實際畫面截圖）見 [`docs/manual/README.md`](docs/manual/README.md)。
 
 - 打開方式、資料包、合併規則：[`local/README.md`](local/README.md)
 - 各頁面怎麼填、損益公式：[`docs/usage.md`](docs/usage.md)
@@ -57,6 +57,7 @@ node tools/verify-local.js             # 地端版：數字與驗算層逐格相
 node tools/verify-excel.js             # Excel 驗算檔：公式翻譯、檔案結構、改壞的科目表抓不抓得到、從 Excel 匯入；有 LibreOffice 時從頭重算、逐格對系統數字
 node tools/verify-formula-reliability.js   # 改公式的可靠度：跟測試裡獨立寫的另一套算法逐格對答案(隨機公式、隨機改科目表)、
                                            # 等價改寫數字不變、手算答案、錯的公式存不進去、Excel 重算；SEED=123 ROUNDS=300 換種子、跑更多回合
+node tools/verify-manual.js            # 使用手冊：README.md 最新、圖都在、截圖是目前這一版系統、每一頁都有寫到
 node tools/e2e-local.js                # 地端版瀏覽器測試（需要 Playwright，找不到時略過）
 E2E_ONLY=dev node tools/e2e-local.js   # 只跑「開發總投從零開始」：全新的空資料庫、從空表開始用畫面操作
 ```
@@ -73,8 +74,20 @@ node tools/dev-server.js               # 打開 http://localhost:8787
 資料只在記憶體、重啟就回到示範資料。適合調版面、看儀表板的圖表與 hover 提示。
 示範資料是用固定種子產生的合理亂數（見 `tools/demo-data.js`），不是真實車型的數字；想換一組數字可以加 `DEMO_SEED=123`。
 
-## 使用手冊截圖
+## 使用手冊
 
-`docs/manual/index.html` 是圖文版使用手冊，圖片全部由 `node tools/manual-screens.js` 用 Chromium 實際操作
-`dist/FS-local.html`（示範資料）截下來；Excel 驗算檔的畫面是用系統匯出真正的 .xlsx，再由 LibreOffice 轉成圖片。
-畫面改了之後重新 build、再執行一次就會更新（`ONLY=dash` 只重截檔名含 dash 的圖）。
+- 在 GitHub 上看：[`docs/manual/README.md`](docs/manual/README.md)（有圖的 Markdown 版）
+- 下載下來用瀏覽器看：`docs/manual/index.html`（跟 README.md 同一份內容，排版比較完整）
+
+`index.html` 是唯一的原稿，`README.md` 由 `node tools/build-manual.js` 產生，不要直接改。
+圖片全部由 `node tools/manual-screens.js` 用 Chromium 實際操作 `dist/FS-local.html`（示範資料）截下來；
+Excel 驗算檔的畫面是用系統匯出真正的 .xlsx，再由 LibreOffice 轉成圖片。截圖時的時鐘固定，畫面沒變的圖重截出來檔案也一樣。
+
+功能有調整時，手冊在同一個 PR 裡一起更新（規則寫在 `CLAUDE.md`）：
+
+```bash
+node tools/build-local.js       # 重新產生 dist/FS-local.html
+node tools/manual-screens.js    # 全部重截（ONLY=dash 只重截檔名含 dash 的圖，用來調整某一張；最後還是要全部重截一次）
+node tools/build-manual.js      # 產生 docs/manual/README.md
+node tools/verify-manual.js     # 檢查手冊有沒有跟上系統
+```
